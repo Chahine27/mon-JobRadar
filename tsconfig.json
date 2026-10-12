@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/prisma/**/*.ts",
+    "packages/*/*.config.ts",
+    "apps/*/src/**/*.ts",
+    "vitest.config.ts",
+    "packages/*/test/**/*.ts",
+    "vitest.int.config.ts"
+  ],
+  "exclude": [
+    "apps/web/**"
+  ]
+}

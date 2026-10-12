@@ -1,0 +1,39 @@
+import type { CollectionStatus, StartResult } from "@job-radar/pipeline";
+import type { FastifyInstance } from "fastify";
+import { requireAuth } from "../auth";
+
+/** Ce dont les routes ont besoin du CollectionRunner (interface → testable). */
+export interface Collector {
+  start(trigger: "manual"): Promise<StartResult | null>;
+  status(): Promise<CollectionStatus>;
+  /** Relance une source (page Réglages) ; « jobscraper » = tous les sites JobScraper actifs. null → source inconnue ou inactive. */
+  startSource(source: string): Promise<StartResult | null>;
+}
+
+export async function collectionRoutes(app: FastifyInstance, opts: { collector: Collector }) {
+  app.addHook("preHandler", requireAuth);
+
+  // README §13 : empêche les refresh simultanés, lance la collecte en arrière-plan.
+  app.post(
+    "/api/jobs/refresh",
+    { config: { rateLimit: { max: 6, timeWindow: "1 minute" } } },
+    async (_request, reply) => {
+      const res = await opts.collector.start("manual");
+      if (!res) return reply.code(409).send({ error: "NO_ENABLED_SOURCE" });
+      return reply.code(202).send(res);
+    },
+  );
+
+  app.post(
+    "/api/sources/:source/refresh",
+    { config: { rateLimit: { max: 12, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const { source } = request.params as { source: string };
+      const res = await opts.collector.startSource(source);
+      if (!res) return reply.code(409).send({ error: "SOURCE_DISABLED", message: "Source inactive (page Sources) ou non configurée." });
+      return reply.code(202).send(res);
+    },
+  );
+
+  app.get("/api/collection/status", async () => opts.collector.status());
+}

@@ -1,0 +1,9 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+allowBuilds:
+  # Base de données intégrée : prépare les fichiers de PostgreSQL à l'installation.
+  '@embedded-postgres/windows-x64': true
+  '@prisma/engines': true
+  esbuild: true
+  prisma: true

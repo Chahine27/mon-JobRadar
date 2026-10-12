@@ -1,0 +1,42 @@
+{
+  "name": "job-radar",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.6.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json && pnpm --filter @job-radar/web typecheck",
+    "check": "pnpm typecheck && pnpm test",
+    "db:server": "pnpm --filter @job-radar/db server",
+    "db:generate": "pnpm --filter @job-radar/db generate",
+    "db:migrate": "pnpm --filter @job-radar/db migrate",
+    "db:seed": "pnpm --filter @job-radar/db seed",
+    "db:studio": "pnpm --filter @job-radar/db studio",
+    "dev:api": "pnpm --filter @job-radar/api dev",
+    "db:demo": "pnpm --filter @job-radar/db demo",
+    "db:demo:clear": "pnpm --filter @job-radar/db demo:clear",
+    "dev": "pnpm --parallel --filter @job-radar/api --filter @job-radar/web dev",
+    "dev:web": "pnpm --filter @job-radar/web dev",
+    "ft:test": "pnpm --filter @job-radar/worker ft:test",
+    "collect": "pnpm --filter @job-radar/worker collect",
+    "jobs:dedupe": "pnpm --filter @job-radar/worker run dedupe",
+    "setup:push": "pnpm --filter @job-radar/worker setup:push",
+    "sources:test": "pnpm --filter @job-radar/worker sources:test",
+    "travel:test": "pnpm --filter @job-radar/worker travel:test",
+    "lbb:test": "pnpm --filter @job-radar/worker lbb:test",
+    "test:int": "vitest run -c vitest.int.config.ts",
+    "jooble:test": "pnpm --filter @job-radar/worker jooble:test",
+    "ai:test": "pnpm --filter @job-radar/worker ai:test",
+    "jobscraper:test": "pnpm --filter @job-radar/worker jobscraper:test",
+    "cv:test": "pnpm --filter @job-radar/api cv:test"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.3",
+    "typescript": "7.0.2",
+    "vitest": "5.0.2"
+  }
+}

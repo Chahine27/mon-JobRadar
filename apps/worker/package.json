@@ -1,0 +1,32 @@
+{
+  "name": "@job-radar/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "ft:test": "tsx src/ft-test.ts",
+    "collect": "tsx src/collect-cli.ts",
+    "setup:push": "tsx src/setup-push.ts",
+    "sources:test": "tsx src/sources-test.ts",
+    "travel:test": "tsx src/travel-test.ts",
+    "lbb:test": "tsx src/lbb-test.ts",
+    "jooble:test": "tsx src/jooble-test.ts",
+    "ai:test": "tsx src/ai-test.ts",
+    "dedupe": "tsx src/dedupe-cli.ts",
+    "jobscraper:test": "tsx src/jobscraper-test.ts"
+  },
+  "dependencies": {
+    "@job-radar/ai": "workspace:*",
+    "@job-radar/db": "workspace:*",
+    "@job-radar/job-normalizer": "workspace:*",
+    "@job-radar/notifications": "workspace:*",
+    "@job-radar/pipeline": "workspace:*",
+    "@job-radar/routing": "workspace:*",
+    "@job-radar/shared": "workspace:*",
+    "@job-radar/source-connectors": "workspace:*",
+    "dotenv": "18.0.4"
+  },
+  "devDependencies": {
+    "tsx": "4.23.15"
+  }
+}

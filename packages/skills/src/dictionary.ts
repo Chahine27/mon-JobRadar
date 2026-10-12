@@ -1,0 +1,153 @@
+/**
+ * Dictionnaire de compétences (README §40).
+ * - `aliases` : écritures reconnues (comparées sans accents, en minuscules).
+ * - `caseSensitiveAliases` : écritures ambiguës en français, reconnues seulement avec la majuscule
+ *   (ex. « Vue » oui, « en vue de » non).
+ * - `family` : sert à reconnaître une techno PROCHE (Vue ≠ React, mais même famille JavaScript).
+ * - `core` : langage ou framework principal. Les outils (Docker, SQL, Git...) ne pèsent pas
+ *   dans la couverture technique, pour ne pas pénaliser une annonce qui liste beaucoup d'outils.
+ */
+
+export type SkillFamily =
+  | "javascript"
+  | "jvm"
+  | "dotnet"
+  | "python"
+  | "php"
+  | "native"
+  | "mobile"
+  | "go"
+  | "rust"
+  | "ruby"
+  | "data"
+  | "devops"
+  | "frontend-tools"
+  | "api"
+  | "testing"
+  | "other";
+
+export type Skill = {
+  id: string;
+  label: string;
+  family: SkillFamily;
+  core: boolean;
+  aliases: string[];
+  caseSensitiveAliases?: string[];
+};
+
+export const SKILLS: Skill[] = [
+  // JavaScript
+  { id: "javascript", label: "JavaScript", family: "javascript", core: true, aliases: ["javascript", "ecmascript", "es6", "vanilla js"] },
+  { id: "typescript", label: "TypeScript", family: "javascript", core: true, aliases: ["typescript"] },
+  { id: "vue", label: "Vue.js", family: "javascript", core: true, aliases: ["vue.js", "vuejs", "vue js", "vu.js", "vue 2", "vue 3", "vue2", "vue3"], caseSensitiveAliases: ["Vue", "VueJS", "VUE"] },
+  { id: "nuxt", label: "Nuxt", family: "javascript", core: true, aliases: ["nuxt", "nuxtjs", "nuxt.js"] },
+  { id: "react", label: "React", family: "javascript", core: true, aliases: ["react", "reactjs", "react.js"] },
+  { id: "nextjs", label: "Next.js", family: "javascript", core: true, aliases: ["next.js", "nextjs"] },
+  { id: "angular", label: "Angular", family: "javascript", core: true, aliases: ["angular", "angularjs"] },
+  { id: "svelte", label: "Svelte", family: "javascript", core: true, aliases: ["svelte", "sveltekit"] },
+  { id: "node", label: "Node.js", family: "javascript", core: true, aliases: ["node.js", "nodejs", "node js", "node"] },
+  { id: "express", label: "Express", family: "javascript", core: true, aliases: ["expressjs", "express.js"], caseSensitiveAliases: ["Express"] },
+  { id: "nestjs", label: "NestJS", family: "javascript", core: true, aliases: ["nestjs", "nest.js"] },
+  { id: "jquery", label: "jQuery", family: "javascript", core: true, aliases: ["jquery"] },
+
+  // JVM
+  { id: "java", label: "Java", family: "jvm", core: true, aliases: ["java", "jee", "java ee", "jakarta ee", "j2ee"] },
+  { id: "spring", label: "Spring Boot", family: "jvm", core: true, aliases: ["spring boot", "springboot", "spring framework", "spring"] },
+  { id: "kotlin", label: "Kotlin", family: "jvm", core: true, aliases: ["kotlin"] },
+  { id: "hibernate", label: "Hibernate", family: "jvm", core: false, aliases: ["hibernate", "jpa"] },
+  { id: "maven", label: "Maven", family: "jvm", core: false, aliases: ["maven"] },
+  { id: "gradle", label: "Gradle", family: "jvm", core: false, aliases: ["gradle"] },
+
+  // .NET
+  { id: "csharp", label: "C#", family: "dotnet", core: true, aliases: ["c#", "csharp", "c sharp"] },
+  { id: "dotnet", label: ".NET", family: "dotnet", core: true, aliases: [".net", "dotnet", "asp.net", ".net core", "asp.net core", "blazor"] },
+
+  // Autres langages
+  { id: "python", label: "Python", family: "python", core: true, aliases: ["python"] },
+  { id: "django", label: "Django", family: "python", core: true, aliases: ["django"] },
+  { id: "flask", label: "Flask", family: "python", core: true, aliases: ["flask"] },
+  { id: "fastapi", label: "FastAPI", family: "python", core: true, aliases: ["fastapi"] },
+  { id: "php", label: "PHP", family: "php", core: true, aliases: ["php"] },
+  { id: "symfony", label: "Symfony", family: "php", core: true, aliases: ["symfony"] },
+  { id: "laravel", label: "Laravel", family: "php", core: true, aliases: ["laravel"] },
+  { id: "cpp", label: "C++", family: "native", core: true, aliases: ["c++", "cpp"] },
+  { id: "c", label: "C", family: "native", core: true, aliases: ["langage c", "c/c++"] },
+  // Plateformes et langages de niche : souvent LA stack principale d'une annonce (« Développeur Windev »).
+  { id: "windev", label: "WinDev", family: "other", core: true, aliases: ["windev", "webdev", "wlangage", "pc soft"] },
+  { id: "delphi", label: "Delphi", family: "other", core: true, aliases: ["delphi"] },
+  { id: "cobol", label: "COBOL", family: "other", core: true, aliases: ["cobol"] },
+  { id: "abap", label: "SAP / ABAP", family: "other", core: true, aliases: ["abap", "sap s/4hana", "s/4hana", "sap hana", "sap fiori"] },
+  { id: "salesforce", label: "Salesforce", family: "other", core: true, aliases: ["salesforce", "apex", "lightning web components"] },
+  { id: "servicenow", label: "ServiceNow", family: "other", core: true, aliases: ["servicenow"] },
+  { id: "powerplatform", label: "Power Platform", family: "other", core: true, aliases: ["power platform", "power apps", "powerapps", "power automate"] },
+  { id: "dynamics", label: "Dynamics 365", family: "other", core: true, aliases: ["dynamics 365", "dynamics crm", "dynamics ax", "business central"] },
+  { id: "pega", label: "Pega", family: "other", core: true, aliases: ["pega", "pegasystems"] },
+  { id: "vba", label: "VBA", family: "other", core: true, aliases: ["vba", "visual basic"] },
+  { id: "calypso", label: "Calypso", family: "other", core: true, aliases: ["calypso"] },
+  { id: "murex", label: "Murex", family: "other", core: true, aliases: ["murex"] },
+  { id: "forgerock", label: "ForgeRock / IAM", family: "other", core: true, aliases: ["forgerock", "openidm", "sailpoint", "okta"] },
+  { id: "scala", label: "Scala", family: "jvm", core: true, aliases: ["scala"] },
+  { id: "groovy", label: "Groovy", family: "jvm", core: true, aliases: ["groovy", "grails"] },
+  { id: "elixir", label: "Elixir", family: "other", core: true, aliases: ["elixir", "phoenix framework"] },
+  { id: "perl", label: "Perl", family: "other", core: true, aliases: ["perl"] },
+  { id: "objc", label: "Objective-C", family: "mobile", core: true, aliases: ["objective-c", "objective c"] },
+  { id: "unity", label: "Unity", family: "other", core: true, aliases: ["unity3d", "unity 3d"], caseSensitiveAliases: ["Unity"] },
+  { id: "wordpress", label: "WordPress", family: "php", core: true, aliases: ["wordpress", "woocommerce"] },
+  { id: "drupal", label: "Drupal", family: "php", core: true, aliases: ["drupal"] },
+  { id: "magento", label: "Magento", family: "php", core: true, aliases: ["magento", "adobe commerce"] },
+  { id: "odoo", label: "Odoo", family: "python", core: true, aliases: ["odoo"] },
+  { id: "go", label: "Go", family: "go", core: true, aliases: ["golang"] },
+  { id: "rust", label: "Rust", family: "rust", core: true, aliases: ["rust"] },
+  { id: "ruby", label: "Ruby", family: "ruby", core: true, aliases: ["ruby", "ruby on rails", "rails"] },
+
+  // Mobile
+  { id: "flutter", label: "Flutter", family: "mobile", core: true, aliases: ["flutter"] },
+  { id: "dart", label: "Dart", family: "mobile", core: true, aliases: ["dart"] },
+  { id: "swift", label: "Swift", family: "mobile", core: true, aliases: ["swift", "swiftui"] },
+  { id: "react-native", label: "React Native", family: "mobile", core: true, aliases: ["react native", "react-native"] },
+
+  // Données
+  { id: "sql", label: "SQL", family: "data", core: false, aliases: ["sql"] },
+  { id: "kafka", label: "Kafka", family: "data", core: false, aliases: ["kafka", "confluent kafka"] },
+  { id: "postgresql", label: "PostgreSQL", family: "data", core: false, aliases: ["postgresql", "postgres"] },
+  { id: "mysql", label: "MySQL", family: "data", core: false, aliases: ["mysql", "mariadb"] },
+  { id: "oracle", label: "Oracle", family: "data", core: false, aliases: ["oracle", "pl/sql", "plsql"] },
+  { id: "mongodb", label: "MongoDB", family: "data", core: false, aliases: ["mongodb", "mongo"] },
+  { id: "redis", label: "Redis", family: "data", core: false, aliases: ["redis"] },
+
+  // DevOps
+  { id: "docker", label: "Docker", family: "devops", core: false, aliases: ["docker", "docker compose", "docker-compose"] },
+  { id: "kubernetes", label: "Kubernetes", family: "devops", core: false, aliases: ["kubernetes", "k8s"] },
+  { id: "git", label: "Git", family: "devops", core: false, aliases: ["git", "github"] },
+  { id: "gitlab", label: "GitLab", family: "devops", core: false, aliases: ["gitlab", "gitlab ci", "gitlab-ci"] },
+  { id: "cicd", label: "CI/CD", family: "devops", core: false, aliases: ["ci/cd", "ci cd", "integration continue", "jenkins"] },
+  { id: "aws", label: "AWS", family: "devops", core: false, aliases: ["aws", "amazon web services"] },
+  { id: "azure", label: "Azure", family: "devops", core: false, aliases: ["azure"] },
+  { id: "gcp", label: "GCP", family: "devops", core: false, aliases: ["gcp", "google cloud"] },
+  { id: "linux", label: "Linux", family: "devops", core: false, aliases: ["linux", "unix"] },
+
+  // Outils front
+  { id: "html", label: "HTML", family: "frontend-tools", core: false, aliases: ["html", "html5"] },
+  { id: "css", label: "CSS", family: "frontend-tools", core: false, aliases: ["css", "css3", "sass", "scss"] },
+  { id: "tailwind", label: "Tailwind CSS", family: "frontend-tools", core: false, aliases: ["tailwind", "tailwindcss"] },
+  { id: "vuetify", label: "Vuetify", family: "frontend-tools", core: false, aliases: ["vuetify"] },
+  { id: "pinia", label: "Pinia", family: "frontend-tools", core: false, aliases: ["pinia", "vuex"] },
+  { id: "redux", label: "Redux", family: "frontend-tools", core: false, aliases: ["redux"] },
+
+  // API
+  { id: "rest", label: "API REST", family: "api", core: false, aliases: ["api rest", "rest api", "apis rest", "restful", "api restful"] },
+  { id: "graphql", label: "GraphQL", family: "api", core: false, aliases: ["graphql"] },
+  { id: "grpc", label: "gRPC", family: "api", core: false, aliases: ["grpc", "protocol buffers", "protobuf"] },
+  { id: "auth", label: "JWT / OAuth", family: "api", core: false, aliases: ["jwt", "json web token", "oauth", "oauth2", "openid connect", "auth0", "keycloak"] },
+  { id: "microservices", label: "Microservices", family: "other", core: false, aliases: ["microservices", "micro-services", "micro services"] },
+  { id: "archi", label: "DDD / CQRS / Clean Architecture", family: "other", core: false, aliases: ["ddd", "domain driven design", "cqrs", "clean architecture", "architecture hexagonale"] },
+
+  // Tests
+  { id: "jest", label: "Jest", family: "testing", core: false, aliases: ["jest"] },
+  { id: "vitest", label: "Vitest", family: "testing", core: false, aliases: ["vitest"] },
+  { id: "cypress", label: "Cypress", family: "testing", core: false, aliases: ["cypress"] },
+  { id: "playwright", label: "Playwright", family: "testing", core: false, aliases: ["playwright"] },
+  { id: "junit", label: "JUnit", family: "testing", core: false, aliases: ["junit"] },
+];
+
+export const SKILLS_BY_ID = new Map(SKILLS.map((s) => [s.id, s]));

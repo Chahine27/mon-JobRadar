@@ -1,0 +1,111 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { defaultMail } from "./spontaneous-mail";
+import { createTestApp, login } from "./test-helpers";
+
+// Candidat fictif.
+const KIT = {
+  header: "Alex Martin\n75011 Paris\n06 00 00 00 00\nalex.martin@example.com",
+  city: "Paris",
+  signature: "Alex MARTIN",
+  cvText: "Développeur Full Stack. Alternance chez Banquo : Vue.js, TypeScript, Java Spring Boot, PostgreSQL. ".repeat(4),
+  letterExample: "",
+};
+
+async function setup() {
+  const t = await createTestApp();
+  const cookies = await login(t.app);
+  const req = (method: "GET" | "POST" | "PUT" | "PATCH", url: string, payload?: object) =>
+    t.app.inject({ method, url, cookies, ...(payload ? { payload } : {}) });
+  await req("POST", "/api/leads/refresh");
+  const lead = (await req("GET", "/api/leads?status=all")).json().items.find((l: { name: string }) => l.name === "ALPHA LOGICIELS");
+  return { ...t, req, lead };
+}
+
+describe("candidature spontanée", () => {
+  it("message et objet écrits par le code, avec le téléphone de l'en-tête", () => {
+    const m = defaultMail(KIT, "ALPHA LOGICIELS", "Développeur full stack");
+    expect(m.subject).toBe("Candidature spontanée – Développeur full stack – Alex MARTIN");
+    expect(m.message).toContain("pour un poste de développeur full stack en CDI chez ALPHA LOGICIELS.");
+    expect(m.message).toContain("Vous trouverez ci-joint mon CV et ma lettre de motivation.");
+    expect(m.message.trim().endsWith("Alex MARTIN\n06 00 00 00 00")).toBe(true);
+  });
+
+  it("email de contact : enregistré, vérifié", async () => {
+    const { req, lead } = await setup();
+    expect((await req("PATCH", `/api/leads/${lead.id}`, { contactEmail: "pas-un-email" })).statusCode).toBe(400);
+    const ok = await req("PATCH", `/api/leads/${lead.id}`, { contactEmail: " RH@Alpha.fr " });
+    expect(ok.json().contactEmail).toBe("rh@alpha.fr");
+  });
+
+  it("lettre écrite en mode « spontanée », puis envoi seulement quand tout est prêt ; lettre PDF + CV joints ; entreprise « Contactée »", async () => {
+    const { req, lead, aiCalls, sentMails } = await setup();
+    await req("PUT", "/api/letter-kit", KIT);
+
+    const first = (await req("GET", `/api/leads/${lead.id}/application`)).json();
+    expect(first).toMatchObject({ application: null, kitReady: true, cvPdf: { found: false }, mail: { configured: true } });
+
+    const written = (await req("POST", `/api/leads/${lead.id}/application/letter`, { title: "Développeur Vue.js" })).json();
+    expect(aiCalls.at(-1)?.title).toBe("lettre:Développeur Vue.js");
+    expect(written.application.letter).toContain("Candidature spontanée – Développeur Vue.js");
+
+    const mail = { to: "rh@alpha.fr", subject: "Candidature spontanée", message: "Madame, Monsieur, voici ma candidature.", letter: written.application.letter };
+    const noCv = await req("POST", `/api/leads/${lead.id}/application/send`, mail);
+    expect(noCv.statusCode).toBe(400);
+    expect(noCv.json().error).toBe("CV_PDF_MISSING");
+    expect(sentMails).toHaveLength(0);
+
+    const dir = await mkdtemp(join(tmpdir(), "jr-cv-"));
+    const cv = join(dir, "CV_Alex_Martin.pdf");
+    await writeFile(cv, "%PDF-1.4 faux CV");
+    await req("PUT", "/api/letter-kit", { ...KIT, cvPdfPath: `"${cv}"` });
+
+    const sent = await req("POST", `/api/leads/${lead.id}/application/send`, mail);
+    expect(sent.statusCode).toBe(200);
+    expect(sentMails).toHaveLength(1);
+    expect(sentMails[0]).toMatchObject({ fromName: "Alex MARTIN", to: "rh@alpha.fr", subject: "Candidature spontanée" });
+    expect(sentMails[0]!.attachments.map((a) => a.filename)).toEqual(["Lettre_de_motivation.pdf", "CV_Alex_Martin.pdf"]);
+    expect(sentMails[0]!.attachments[0]!.content.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(sent.json().application).toMatchObject({ sentTo: "rh@alpha.fr" });
+    expect(sent.json().lead).toMatchObject({ status: "CONTACTED", contactEmail: "rh@alpha.fr" });
+
+    // Pas de double envoi par erreur : il faut le demander explicitement.
+    const again = await req("POST", `/api/leads/${lead.id}/application/send`, mail);
+    expect(again.statusCode).toBe(409);
+    expect((await req("POST", `/api/leads/${lead.id}/application/send`, { ...mail, force: true })).statusCode).toBe(200);
+    expect(sentMails).toHaveLength(2);
+
+    // Renvoyé vers leur site : « J'ai postulé sur leur site », puis annuler.
+    const item = () => req("GET", "/api/applications").then((r) => r.json().spontaneous[0]);
+    const id = (await item()).id;
+    const outcome = (o: "applied" | "none" | null, to = id) => req("POST", `/api/applications/spontaneous/${to}/site-outcome`, { outcome: o });
+    expect((await outcome("applied")).statusCode).toBe(200);
+    expect(await item()).toMatchObject({ stage: "SENT", noOpeningAt: null });
+    expect((await item()).appliedOnSiteAt).not.toBeNull();
+    // Rien à postuler sur leur site : close (l'autre choix est effacé).
+    await outcome("none");
+    expect(await item()).toMatchObject({ stage: "REJECTED", appliedOnSiteAt: null });
+    await outcome(null);
+    expect(await item()).toMatchObject({ stage: "SENT", appliedOnSiteAt: null, noOpeningAt: null });
+    expect((await outcome("applied", "inconnu")).statusCode).toBe(404);
+  });
+
+  it("préparation en lot : lettres écrites pour les entreprises « À contacter » avec email, rien n'est envoyé", async () => {
+    const { req, lead, sentMails } = await setup();
+    await req("PUT", "/api/letter-kit", KIT);
+    await req("PATCH", `/api/leads/${lead.id}`, { contactEmail: "rh@alpha.fr" });
+
+    expect((await req("GET", "/api/leads/applications/batch")).json()).toMatchObject({ toWrite: 1, items: [] });
+    expect((await req("POST", "/api/leads/applications/batch")).json().batch).toMatchObject({ running: true, total: 1, steps: [{ leadId: lead.id, status: "writing" }] });
+    await expect.poll(async () => (await req("GET", "/api/leads/applications/batch")).json().batch.running).toBe(false);
+
+    const after = (await req("GET", "/api/leads/applications/batch")).json();
+    expect(after.toWrite).toBe(0);
+    expect(after.batch.steps).toMatchObject([{ name: "ALPHA LOGICIELS", status: "done" }]);
+    expect(after.items.map((i: { lead: { id: string } }) => i.lead.id)).toEqual([lead.id]);
+    expect(after.items[0].application.letter).toContain("Candidature spontanée");
+    expect(sentMails).toHaveLength(0);
+  });
+});

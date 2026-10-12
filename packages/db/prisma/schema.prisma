@@ -1,0 +1,503 @@
+// Schéma Job Radar — voir docs/00-analyse-v1.md §5.
+// Règle : une donnée inconnue reste NULL, jamais devinée.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────── Utilisateur & profil ─────────────
+
+model User {
+  id           String             @id @default(cuid())
+  email        String             @unique
+  passwordHash String
+  /// préférences d'affichage — colonne créée par le projet jobRadar (même base), inutilisée ici
+  uiPrefs      Json?
+  createdAt    DateTime           @default(now())
+  profile      Profile?
+  letterKit    LetterKit?
+  cvMaster     CvMaster?
+  sessions     Session[]
+  pushSubs     PushSubscription[]
+}
+
+model Session {
+  id        String   @id // jeton aléatoire (haché côté API)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId])
+}
+
+model Profile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Profil validé par ProfileSchema (@job-radar/shared).
+  data      Json
+  /// Point de départ du trajet — privé, jamais exposé hors de l'appli.
+  homeLabel String?
+  homeLat   Float?
+  homeLng   Float?
+  updatedAt DateTime @updatedAt
+}
+
+// ───────────── Offres ─────────────
+
+enum RemoteType {
+  remote
+  hybrid
+  onsite
+  unknown
+}
+
+enum JobStatus {
+  NEW
+  SEEN
+  SAVED
+  APPLIED
+  REJECTED
+  EXPIRED
+  IGNORED
+}
+
+enum LocationPrecision {
+  address
+  city_centroid
+  unknown
+}
+
+model Job {
+  id                String            @id @default(cuid())
+  /// entreprise + titre + ville normalisés (dédoublonnage niveau 3)
+  fingerprint       String            @unique
+  /// entreprise + titre nettoyés (sans contrat, (H/F)…) : repère la même offre écrite autrement par une autre source
+  dedupeKey         String?
+  /// change si le contenu de l'offre change
+  contentHash       String
+  title             String
+  company           String?
+  description       String
+  /// Annonce complète collée par l'utilisateur (quand la source ne donne qu'un extrait). Jamais écrasée par la collecte.
+  fullText          String?
+  fullTextAt        DateTime?
+  fullExperienceYrs Int?
+  /// Infos lues par l'IA dans l'annonce complète (contrat, télétravail, salaire) : complètent la source quand elle ne les donne pas.
+  fullInfo          Json?
+  /// Corrections saisies à la main (entreprise, lieu, contrat, salaire…) : priment sur la source. Jamais écrasées par la collecte.
+  userEdits         Json?
+  userEditsAt       DateTime?
+  contractType      String?
+  experienceText    String?
+  experienceMinYrs  Int?
+  experienceMaxYrs  Int?
+  salaryMin         Int?
+  salaryMax         Int?
+  salaryPeriod      String?
+  salaryText        String?
+  city              String?
+  postalCode        String?
+  department        String?
+  address           String?
+  latitude          Float?
+  longitude         Float?
+  locationPrecision LocationPrecision @default(unknown)
+  remoteType        RemoteType        @default(unknown)
+  /// telles qu'écrites dans l'annonce
+  technologies      String[]
+  publishedAt       DateTime?
+  firstSeenAt       DateTime          @default(now())
+  lastSeenAt        DateTime          @default(now())
+  status            JobStatus         @default(NEW)
+  /// garde-fou anti double notification
+  notifiedAt        DateTime?
+
+  sources  JobSourceLink[]
+  scores   JobScore[]
+  analyses JobAnalysis[]
+  events   JobEvent[]
+  travel   TravelEstimate?
+  coverLetter CoverLetter?
+  mails    ApplicationMail[]
+  tailoredCvs TailoredCv[]
+
+  @@index([status, lastSeenAt])
+  @@index([department])
+  @@index([publishedAt])
+  @@index([dedupeKey])
+}
+
+model JobSourceLink {
+  id           String   @id @default(cuid())
+  jobId        String
+  job          Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  /// "france-travail", "adzuna", "ats:greenhouse:acme"...
+  source       String
+  sourceJobId  String
+  sourceUrl    String
+  canonicalUrl String?
+  rawData      Json?
+  firstSeenAt  DateTime @default(now())
+  lastSeenAt   DateTime @default(now())
+
+  @@unique([source, sourceJobId])
+  @@index([canonicalUrl])
+  @@index([jobId])
+}
+
+model JobScore {
+  id           String   @id @default(cuid())
+  jobId        String
+  job          Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  rulesVersion String
+  profileHash  String
+  final        Int
+  technical    Int
+  experience   Int
+  contract     Int
+  salary       Int
+  location     Int
+  transport    Int
+  reasons      Json
+  warnings     Json
+  createdAt    DateTime @default(now())
+
+  @@unique([jobId, rulesVersion, profileHash])
+  @@index([final])
+}
+
+model JobAnalysis {
+  id            String   @id @default(cuid())
+  jobId         String
+  job           Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  /// contentHash + profileHash
+  inputHash     String
+  model         String
+  summary       String
+  matchedSkills String[]
+  missingSkills String[]
+  risks         String[]
+  createdAt     DateTime @default(now())
+
+  @@unique([jobId, inputHash])
+}
+
+/// CV (texte), lettre exemple et en-tête des lettres — validé par LetterKitSchema (@job-radar/shared). Privé.
+model LetterKit {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data      Json
+  updatedAt DateTime @updatedAt
+}
+
+/// Lettre de motivation écrite par l'IA pour une offre (une par offre), modifiable.
+model CoverLetter {
+  id        String   @id @default(cuid())
+  jobId     String   @unique
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  /// contenu de l'offre + CV/lettre exemple + modèle + version de la consigne
+  inputHash String
+  model     String
+  content   String
+  /// true = modifiée à la main
+  edited    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model JobEvent {
+  id        String   @id @default(cuid())
+  jobId     String
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  /// STATUS_CHANGED, UPDATED, RESEEN, NOTIFIED...
+  type      String
+  fromValue String?
+  toValue   String?
+  createdAt DateTime @default(now())
+
+  @@index([jobId, createdAt])
+}
+
+model TravelEstimate {
+  jobId      String            @id
+  job        Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  /// null si non calculable — jamais inventé
+  minutes    Int?
+  provider   String?
+  /// "car" (voiture depuis le domicile) ou "transit" (transports depuis la gare d'arrivée) ; null = ancien calcul
+  mode       String?
+  precision  LocationPrecision
+  /// point de départ utilisé (arrondi) : si le domicile change, le trajet est recalculé
+  originKey  String?
+  computedAt DateTime          @default(now())
+}
+
+// ───────────── Collecte & sources ─────────────
+
+model CollectionRun {
+  id         String      @id @default(cuid())
+  /// "manual" | "scheduler"
+  trigger    String
+  /// running | done | partial | failed
+  status     String
+  startedAt  DateTime    @default(now())
+  finishedAt DateTime?
+  fetched    Int         @default(0)
+  created    Int         @default(0)
+  duplicates Int         @default(0)
+  aiCalls    Int         @default(0)
+  sourceRuns SourceRun[]
+
+  @@index([startedAt])
+}
+
+model SourceRun {
+  id         String        @id @default(cuid())
+  runId      String
+  run        CollectionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  source     String
+  /// OK | ERROR | SKIPPED | SOURCE_UNAVAILABLE
+  status     String
+  error      String?
+  durationMs Int?
+  fetched    Int           @default(0)
+  createdAt  DateTime      @default(now())
+
+  @@index([runId])
+  @@index([source, createdAt])
+}
+
+model SourceState {
+  source          String    @id
+  enabled         Boolean   @default(true)
+  intervalMinutes Int
+  failures        Int       @default(0)
+  nextRunAt       DateTime  @default(now())
+  lastSuccessAt   DateTime?
+}
+
+/// Compteur d'appels des API à quota limité (Jooble : 500 appels à vie par clé gratuite).
+model ApiQuota {
+  /// source + empreinte de la clé (nouvelle clé = compteur remis à zéro)
+  id         String    @id
+  used       Int       @default(0)
+  lastCallAt DateTime?
+  updatedAt  DateTime  @updatedAt
+}
+
+model CompanyTarget {
+  id       String  @id @default(cuid())
+  name     String
+  /// greenhouse | lever | ashby | recruitee | workable | personio
+  ats      String
+  boardKey String
+  enabled  Boolean @default(true)
+
+  @@unique([ats, boardKey])
+}
+
+// ───────────── Notifications ─────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  jobId     String
+  /// email | webpush
+  channel   String
+  /// apply (à postuler) | complete (annonce incomplète à compléter)
+  kind      String   @default("apply")
+  /// sent | failed
+  status    String
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@unique([jobId, channel, kind])
+}
+
+model PushSubscription {
+  id       String @id @default(cuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint String @unique
+  keys     Json
+}
+
+model NotificationSettings {
+  id           String  @id @default("singleton")
+  emailEnabled Boolean @default(true)
+  pushEnabled  Boolean @default(true)
+  emailTo      String?
+}
+
+// ───────────── Caches ─────────────
+
+model GeocodeCache {
+  /// texte normalisé
+  query     String            @id
+  lat       Float?
+  lng       Float?
+  precision LocationPrecision
+  createdAt DateTime          @default(now())
+}
+
+model TravelCache {
+  /// origine arrondie + destination arrondie + fournisseur
+  key       String   @id
+  minutes   Int?
+  createdAt DateTime @default(now())
+}
+
+// ───────── Candidatures spontanées (La Bonne Boîte) ─────────
+
+enum LeadStatus {
+  TO_CONTACT
+  CONTACTED
+  FOLLOWED_UP
+  INTERVIEW
+  NOT_INTERESTED
+  IGNORED
+}
+
+model CompanyLead {
+  id              String     @id @default(cuid())
+  siret           String     @unique
+  name            String
+  officeName      String?
+  naf             String?
+  nafLabel        String?
+  headcountMin    Int?
+  headcountMax    Int?
+  city            String?
+  postcode        String?
+  citycode        String?
+  department      String?
+  latitude        Float?
+  longitude       Float?
+  /// potentiel d'embauche La Bonne Boîte (0 à 100)
+  hiringPotential Float?
+  isHighPotential Boolean    @default(false)
+  /// La Bonne Boîte connaît un email de contact (non fourni par l'API)
+  hasEmail        Boolean    @default(false)
+  /// email de contact collé à la main (candidature spontanée)
+  contactEmail    String?
+  /// adresse exacte de l'établissement — colonnes créées par le projet jobRadar (même base), inutilisées ici
+  address         String?
+  addressCheckedAt DateTime?
+  rome            String?
+  status          LeadStatus @default(TO_CONTACT)
+  notes           String?
+  contactedAt     DateTime?
+  travelMinutes   Int?
+  travelOriginKey String?
+  firstSeenAt     DateTime   @default(now())
+  lastSeenAt      DateTime   @default(now())
+  application     SpontaneousApplication?
+
+  @@index([status, hiringPotential])
+}
+
+/// Candidature spontanée préparée pour une entreprise : lettre (IA, modifiable) et envoi par email.
+model SpontaneousApplication {
+  id        String      @id @default(cuid())
+  leadId    String      @unique
+  lead      CompanyLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  /// entreprise + CV/règles + intitulé visé + modèle + version de la consigne
+  inputHash String
+  model     String
+  letter    String
+  /// true = modifiée à la main
+  edited    Boolean     @default(false)
+  sentAt    DateTime?
+  sentTo    String?
+  /// Message-ID du mail envoyé : une réponse dans ce fil se reconnaît sans deviner
+  messageId String?
+  /// L'entreprise a renvoyé vers son site carrière, et tu y as postulé : le suivi des réponses continue
+  appliedOnSiteAt DateTime?
+  /// Renvoyé vers leur site, mais rien à y postuler (pas de poste, pas de candidature spontanée) : candidature close
+  noOpeningAt     DateTime?
+  mails     ApplicationMail[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+}
+
+/// Mail reçu reconnu comme une étape d'une candidature (sur offre OU spontanée), lu dans la boîte en lecture seule.
+model ApplicationMail {
+  id            String                  @id @default(cuid())
+  /// Message-ID du mail : jamais traité deux fois
+  messageId     String                  @unique
+  jobId         String?
+  job           Job?                    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  spontaneousId String?
+  spontaneous   SpontaneousApplication? @relation(fields: [spontaneousId], references: [id], onDelete: Cascade)
+  /// ACK (accusé de réception) | INTERVIEW (entretien, test, échange) | OFFER (proposition) | REJECTION (refus) | CAREER_SITE (postuler sur leur site)
+  kind          String
+  /// précision lisible : « Test technique », « Demande de disponibilités »…
+  detail        String?
+  subject       String
+  fromAddress   String
+  receivedAt    DateTime
+  /// true = tu as indiqué que ce mail ne concerne pas cette candidature
+  dismissed     Boolean                 @default(false)
+  createdAt     DateTime                @default(now())
+
+  @@index([jobId])
+  @@index([spontaneousId])
+}
+
+/// Dernier mail lu par dossier (IMAP) : seuls les nouveaux sont relus.
+model MailCursor {
+  folder      String   @id
+  uidValidity String
+  lastUid     Int
+  checkedAt   DateTime @default(now())
+}
+
+// ───────── CV adapté à l'offre ─────────
+
+/// CV complet découpé en morceaux (un par utilisateur) — validé par CvMasterSchema (@job-radar/shared). Privé.
+model CvMaster {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data        Json
+  /// empreinte du CV complet : un CV adapté fait sur une autre empreinte est « à refaire »
+  contentHash String
+  updatedAt   DateTime @updatedAt
+}
+
+enum TailoredCvStatus {
+  DRAFT
+  VALIDATED
+  EXPORTED
+}
+
+/// CV adapté à une offre, un par modèle (une-colonne / deux-colonnes).
+model TailoredCv {
+  id           String           @id @default(cuid())
+  jobId        String
+  job          Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  template     String
+  /// TailoredCvDraft (@job-radar/cv-tailor) : ce qui est affiché, notes, écartés, contrôles
+  draft        Json
+  /// choix manuels (CvOverridesSchema)
+  overrides    Json
+  rulesVersion String
+  masterHash   String
+  jobHash      String
+  status       TailoredCvStatus @default(DRAFT)
+  pdfPath      String?
+  exportedAt   DateTime?
+  /// offre marquée « Postulé » avec ce CV exporté
+  sentAt       DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@unique([jobId, template])
+}
