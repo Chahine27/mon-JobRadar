@@ -233,6 +233,15 @@ describe("règles détaillées", () => {
     expect(r.breakdown.experience).toBe(30);
   });
 
+  it("années lues dans l'annonce (« 2 à 3 ans ») : elles priment sur l'étiquette « Niveau senior » de la source", () => {
+    const profile: Profile = { ...DEFAULT_PROFILE, experienceMin: 1, experienceMax: 3 };
+    const r = score({ ...PERFECT, title: "Ingénieur en IA générative", experienceMinYears: 2, experienceText: "Niveau senior" }, profile);
+    expect(r.breakdown.experience).toBe(100);
+    expect(r.warnings).not.toContain("Poste indiqué senior / confirmé");
+    // « Senior » dans le titre : compte toujours, années ou pas.
+    expect(score({ ...PERFECT, title: "Ingénieur IA Senior", experienceMinYears: 2 }, profile).breakdown.experience).toBe(30);
+  });
+
   it("une compétence ajoutée au profil est reconnue et fait monter le score", () => {
     const profile: Profile = { ...DEFAULT_PROFILE, skills: [...DEFAULT_PROFILE.skills, "Quasar"] };
     const r = score({ ...PERFECT, title: "Développeur Quasar", description: "Front Quasar." }, profile);

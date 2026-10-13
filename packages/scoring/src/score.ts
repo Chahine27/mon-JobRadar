@@ -192,9 +192,13 @@ const fr = (n: number) => String(n).replace(".", ",");
 // ───────── Expérience ─────────
 
 function scoreExperience(input: ScoringInput, profile: Profile, rules: ScoringRules, product: ProductExperience): Part {
-  const seniority =
-    (input.seniority !== undefined ? input.seniority : detectSeniority(input.title)) ?? (input.experienceText ? detectSeniority(input.experienceText) : null);
   const years = input.experienceMinYears;
+  // Niveau de la source (« Niveau senior », LinkedIn le met sur presque tout) : seulement si l'annonce ne dit pas
+  // combien d'années. « 2 à 3 ans » lu dans le texte est plus précis qu'une étiquette (il était noté 30 au lieu de 100).
+  // Un « Senior » écrit dans le titre, lui, compte toujours.
+  const seniority =
+    (input.seniority !== undefined ? input.seniority : detectSeniority(input.title)) ??
+    (years === null && input.experienceText ? detectSeniority(input.experienceText) : null);
   const { experienceMin: min, experienceMax: max } = profile;
   const part: Part = { score: rules.neutral, reasons: [], warnings: [] };
 
