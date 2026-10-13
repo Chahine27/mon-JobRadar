@@ -147,3 +147,14 @@ export function sourceBadge(s: { lastStatus: string | null; lastError: string | 
   if (status) return { tone: "bad", text: "erreur", busy: false, pct: null };
   return { tone: "", text: "jamais lancée", busy: false, pct: null };
 }
+
+const plain = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+
+/**
+ * « Pas pour moi » → techno que tu ne maîtrises pas : règle sur le titre si elle y est (la stack principale),
+ * sinon sur l'annonce entière. Toujours « dans le titre » ne touchait ni l'offre (« Ingénieur en IA générative »
+ * avec NLP dans le texte seulement) ni les suivantes : le score ne bougeait pas.
+ */
+export function skillRuleKind(title: string, skill: string): "title" | "text" {
+  return plain(title).includes(plain(skill)) ? "title" : "text";
+}

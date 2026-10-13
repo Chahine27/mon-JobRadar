@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSalary, safeUrl, scoreTone, sourceBadge, timeAgo } from "./format";
+import { formatSalary, safeUrl, scoreTone, skillRuleKind, sourceBadge, timeAgo } from "./format";
 
 describe("format", () => {
   it("formatSalary", () => {
@@ -47,5 +47,14 @@ describe("pastille d'une source", () => {
     expect(sourceBadge({ lastStatus: "SOURCE_UNAVAILABLE", lastError: "JobScraper est désactivé." }).text).toBe("non configurée");
     expect(sourceBadge({ lastStatus: null, lastError: null }).text).toBe("jamais lancée");
     expect(sourceBadge({ lastStatus: "ERROR", lastError: "x" })).toMatchObject({ tone: "bad", text: "erreur" });
+  });
+});
+
+describe("« Pas pour moi » : règle sur une techno non maîtrisée", () => {
+  it("dans le titre si elle y est, sinon dans l'annonce", () => {
+    expect(skillRuleKind("Ingénieur en IA générative", "NLP")).toBe("text");
+    expect(skillRuleKind("Ingénieur en IA générative", "Data science")).toBe("text");
+    expect(skillRuleKind("Développeur Angular / Java", "Angular")).toBe("title");
+    expect(skillRuleKind("Ingénieur Électronique embarquée", "electronique")).toBe("title");
   });
 });

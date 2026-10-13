@@ -8,7 +8,7 @@ import CvCard from "../components/CvCard.vue";
 import Icon from "../components/Icon.vue";
 import ScoreBadge from "../components/ScoreBadge.vue";
 import SourceLogo from "../components/SourceLogo.vue";
-import { SOURCE_LABELS, REMOTE_LABELS, STATUS_LABELS, formatSalary, linkLabel, mapsUrl, safeUrl, timeAgo } from "../format";
+import { SOURCE_LABELS, REMOTE_LABELS, STATUS_LABELS, formatSalary, linkLabel, mapsUrl, safeUrl, skillRuleKind, timeAgo } from "../format";
 import type { JobDetail, JobEdits, JobStatus, RemoteType } from "../types";
 import type { ScoreRule } from "@job-radar/shared";
 import { goBack } from "../router";
@@ -188,7 +188,7 @@ const NFM_POINTS: Record<Exclude<NotForMeReason, "other">, number> = { stack: -3
 function openNotForMe() {
   const j = job.value!;
   // Technos absentes de ton profil citées dans le titre : sans doute la stack principale.
-  nfmSkills.value = j.missingSkills.filter((s) => j.title.toLowerCase().includes(s.toLowerCase()));
+  nfmSkills.value = j.missingSkills.filter((s) => skillRuleKind(j.title, s) === "title");
   nfmReason.value = j.missingSkills.length ? "stack" : "role";
   nfmWord.value = "";
   nfmRemember.value = true;
@@ -202,7 +202,7 @@ function toggleSkill(s: string) {
 const nfmRules = computed<ScoreRule[]>(() => {
   const j = job.value;
   if (!j || !nfmRemember.value) return [];
-  if (nfmReason.value === "stack") return nfmSkills.value.map((value) => ({ kind: "title", value, points: NFM_POINTS.stack }));
+  if (nfmReason.value === "stack") return nfmSkills.value.map((value) => ({ kind: skillRuleKind(j.title, value), value, points: NFM_POINTS.stack }));
   if (nfmReason.value === "role" && nfmWord.value.trim().length >= 2) return [{ kind: "title", value: nfmWord.value.trim(), points: NFM_POINTS.role }];
   if (nfmReason.value === "company" && j.company) return [{ kind: "company", value: j.company, points: NFM_POINTS.company }];
   return [];
