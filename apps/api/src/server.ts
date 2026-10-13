@@ -192,12 +192,13 @@ const scraperRunner = new CollectionRunner({
     timeoutMs: env.JOBSCRAPER_TIMEOUT_MS,
   }),
   schedulerTrigger: "scraper",
-  // Puis : offres arrivées sans description (LinkedIn sans détail, HelloWork) complétées depuis leur page publique.
+  // D'abord : offres arrivées sans description ni date (LinkedIn, HelloWork) complétées depuis leur page publique.
+  // Ensuite seulement trajets, IA et notifications : ils travaillent une seule fois, sur l'annonce entière.
   onFinished: async (report) => {
-    await runnerBase.onFinished(report);
     await completeJobScraperDescriptions({ prisma, fetchDetails: (l) => fetchJobScraperDetails(l), log: (m) => log(m) }).catch((err) =>
       log(`Descriptions JobScraper : ${String(err)}`),
     );
+    await runnerBase.onFinished(report);
   },
   // Un processus Python par recherche : une collecte peut durer bien plus de 15 min.
   staleMs: 90 * 60_000,

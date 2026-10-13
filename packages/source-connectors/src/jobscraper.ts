@@ -328,7 +328,7 @@ export class JobScraperSource implements JobSource {
     const dir = await mkdtemp(path.join(os.tmpdir(), "job-radar-jobscraper-"));
     const output = path.join(dir, "jobs.json");
     const days = params.publishedSinceDays;
-    // Sites scrapés, détail LinkedIn = 1 requête de plus par offre : 300 par recherche (comme les API) rendrait
+    // Sites scrapés : 300 par recherche (comme les API) rendrait
     // une collecte interminable (coupée par le délai) et ferait bloquer l'IP. Tri par date : les plus récentes d'abord.
     const max = Math.min(params.maxResults ?? JOBSCRAPER_MAX_PER_SEARCH, JOBSCRAPER_MAX_PER_SEARCH);
     const date = days === undefined ? "any_time" : days <= 1 ? "past_24h" : days <= 7 ? "past_week" : "past_month";
@@ -340,7 +340,8 @@ export class JobScraperSource implements JobSource {
         "--date", date,
         "--sort", "date",
         "--max-results", String(max),
-        ...(this.opts.provider === "linkedin" ? ["--details"] : []),
+        // Pas de --details LinkedIn : 1 requête de plus par offre (→ HTTP 429), date perdue, texte aux mots collés.
+        // completeJobScraperDescriptions lit ensuite chaque page une seule fois, sans rafale.
         "--format", "json", "--output", output,
       ]);
       // Journal JobScraper « | ERROR | », JobSpy « - ERROR - ».
