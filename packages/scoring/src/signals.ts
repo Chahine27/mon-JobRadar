@@ -1,4 +1,4 @@
-import { normalizeText, skillIndexes, type Skill } from "@job-radar/skills";
+import { extractSkills, normalizeText, skillIndexes, type Skill } from "@job-radar/skills";
 
 /** Petits extracteurs de texte, réutilisés par la normalisation (étape 7). Ne devinent jamais : inconnu → null. */
 
@@ -225,4 +225,34 @@ export function contractFromTitle(title: string): ContractKind | null {
   if (/\bcdd\b/.test(t)) return "CDD";
   if (/\bcdi\b/.test(t)) return "CDI";
   return null;
+}
+
+/** « 3 ans d'expérience minimum sur ces environnements », « 3 years of experience working with these technologies ». */
+const PRODUCT_ANAPHORA =
+  /^[^,]{0,30}?\b(sur|avec|dans|with|on|in|using)\s+(ces|cet|cette|ce|these|those|this|such)\s+(environnements?|solutions?|technologies?|technos?|outils|produits?|logiciels?|progiciels?|plateformes?|environments?|tools|products?|platforms?)\b/;
+
+/**
+ * Années d'expérience exigées sur des technos / produits précis : « 3 ans d'expérience sur Angular », ou
+ * « … sur ces environnements » qui renvoie aux produits du titre et des deux phrases d'avant.
+ * Renvoie les compétences visées (le score garde celles absentes du profil) et le nombre d'années, ou null.
+ */
+export function productExperienceRequired(title: string, description: string, extraSkills: Skill[] = []): { ids: string[]; years: number } | null {
+  // Phrases : coupure après . ! ? ; suivi d'un espace (« Vue.js » reste entier) ou à la ligne.
+  const sentences = description.split(/(?<=[.!?;])\s+|\n+/).map(normalizeText);
+  const ids = new Set<string>();
+  let years = 0;
+  sentences.forEach((s, i) => {
+    if (!/experience/.test(s) || /un plus|apprecie|idealement|serait un atout|bonus|nice to have/.test(s)) return;
+    const m = s.match(/(\d{1,2})\s*\+?\s*(?:ans?|annees?|years?)\b/);
+    const n = Number(m?.[1]);
+    if (!m || n < 1 || n > 15) return;
+    const tail = s.slice((m.index ?? 0) + m[0].length);
+    // ponytail: texte sans majuscules, donc les alias sensibles à la casse (« Vue ») ne sont pas vus ici.
+    const found = extractSkills(tail.slice(0, 80), extraSkills);
+    if (PRODUCT_ANAPHORA.test(tail)) found.push(...extractSkills([title, sentences[i - 1] ?? "", sentences[i - 2] ?? ""].join("\n"), extraSkills));
+    if (!found.length) return;
+    found.forEach((id) => ids.add(id));
+    years = Math.max(years, n);
+  });
+  return ids.size ? { ids: [...ids], years } : null;
 }

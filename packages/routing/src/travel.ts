@@ -59,7 +59,8 @@ export async function ensureTravelTimes(opts: {
   };
 
   const jobs = await prisma.job.findMany({
-    where: { id: { in: opts.jobIds }, remoteType: { not: "remote" }, department: { not: "99" } },
+    // `not: "99"` seul exclurait aussi les départements inconnus (NULL en SQL) : la ville ne serait jamais localisée.
+    where: { id: { in: opts.jobIds }, remoteType: { not: "remote" }, OR: [{ department: null }, { department: { not: "99" } }] },
     select: {
       id: true, company: true, latitude: true, longitude: true, city: true, department: true, address: true, locationPrecision: true,
       travel: { select: { mode: true, originKey: true, provider: true } },

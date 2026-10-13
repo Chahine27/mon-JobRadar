@@ -29,6 +29,16 @@ describe("GET /api/jobs", () => {
     expect((await get("/api/jobs?source=Pas%20valide")).statusCode).toBe(400);
   });
 
+  it("filtre par contrat : CDD, CDI, non précisé", async () => {
+    const { get, jobs } = await setup();
+    jobs.get("j-java")!.contractType = null;
+    const ids = async (c: string) => (await get(`/api/jobs?limit=50&includeHidden=true&contract=${c}`)).json().items.map((j: { id: string }) => j.id);
+    expect(await ids("CDD")).toEqual(["j-cdd"]);
+    expect(await ids("CDI")).not.toContain("j-cdd");
+    expect(await ids("unknown")).toEqual(["j-java"]);
+    expect((await get("/api/jobs?contract=PIGISTE")).statusCode).toBe(400);
+  });
+
   it("trie par score et masque les contrats hors profil", async () => {
     const { get } = await setup();
     const res = await get("/api/jobs");

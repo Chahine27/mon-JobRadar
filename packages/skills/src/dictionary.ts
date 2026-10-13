@@ -79,6 +79,8 @@ export const SKILLS: Skill[] = [
   { id: "abap", label: "SAP / ABAP", family: "other", core: true, aliases: ["abap", "sap s/4hana", "s/4hana", "sap hana", "sap fiori"] },
   { id: "salesforce", label: "Salesforce", family: "other", core: true, aliases: ["salesforce", "apex", "lightning web components"] },
   { id: "servicenow", label: "ServiceNow", family: "other", core: true, aliases: ["servicenow"] },
+  { id: "3dexperience", label: "3DEXPERIENCE", family: "other", core: true, aliases: ["3dexperience", "3d experience", "enovia"] },
+  { id: "apriso", label: "DELMIA Apriso", family: "other", core: true, aliases: ["apriso", "delmia apriso"] },
   { id: "powerplatform", label: "Power Platform", family: "other", core: true, aliases: ["power platform", "power apps", "powerapps", "power automate"] },
   { id: "dynamics", label: "Dynamics 365", family: "other", core: true, aliases: ["dynamics 365", "dynamics crm", "dynamics ax", "business central"] },
   { id: "pega", label: "Pega", family: "other", core: true, aliases: ["pega", "pegasystems"] },

@@ -101,6 +101,7 @@ async function save() {
   const payload: Profile = {
     ...profile.value,
     searchRadiusKm: Number(profile.value.searchRadiusKm) || null, // champ vidé → ""
+    experienceYears: typeof profile.value.experienceYears === "number" ? profile.value.experienceYears : null, // champ vidé → ""
     preferredTechs: profile.value.preferredTechs.filter((p) => p.name.trim()),
     locations: profile.value.locations.filter((l) => l.label.trim() || l.department.trim()),
     scoreRules: profile.value.scoreRules
@@ -202,7 +203,9 @@ async function save() {
         <div class="row">
           <label>Min <input v-model.number="profile.experienceMin" type="number" min="0" max="30" /></label>
           <label>Max <input v-model.number="profile.experienceMax" type="number" min="0" max="30" /></label>
+          <label>Mon expérience réelle <input v-model.number="profile.experienceYears" type="number" min="0" max="50" step="0.5" placeholder="ex. 2,5" /></label>
         </div>
+        <p class="muted small hint">Une offre qui demande plus que ton expérience réelle passe en point de vigilance (le score suit ta cible).</p>
       </section>
 
       <section class="card stack">

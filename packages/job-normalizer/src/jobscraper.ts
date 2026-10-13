@@ -35,7 +35,9 @@ export function normalizeJobScraper(raw: RawJob): NormalizedJob | null {
   // Un stage à temps plein serait donc un CDI → inconnu ; le contrat est lu dans le titre ou la description.
   const contractType = provider === "linkedin" && job.contract_type === "cdi" ? null : contractFromLabel(job.contract_type);
   const publishedAt = job.posted_at ? parseParisDate(job.posted_at) : null;
-  const experienceText = job.experience_level ? `Niveau ${job.experience_level}` : null;
+  // LinkedIn « Mid-Senior level » / « Confirmé » (mis sur presque toutes les annonces) arrive en « senior » : ne dit rien.
+  const level = provider === "linkedin" && job.experience_level === "senior" ? null : job.experience_level;
+  const experienceText = level ? `Niveau ${level}` : null;
   const salaryText = [job.salary_min, job.salary_max].some((n) => typeof n === "number")
     ? `${job.salary_min ?? job.salary_max}–${job.salary_max ?? job.salary_min} ${job.salary_currency ?? ""}`.trim()
     : null;

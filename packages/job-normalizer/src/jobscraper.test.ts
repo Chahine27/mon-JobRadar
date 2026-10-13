@@ -39,6 +39,14 @@ describe("JobScraper normalization", () => {
     const wttj = normalize({ source: "jobscraper:wttj", sourceJobId: "w-7", collectedAt: new Date(), data: { ...base, id: "w-7", source: "wttj" } });
     expect(wttj?.contractType).toBe("CDI");
   });
+
+  it("LinkedIn : « senior » vient de « Mid-Senior level » (quasi systématique) → ignoré ; WTTJ le garde", () => {
+    const base = { id: "li-8", url: "https://example.test/jobs/8", title: "Dev Front", experience_level: "senior" };
+    const li = normalize({ source: "jobscraper:linkedin", sourceJobId: "li-8", collectedAt: new Date(), data: { ...base, source: "linkedin" } });
+    expect(li?.experienceText).toBeNull();
+    const wttj = normalize({ source: "jobscraper:wttj", sourceJobId: "w-8", collectedAt: new Date(), data: { ...base, id: "w-8", source: "wttj" } });
+    expect(wttj?.experienceText).toBe("Niveau senior");
+  });
 });
 
 describe("HelloWork : lieu « ville - département »", () => {

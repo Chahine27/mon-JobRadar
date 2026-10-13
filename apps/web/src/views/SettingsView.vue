@@ -75,6 +75,29 @@ function status(r: Row): { text: string; tone: string } {
   return failed(r).length ? { text: "erreur", tone: "bad" } : { text: "OK", tone: "good" };
 }
 
+// Plafond du score quand l'annonce exige des années sur une techno / un produit que tu n'as pas (gardé dans le profil).
+const cap = ref<number | "">("");
+const savingCap = ref(false);
+onMounted(async () => {
+  cap.value = (await api.getProfile()).profile.productExperienceCap;
+});
+async function saveCap() {
+  if (typeof cap.value !== "number" || cap.value < 0 || cap.value > 100) {
+    message.value = { ok: false, text: "Plafond invalide : entre 0 et 100 %." };
+    return;
+  }
+  savingCap.value = true;
+  try {
+    const { profile } = await api.getProfile();
+    await api.saveProfile({ ...profile, productExperienceCap: Math.round(cap.value) });
+    message.value = { ok: true, text: "Plafond enregistré. Les scores sont recalculés." };
+  } catch {
+    message.value = { ok: false, text: "Le plafond n'a pas été enregistré." };
+  } finally {
+    savingCap.value = false;
+  }
+}
+
 /** Début de l'erreur : le détail complet reste dans l'infobulle et sur la page Sources. */
 const shortError = (e: string) => (e.length > 220 ? `${e.slice(0, 220)}…` : e);
 </script>
@@ -113,6 +136,17 @@ const shortError = (e: string) => (e.length > 220 ? `${e.slice(0, 220)}…` : e)
         </li>
       </ul>
     </section>
+    <section class="card stack">
+      <h2 style="margin-top: 0"><Icon name="sliders" :size="17" />Score</h2>
+      <form class="cap" @submit.prevent="saveCap">
+        <label>
+          Plafond si l'annonce exige de l'expérience sur une techno / un produit que tu n'as pas (%)
+          <input v-model.number="cap" type="number" min="0" max="100" step="5" />
+        </label>
+        <button type="submit" class="small" :disabled="savingCap || cap === ''">{{ savingCap ? "Enregistrement…" : "Enregistrer" }}</button>
+      </form>
+      <p class="muted small" style="margin: 0">Ex. « 3 ans d'expérience minimum sur 3DEXPERIENCE » alors que ce produit n'est pas dans ton profil.</p>
+    </section>
   </div>
 </template>
 
@@ -121,6 +155,7 @@ const shortError = (e: string) => (e.length > 220 ? `${e.slice(0, 220)}…` : e)
 .rows li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 0.8rem; align-items: center; padding: 0.75rem 0; border-top: 1px solid var(--border); }
 .rows li:first-child { border-top: none; }
 .info { display: grid; gap: 0.15rem; min-width: 0; }
+.cap { display: flex; gap: 0.8rem; align-items: end; flex-wrap: wrap; }
 .err { color: var(--low); overflow-wrap: anywhere; }
 .src-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); }
 @media (max-width: 600px) { .rows li { grid-template-columns: auto 1fr; } }

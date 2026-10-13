@@ -1,5 +1,5 @@
 import { analyzeJobText, cleanFullText } from "@job-radar/pipeline";
-import { JOB_STATUSES, ManualJobSchema } from "@job-radar/shared";
+import { JOB_STATUSES, MANUAL_CONTRACTS, ManualJobSchema } from "@job-radar/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireAuth } from "../auth";
@@ -23,6 +23,8 @@ const ListQuery = z.object({
   zone: z.enum(["local", "remote", "unknown"]).optional(),
   /** Seulement les offres de cette source (« france-travail », « manual »…) ; absent = toutes. */
   source: z.string().trim().max(40).regex(/^[a-z0-9:-]*$/).optional(),
+  /** Seulement ce type de contrat (« unknown » = non précisé) ; absent = tous. */
+  contract: z.enum([...MANUAL_CONTRACTS, "unknown"]).optional(),
   /** Pagination : 20 offres par page par défaut. */
   limit: z.coerce.number().int().min(1).max(200).default(20),
   offset: z.coerce.number().int().min(0).default(0),

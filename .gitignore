@@ -25,3 +25,6 @@ __pycache__/
 
 # État du démarrage lu par la page de chargement (écrit par scripts/lancer.ps1)
 scripts/demarrage-etat.js
+
+# Brouillons et exports de Claude Code (peuvent contenir des offres)
+.tmp-claude/

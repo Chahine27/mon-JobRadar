@@ -42,6 +42,8 @@ export type JobQuery = {
   source?: string;
   /** Rubrique du flux : dans ta zone, full remote, lieu non précisé. */
   zone?: "" | "local" | "remote" | "unknown"; // "" = toutes les rubriques
+  /** Un seul type de contrat (CDI, CDD…, « unknown » = non précisé ; vide = tous). */
+  contract?: string;
   limit?: number;
   offset?: number;
 };

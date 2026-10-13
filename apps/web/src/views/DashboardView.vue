@@ -11,7 +11,7 @@ import type { AutoCheckStatus, CollectionStatus, JobSummary } from "../types";
 const FILTERS_KEY = "jobradar.filters";
 
 function loadFilters(): Required<Omit<JobQuery, "q" | "limit" | "offset">> & { q: string } {
-  const defaults = { minScore: 0, status: "active" as const, includeHidden: false, q: "", sort: "score" as const, source: "", zone: "local" as const };
+  const defaults = { minScore: 0, status: "active" as const, includeHidden: false, q: "", sort: "score" as const, source: "", zone: "local" as const, contract: "" };
   try {
     const saved = { ...defaults, ...JSON.parse(localStorage.getItem(FILTERS_KEY) ?? "{}") };
     // « Postulé » a sa propre page (Candidatures) : ancien filtre → flux normal.
@@ -218,7 +218,15 @@ onMounted(async () => {
   await loadStatus();
   if (collection.value?.running) fastPoll = setInterval(loadStatus, 2000);
   slowPoll = setInterval(loadStatus, 30_000);
-  api.getProfile().then((p) => (threshold.value = p.profile.minScoreForNotification)).catch(() => {});
+  api
+    .getProfile()
+    .then((p) => {
+      threshold.value = p.profile.minScoreForNotification;
+      contracts.value = p.profile.contracts;
+      // Contrat mémorisé mais retiré du profil depuis : on revient à « Tous ».
+      if (filters.contract && filters.contract !== "unknown" && !contractTabs.value.some((t) => t.value === filters.contract)) filters.contract = "";
+    })
+    .catch(() => {});
 });
 
 // Retour depuis une offre : son statut a pu changer, on recharge sans perdre les pages déjà affichées.
@@ -245,7 +253,15 @@ const ZONE_TABS: Array<{ value: NonNullable<JobQuery["zone"]>; label: string }> 
   { value: "unknown", label: "Lieu non précisé" },
 ];
 
-const STATUS_TABS: Array<{ value: NonNullable<JobQuery["status"]>; label: string }> = [
+// Contrats cochés dans le profil (« Intérim » → INTERIM, comme le score) ; les autres sont masqués de toute façon.
+const contracts = ref<string[]>([]);
+const contractTabs = computed(() => [
+  { value: "", label: "Tous" },
+  ...contracts.value.map((c) => ({ value: c.normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase(), label: c })),
+  { value: "unknown", label: "Non précisé" },
+]);
+
+const STATUS_TABS:Array<{ value: NonNullable<JobQuery["status"]>; label: string }> = [
   { value: "active", label: "Actives" },
   { value: "NEW", label: "Nouvelles" },
   { value: "SAVED", label: "Sauvegardées" },
@@ -357,6 +373,19 @@ function place(job: JobSummary) {
           {{ t.label }}
         </button>
       </div>
+      <div v-if="contracts.length" class="tabs" role="tablist" aria-label="Contrat">
+        <button
+          v-for="t in contractTabs"
+          :key="t.value"
+          type="button"
+          role="tab"
+          :aria-selected="filters.contract === t.value"
+          :class="{ active: filters.contract === t.value }"
+          @click="filters.contract = t.value"
+        >
+          {{ t.label }}
+        </button>
+      </div>
       </div>
       <div class="filters">
         <div class="field search">
@@ -388,7 +417,7 @@ function place(job: JobSummary) {
             <option value="date">Plus récentes</option>
           </select>
         </label>
-        <label class="switch"><input v-model="filters.includeHidden" type="checkbox" /> Offres masquées (CDD…)</label>
+        <label class="switch"><input v-model="filters.includeHidden" type="checkbox" /> Offres masquées (contrat hors profil, senior…)</label>
       </div>
     </section>
 

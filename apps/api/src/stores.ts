@@ -97,13 +97,15 @@ export type JobEdits = {
   experienceMinYrs?: number;
 };
 
+/** « 3 ans minimum », « débutant accepté ». */
+export const yearsText = (n: number) => (n === 0 ? "débutant accepté" : `${n} an${n > 1 ? "s" : ""} minimum`);
+
 /** Applique les corrections à la main sur l'offre lue (score et IA recalculés grâce au contentHash). */
 export function applyEdits(row: JobRow, edits: JobEdits, at: Date) {
   Object.assign(row, edits);
   if (edits.salaryMin !== undefined && edits.salaryMax === undefined) row.salaryMax = edits.salaryMin;
   if (edits.experienceMinYrs !== undefined) {
-    const n = edits.experienceMinYrs;
-    row.experienceText = n === 0 ? "débutant accepté" : `${n} an${n > 1 ? "s" : ""} minimum`;
+    row.experienceText = yearsText(edits.experienceMinYrs);
   }
   row.contentHash = `${row.contentHash}:edit${at.getTime()}`;
   row.userEdits = edits;

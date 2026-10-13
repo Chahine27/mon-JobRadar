@@ -2,7 +2,7 @@ import type { JobStatus, Profile } from "@job-radar/shared";
 import { DEFAULT_RULES, hashProfile, scoreJob, scoringInputFromJob, type ScoreResult, type ScoringRules } from "@job-radar/scoring";
 import { distanceKm } from "../routes/leads";
 import { AI_SCORE_CAPS, type Adequation, analysisHash, isAbridged, readVerdict, toProfileInput } from "../ai-context";
-import type { JobEdits, JobRow, Stores } from "../stores";
+import { type JobEdits, type JobRow, type Stores, yearsText } from "../stores";
 
 export { ABRIDGED_SOURCES, isAbridged } from "../ai-context";
 
@@ -19,6 +19,8 @@ export type JobFilters = {
   sort: "score" | "date";
   /** Seulement les offres trouvées par cette source (une offre vue sur 2 sources apparaît dans les 2). */
   source?: string | undefined;
+  /** Seulement ce type de contrat (CDI, CDD…) ; « unknown » = contrat non précisé. */
+  contract?: string | undefined;
 };
 
 export type JobSummary = {
@@ -218,6 +220,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
         .filter((j) => (f.status === "all" ? true : f.status === "active" ? !OUT_OF_FEED.includes(j.status) : j.status === f.status))
         .filter((j) => !q || `${j.title} ${j.company ?? ""} ${j.city ?? ""}`.toLowerCase().includes(q))
         .filter((j) => !f.source || j.sources.some((s) => s.source === f.source))
+        .filter((j) => !f.contract || (j.contractType ?? "unknown") === f.contract)
         .map((j) => {
           const v = verdictOf(j);
           const jj = withAiExperience(j, v);
@@ -293,7 +296,8 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       return {
         ...summary,
         description: job.description,
-        experienceText: scored.experienceText,
+        // La source ne donne pas toujours le texte : on affiche alors les années lues dans l'annonce (celles du score).
+        experienceText: scored.experienceText ?? (scored.experienceMinYrs === null ? null : yearsText(scored.experienceMinYrs)),
         address: job.address,
         travelMinutes: job.travelMinutes,
         travelMode: job.travelMode,
