@@ -33,24 +33,30 @@ export function toProfileInput(p: Profile, kit: LetterKit | null): AnalysisProfi
 }
 
 const sha = (v: unknown, n: number) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, n);
-const annoncePart = (job: Pick<JobRow, "contentHash">) => sha(job.contentHash, 12);
+/** Ce que l'IA lit de l'offre, avec sa consigne et son modèle (« i » : jamais le début d'une ancienne empreinte, en hexadécimal). */
+const readPart = (job: JobRow, model: string) => `i${sha([toJobInput(job), ANALYSIS_PROMPT_VERSION, model], 11)}`;
+/** Consigne des analyses faites avant ce format : elles restent valables tant qu'elle ne change pas. */
+const LEGACY_PROMPT_VERSION = "2026-10-03.2";
 
 /**
- * « <annonce>:<tout> ». Même offre + même profil + même modèle + même consigne = même analyse (pas de nouvel appel).
- * La 1ʳᵉ partie ne dépend que de l'annonce : cf. analysisFitsJob.
+ * « <ce que l'IA lit>:<tout> ». Même offre + même profil + même modèle + même consigne = même analyse (pas de nouvel appel).
+ * La 1ʳᵉ partie ne dépend pas du profil : cf. analysisFitsJob.
  */
-export function analysisHash(job: Pick<JobRow, "contentHash">, profile: AnalysisProfileInput, model: string): string {
-  return `${annoncePart(job)}:${sha([job.contentHash, profile, model, ANALYSIS_PROMPT_VERSION], 32)}`;
+export function analysisHash(job: JobRow, profile: AnalysisProfileInput, model: string): string {
+  return `${readPart(job, model)}:${sha([job.contentHash, profile, model, ANALYSIS_PROMPT_VERSION], 32)}`;
 }
 
 /**
- * L'analyse porte-t-elle sur l'annonce telle qu'elle est ? Un changement de profil, de CV ou de modèle ne la jette
- * plus (sinon chaque retouche du profil relançait l'IA sur tout le flux : jusqu'à 27 analyses pour une offre) :
- * elle reste appliquée, et se refait si l'annonce change ou si tu cliques « Relancer ».
- * Ancien format (sans « : ») : annonce supposée inchangée, pour ne pas tout réanalyser d'un coup.
+ * L'avis de l'IA vaut-il encore ? Il se refait (automatiquement pour les meilleures offres) quand ce qu'elle lit de
+ * l'offre change (texte, contrat, salaire, lieu… y compris après une règle réappliquée), quand sa consigne change
+ * (ANALYSIS_PROMPT_VERSION) ou quand le modèle change. Pas quand le profil ou le CV change (sinon chaque retouche
+ * relançait l'IA sur tout le flux : jusqu'à 27 analyses pour une offre) : « Relancer » le fait à la demande.
  */
-export function analysisFitsJob(inputHash: string, job: Pick<JobRow, "contentHash">): boolean {
-  return !inputHash.includes(":") || inputHash.startsWith(`${annoncePart(job)}:`);
+export function analysisFitsJob(a: { inputHash: string; model: string }, job: JobRow, model: string): boolean {
+  if (a.inputHash.startsWith("i")) return a.inputHash.startsWith(`${readPart(job, model)}:`);
+  // Analyses d'avant : gardées tant que la consigne et le modèle n'ont pas changé (sinon tout serait refait d'un coup).
+  const sameAnnonce = !a.inputHash.includes(":") || a.inputHash.startsWith(`${sha(job.contentHash, 12)}:`);
+  return sameAnnonce && a.model === model && ANALYSIS_PROMPT_VERSION === LEGACY_PROMPT_VERSION;
 }
 
 export type Adequation = "forte" | "moyenne" | "faible";

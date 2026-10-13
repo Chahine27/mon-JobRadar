@@ -9,3 +9,4 @@ export * from "./manual";
 export * from "./complete";
 export * from "./mail-tracking";
 export * from "./dedupe";
+export * from "./renormalize";

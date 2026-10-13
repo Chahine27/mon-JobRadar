@@ -201,13 +201,14 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
    * cf. analysisFitsJob). Annonce modifiée → l'avis ne corrige plus le score et l'offre est réanalysée.
    */
   async function loadVerdicts(): Promise<(job: JobRow) => Verdict> {
-    if (!opts.aiModel) return () => null;
+    const model = opts.aiModel;
+    if (!model) return () => null;
     const analyses = await stores.analyses.latestAll();
     if (analyses.size === 0) return () => null;
     return (job) => {
       const a = analyses.get(job.id);
       // Analyse faite sur un extrait : elle ne corrige pas le score (elle serait biaisée).
-      if (!a || isAbridged(job) || !analysisFitsJob(a.inputHash, job)) return null;
+      if (!a || isAbridged(job) || !analysisFitsJob(a, job, model)) return null;
       return readVerdict(a.result);
     };
   }

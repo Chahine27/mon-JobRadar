@@ -24,6 +24,7 @@
     "ft:test": "pnpm --filter @job-radar/worker ft:test",
     "collect": "pnpm --filter @job-radar/worker collect",
     "jobs:dedupe": "pnpm --filter @job-radar/worker run dedupe",
+    "jobs:renormalize": "pnpm --filter @job-radar/worker run renormalize",
     "setup:push": "pnpm --filter @job-radar/worker setup:push",
     "sources:test": "pnpm --filter @job-radar/worker sources:test",
     "travel:test": "pnpm --filter @job-radar/worker travel:test",

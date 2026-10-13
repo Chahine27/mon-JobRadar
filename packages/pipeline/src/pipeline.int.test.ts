@@ -8,6 +8,7 @@ import { buildManualJob, removeManualJob, saveManualJob } from "./manual";
 import { collectOnce } from "./collect";
 import { completeJobScraperDescriptions } from "./complete";
 import { expireJobs } from "./expire";
+import { renormalizeJobs } from "./renormalize";
 import { ingestJob } from "./ingest";
 
 const prisma = testPrisma();
@@ -237,6 +238,27 @@ describe("source → normalisation → base (README §32)", () => {
     expect(job.technologies).toEqual(expect.arrayContaining(["Vue.js", "TypeScript"])); // score technique sur le vrai texte
     // Déjà complétée : rien à refaire au passage suivant.
     expect((await completeJobScraperDescriptions({ prisma, sleep: async () => {}, fetchDetails: async () => null })).checked).toBe(0);
+  });
+
+  it("règles changées depuis : réappliquées aux offres déjà en base, sans toucher aux ajouts manuels ni aux fusions", async () => {
+    const li = (id: string, extra: object = {}) =>
+      normalize(mapJobScraperOfferToRawJob({ id, source: "linkedin", url: `https://www.linkedin.com/jobs/view/${id.slice(9)}`, title: `Dev ${id}`, company: `Boîte ${id}`, location: "Paris", experience_level: "senior", ...extra }, "linkedin")!)!;
+    await ingestJob(prisma, li("linkedin_4400001"));
+    await ingestJob(prisma, li("linkedin_4400002"));
+    // Valeurs d'une ancienne règle : « Niveau senior » gardé, télétravail lu ailleurs.
+    await prisma.job.updateMany({ data: { experienceText: "Niveau senior", remoteType: "hybrid" } });
+    const merged = await prisma.job.findFirstOrThrow({ where: { title: "Dev linkedin_4400002" } });
+    await prisma.jobSourceLink.create({ data: { jobId: merged.id, source: "adzuna", sourceJobId: "a-1", sourceUrl: "https://www.adzuna.fr/details/1", rawData: {} } });
+
+    const dry = await renormalizeJobs({ prisma, apply: false });
+    expect(dry).toMatchObject({ checked: 1, changed: 1, fields: { experienceText: 1 } });
+    expect((await prisma.job.findFirstOrThrow({ where: { title: "Dev linkedin_4400001" } })).experienceText).toBe("Niveau senior");
+
+    await renormalizeJobs({ prisma });
+    const fixed = await prisma.job.findFirstOrThrow({ where: { title: "Dev linkedin_4400001" } });
+    expect(fixed).toMatchObject({ experienceText: null, remoteType: "hybrid" }); // « inconnu » n'efface pas une valeur connue
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: merged.id } })).experienceText).toBe("Niveau senior"); // plusieurs sources : pas touchée
+    expect((await renormalizeJobs({ prisma })).changed).toBe(0); // déjà à jour
   });
 
   it("page illisible : essai noté, pas retentée au passage suivant (seulement le lendemain)", async () => {

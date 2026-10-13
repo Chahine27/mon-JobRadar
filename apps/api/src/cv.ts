@@ -14,7 +14,7 @@ export function createCvService(stores: Stores, opts: { aiModel?: string | undef
     const profile = await stores.profiles.get(userId);
     if (opts.aiModel && !isAbridged(job)) {
       const latest = await stores.analyses.latest(job.id);
-      const v = latest && analysisFitsJob(latest.inputHash, job) ? readVerdict(latest.result) : null;
+      const v = latest && analysisFitsJob(latest, job, opts.aiModel) ? readVerdict(latest.result) : null;
       if (v) analysis = { required: v.required, bonus: v.bonus };
     }
     // Compétences du profil : ajoutées à la liste du CV quand l'offre les cite (tu les as déclarées).

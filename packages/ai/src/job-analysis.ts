@@ -2,7 +2,11 @@ import { z } from "zod";
 import { contractOfJob, normalizeContract } from "@job-radar/scoring";
 import type { OllamaClient } from "./ollama";
 
-/** Changer ce numéro quand la consigne change : les analyses déjà faites seront refaites à la demande. */
+/**
+ * Changer ce numéro quand la consigne change : les avis déjà donnés ne comptent plus, et l'IA refait d'elle-même
+ * les offres au-dessus du seuil « Analyse IA à partir de » (30 par collecte) ; les autres avec « Relancer »
+ * (cf. analysisFitsJob dans l'API).
+ */
 export const ANALYSIS_PROMPT_VERSION = "2026-10-03.2";
 
 /**

@@ -135,7 +135,7 @@ describe("vérification automatique des meilleures offres affichées", () => {
     await waitIdle(req);
     const calls = aiCalls.length;
 
-    jobs.set(top.id, { ...jobs.get(top.id)!, contentHash: "annonce-modifiee" });
+    jobs.set(top.id, { ...jobs.get(top.id)!, contentHash: "annonce-modifiee", description: `${jobs.get(top.id)!.description} Télétravail 2 jours.` });
     expect((await req("GET", `/api/jobs/${top.id}`)).json().ai).toBeNull();
     await req("POST", "/api/ai/auto", { jobIds: [top.id] });
     await waitIdle(req);

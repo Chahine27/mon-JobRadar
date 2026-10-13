@@ -11,7 +11,7 @@ import {
   notifyNewMatches,
   notifyNotice,
 } from "@job-radar/notifications";
-import { type CollectReport, CollectionRunner, type RunnerOptions, completeJobScraperDescriptions, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
+import { type CollectReport, CollectionRunner, type RunnerOptions, completeJobScraperDescriptions, renormalizeJobs, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
 import { OsrmRoutingService, PrimRoutingService, ensureTravelTimes, fillDepartments, geocode } from "@job-radar/routing";
 import { scoreJob, scoringInputFromJob } from "@job-radar/scoring";
 import { parseProfile } from "@job-radar/shared";
@@ -328,7 +328,11 @@ log = (msg) => app.log.info(msg);
 
 // 127.0.0.1 : accessible uniquement depuis ton PC.
 await app.listen({ host: env.API_HOST, port: env.API_PORT });
-void warmFeed();
+// Règles de normalisation changées depuis (contrat, expérience, compétences, salaire) : réappliquées aux offres déjà
+// en base avant de préchauffer le flux, pour que les scores affichés suivent les règles du code. ~1 s, rien si à jour.
+void renormalizeJobs({ prisma, log: (m) => log(m) })
+  .catch((err) => log(`Réapplication des règles : ${String(err)}`))
+  .then(() => warmFeed());
 
 const on = notifiers.filter((n) => n.isConfigured()).map((n) => n.channel);
 app.log.info(`Temps de trajet : voiture OSRM ; transports ${routing.transit.isConfigured() ? "PRIM configuré" : "non configuré (PRIM_API_KEY dans .env)"}`);
