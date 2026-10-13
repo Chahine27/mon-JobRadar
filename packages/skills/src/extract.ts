@@ -1,13 +1,27 @@
 import { SKILLS, SKILLS_BY_ID, type Skill } from "./dictionary";
 
-/** Minuscules + sans accents + apostrophes unifiées. */
-export function normalizeText(text: string): string {
-  return stripAccents(text).toLowerCase().replace(/[’`]/g, "'");
+/**
+ * Mémoire des derniers textes traités : le score relit la même description des dizaines de fois (une par règle) ;
+ * la normaliser à chaque fois prenait ~60 % du calcul du flux (5 s à froid pour 1 800 offres).
+ * ponytail: vidée d'un coup à 2 000 entrées (pas de LRU) : un flux entier y tient, au-delà on repart de zéro.
+ */
+function memo(fn: (s: string) => string): (s: string) => string {
+  const cache = new Map<string, string>();
+  return (s) => {
+    let v = cache.get(s);
+    if (v === undefined) {
+      v = fn(s);
+      if (cache.size >= 2000) cache.clear();
+      cache.set(s, v);
+    }
+    return v;
+  };
 }
 
-function stripAccents(text: string): string {
-  return text.normalize("NFD").replace(/\p{Diacritic}/gu, "");
-}
+const stripAccents = memo((text) => text.normalize("NFD").replace(/\p{Diacritic}/gu, ""));
+
+/** Minuscules + sans accents + apostrophes unifiées. */
+export const normalizeText = memo((text) => stripAccents(text).toLowerCase().replace(/[’`]/g, "'"));
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
@@ -25,13 +39,19 @@ function aliasRegex(alias: string, caseSensitive: boolean): RegExp {
   return new RegExp(`(?<![\\p{L}\\p{N}+#.])${body}(?![\\p{L}\\p{N}+#])`, caseSensitive ? "u" : "iu");
 }
 
-type Matcher = { skill: Skill; regexes: RegExp[]; csRegexes: RegExp[] };
+/** Écriture + son premier mot, qui doit figurer tel quel dans le texte pour qu'elle puisse y être (test très rapide). */
+type Alias = { re: RegExp; needle: string };
+type Matcher = { skill: Skill; regexes: Alias[]; csRegexes: Alias[] };
+
+const alias = (a: string, caseSensitive: boolean): Alias => ({ re: aliasRegex(a, caseSensitive), needle: a.split(/[\s/]+/).find(Boolean) ?? a });
+/** Pré-filtre : la plupart des ~95 compétences sont absentes d'une offre, leur expression régulière n'est même pas lancée. */
+const hit = (text: string, a: Alias) => text.includes(a.needle) && a.re.test(text);
 
 function buildMatchers(skills: Skill[]): Matcher[] {
   return skills.map((skill) => ({
     skill,
-    regexes: skill.aliases.map((a) => aliasRegex(normalizeText(a), false)),
-    csRegexes: (skill.caseSensitiveAliases ?? []).map((a) => aliasRegex(stripAccents(a), true)),
+    regexes: skill.aliases.map((a) => alias(normalizeText(a), false)),
+    csRegexes: (skill.caseSensitiveAliases ?? []).map((a) => alias(stripAccents(a), true)),
   }));
 }
 
@@ -45,7 +65,7 @@ export function extractSkills(text: string, extraSkills: Skill[] = []): string[]
   const found: string[] = [];
   for (const m of matchers) {
     if (found.includes(m.skill.id)) continue;
-    if (m.regexes.some((r) => r.test(lower)) || m.csRegexes.some((r) => r.test(original))) {
+    if (m.regexes.some((a) => hit(lower, a)) || m.csRegexes.some((a) => hit(original, a))) {
       found.push(m.skill.id);
     }
   }

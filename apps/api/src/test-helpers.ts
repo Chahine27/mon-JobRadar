@@ -257,7 +257,7 @@ export async function createMemoryStores() {
       recent: async () => [],
     },
     jobs: {
-      list: async () => [...jobs.values()],
+      list: async (statuses) => [...jobs.values()].filter((j) => !statuses || statuses.includes(j.status)),
       get: async (id) => jobs.get(id) ?? null,
       appliedDates: async () => new Map(events.filter((e) => e.to === "APPLIED").reverse().map((e) => [e.jobId, e.at])),
       setStatus: async (id, status) => {

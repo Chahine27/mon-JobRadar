@@ -69,7 +69,8 @@ export type JobRow = {
 };
 
 export interface JobStore {
-  list(): Promise<JobRow[]>;
+  /** `statuses` : seulement ces statuts, filtrés en base (le flux ne relit plus les expirées, ignorées…). */
+  list(statuses?: JobStatus[]): Promise<JobRow[]>;
   get(id: string): Promise<JobRow | null>;
   /** Change le statut et garde une trace dans l'historique. null si l'offre n'existe pas. */
   setStatus(id: string, status: JobStatus): Promise<JobRow | null>;

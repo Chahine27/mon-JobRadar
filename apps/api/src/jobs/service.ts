@@ -1,4 +1,4 @@
-import type { JobStatus, Profile } from "@job-radar/shared";
+import { JOB_STATUSES, type JobStatus, type Profile } from "@job-radar/shared";
 import { DEFAULT_RULES, hashProfile, scoreJob, scoringInputFromJob, type ScoreResult, type ScoringRules } from "@job-radar/scoring";
 import { distanceKm } from "../routes/leads";
 import { AI_SCORE_CAPS, type Adequation, analysisFitsJob, isAbridged, readVerdict } from "../ai-context";
@@ -217,8 +217,9 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       const { profile, hash } = await loadProfile(userId);
       const verdictOf = await loadVerdicts();
       const q = f.q?.trim().toLowerCase();
-      const items = (await stores.jobs.list())
-        .filter((j) => (f.status === "all" ? true : f.status === "active" ? !OUT_OF_FEED.includes(j.status) : j.status === f.status))
+      // Statut filtré en base : seulement les offres demandées sont lues (pas les expirées ou ignorées pour le flux).
+      const statuses = f.status === "all" ? undefined : f.status === "active" ? JOB_STATUSES.filter((s) => !OUT_OF_FEED.includes(s)) : [f.status];
+      const items = (await stores.jobs.list(statuses))
         .filter((j) => !q || `${j.title} ${j.company ?? ""} ${j.city ?? ""}`.toLowerCase().includes(q))
         .filter((j) => !f.source || j.sources.some((s) => s.source === f.source))
         .filter((j) => !f.contract || (j.contractType ?? "unknown") === f.contract)
@@ -250,7 +251,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       const { profile, hash } = await loadProfile(userId);
       const verdictOf = await loadVerdicts();
       const applied = await stores.jobs.appliedDates();
-      return (await stores.jobs.list())
+      return (await stores.jobs.list(["APPLIED", "REJECTED"]))
         .filter((j) => j.status === "APPLIED" || (j.status === "REJECTED" && applied.has(j.id)))
         .map((j) => {
           const v = verdictOf(j);

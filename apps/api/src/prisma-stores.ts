@@ -450,8 +450,8 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
       },
     },
     jobs: {
-      async list() {
-        const rows = await prisma.job.findMany({ select: jobSelect, orderBy: { firstSeenAt: "desc" } });
+      async list(statuses) {
+        const rows = await prisma.job.findMany({ ...(statuses ? { where: { status: { in: statuses } } } : {}), select: jobSelect, orderBy: { firstSeenAt: "desc" } });
         return rows.map(toJobRow);
       },
       async get(id) {

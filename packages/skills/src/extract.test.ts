@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SKILLS } from "./dictionary";
 import { extractSkills, resolveSkill } from "./extract";
 
 describe("extractSkills", () => {
@@ -54,5 +55,15 @@ describe("barre oblique avec espaces", () => {
   it("« CI / CD » (CV mis en page) = CI/CD", () => {
     expect(extractSkills("DevOps : Git · Docker · CI / CD · Postman")).toContain("cicd");
     expect(extractSkills("principes de CI/CD")).toContain("cicd");
+  });
+});
+
+describe("pré-filtre rapide : aucune écriture du dictionnaire n'est perdue", () => {
+  it.each(SKILLS.map((s) => [s.id, s] as const))("%s", (_, skill) => {
+    for (const a of skill.aliases) {
+      const variants = [a, a.replace(/ /g, "-"), a.replace(/\//g, " / "), a.toUpperCase()];
+      for (const v of variants) expect(extractSkills(`Poste : ${v}, en équipe.`), v).toContain(skill.id);
+    }
+    for (const a of skill.caseSensitiveAliases ?? []) expect(extractSkills(`Poste : ${a}, en équipe.`), a).toContain(skill.id);
   });
 });
