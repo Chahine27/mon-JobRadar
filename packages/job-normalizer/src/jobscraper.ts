@@ -30,7 +30,8 @@ export function normalizeJobScraper(raw: RawJob): NormalizedJob | null {
   const text = `${title}\n${description}\n${(job.skills ?? []).join(" ")}`;
   const skillLabels = extractSkills(text).map((id) => getSkill(id)?.label ?? id);
   const technologies = [...new Set([...(job.skills ?? []).filter((s) => typeof s === "string" && s.trim()), ...skillLabels])];
-  const remoteType = job.remote == null ? "unknown" : job.remote ? "remote" : "onsite";
+  // WTTJ « partial » : hybride (avant, compté comme télétravail complet).
+  const remoteType = job.workplace === "hybrid" ? "hybrid" : job.remote == null ? "unknown" : job.remote ? "remote" : "onsite";
   // LinkedIn n'a pas de type « CDI » : JobScraper traduit « Temps plein » (le temps de travail) en « cdi ».
   // Un stage à temps plein serait donc un CDI → inconnu ; le contrat est lu dans le titre ou la description.
   const contractType = provider === "linkedin" && job.contract_type === "cdi" ? null : contractFromLabel(job.contract_type);

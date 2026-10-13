@@ -61,6 +61,9 @@ function activeNotifiers(notifiers: Notifier[], settings: NotificationSettingsLi
 /** Envoie un lot (même type) sur chaque canal actif ; un canal en panne n'empêche pas les autres. */
 async function deliver(repo: NotifyRepo, active: Notifier[], matches: Match[], result: NotifyResult, log: (msg: string) => void) {
   for (const notifier of active) {
+    // Aucun navigateur abonné : canal sauté sans rien réserver (sinon une notification « en échec » par offre, et
+    // l'offre ne serait plus jamais annoncée sur ce canal une fois un navigateur abonné).
+    if (notifier.hasRecipients && !(await notifier.hasRecipients())) continue;
     const claimed = [];
     for (const m of matches) if (await repo.claim(m.id, notifier.channel, m.alert.kind)) claimed.push(m);
     if (claimed.length === 0) continue;

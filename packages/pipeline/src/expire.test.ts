@@ -42,3 +42,11 @@ describe("LinkedIn (JobScraper)", () => {
     expect(linkVerdict(li, { publishedAt: null, firstSeenAt: NOW }, NOW)).toBe("online");
   });
 });
+
+describe("HelloWork, WTTJ, Indeed (sites scrapés sur 24 h)", () => {
+  it.each(["jobscraper:hellowork", "jobscraper:wttj", "jobscraper:indeed"])("%s : publiée il y a plus de 45 jours → retirée", (source) => {
+    const link = { source, sourceJobId: "x", lastSeenAt: daysAgo(3) };
+    expect(linkVerdict(link, job(30), NOW)).toBe("online");
+    expect(linkVerdict(link, job(50), NOW)).toBe("gone");
+  });
+});

@@ -4,7 +4,7 @@ import type { PrismaClient } from "@job-radar/db";
  * Offres expirées (plus en ligne). On ne devine pas : chaque source a sa règle.
  *  - France Travail : l'offre n'a pas été revue depuis 7 jours → on DEMANDE à France Travail si elle existe encore.
  *  - Sites carrières : chaque collecte récupère toutes les offres de l'entreprise → absente depuis 2 jours = retirée.
- *  - Adzuna, Jooble : pas de vérification possible → publiée (ou vue la 1ʳᵉ fois) il y a plus de 45 jours.
+ *  - Adzuna, Jooble, HelloWork, WTTJ, Indeed : pas de vérification possible → publiée (ou vue la 1ʳᵉ fois) il y a plus de 45 jours.
  *  - LinkedIn (JobScraper) : on DEMANDE à la page publique ; bandeau « candidatures plus acceptées » ou offre supprimée → close.
  *  - Démo : jamais.
  * Une offre trouvée sur plusieurs sources n'expire que si TOUTES ses sources la donnent retirée.
@@ -35,7 +35,11 @@ export function linkVerdict(
       // Une offre LinkedIn ne se devine pas : seulement si la page dit qu'elle est close.
       return ftOnline === false ? "gone" : "online";
     case "adzuna":
-    case "jooble": {
+    case "jooble":
+    // Sites scrapés sur les dernières 24 h : une offre n'y est plus revue après sa 1ʳᵉ journée, l'absence ne dit rien.
+    case "jobscraper:hellowork":
+    case "jobscraper:wttj":
+    case "jobscraper:indeed": {
       const ageDays = (now.getTime() - (job.publishedAt ?? job.firstSeenAt).getTime()) / DAY;
       return ageDays > EXPIRY.adzunaMaxAgeDays && unseenDays >= 1 ? "gone" : "online";
     }
@@ -52,12 +56,17 @@ export async function expireJobs(opts: {
   ftIsOnline?: (id: string) => Promise<boolean | null>;
   /** Vérification LinkedIn (linkedinJobIsOpen) : offre close = candidatures plus acceptées. */
   linkedinIsOpen?: (id: string) => Promise<boolean | null>;
+  /** Pause entre deux pages LinkedIn (remplaçable dans les tests). */
+  sleep?: (ms: number) => Promise<void>;
   now?: Date;
   log?: (m: string) => void;
 }): Promise<ExpiryReport> {
   const { prisma, log = () => {} } = opts;
   const now = opts.now ?? new Date();
   const report: ExpiryReport = { checked: 0, expired: 0, ftChecks: 0, linkedinChecks: 0 };
+  const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  /** Réponses LinkedIn illisibles d'affilée (429, blocage) : au-delà de 3, on arrête de lui demander pour ce passage. */
+  let linkedinFailures = 0;
 
   // Candidates : pas revues depuis au moins 1 jour, ou venues de LinkedIn (une offre peut y fermer en quelques heures).
   const jobs = await prisma.job.findMany({
@@ -96,10 +105,19 @@ export async function expireJobs(opts: {
           await prisma.jobSourceLink.updateMany({ where: { source: link.source, sourceJobId: link.sourceJobId }, data: { lastSeenAt: now } });
         }
       }
-      // ponytail: plafond fixe, toujours les mêmes offres les plus anciennes en premier ; faire tourner (date de dernière vérification) si plus de 100 offres LinkedIn actives.
-      if (link.source === "jobscraper:linkedin" && opts.linkedinIsOpen && report.linkedinChecks < EXPIRY.maxLinkedinChecks) {
+      if (link.source === "jobscraper:linkedin" && opts.linkedinIsOpen && report.linkedinChecks < EXPIRY.maxLinkedinChecks && linkedinFailures < 3) {
+        // Une page à la fois, espacées : une rafale de 100 pages faisait bloquer l'IP (HTTP 429).
+        if (report.linkedinChecks > 0) await sleep(1500);
         report.linkedinChecks++;
         ftOnline = await opts.linkedinIsOpen(link.sourceJobId);
+        linkedinFailures = ftOnline === null ? linkedinFailures + 1 : 0;
+        // Encore ouverte : notée « revue », elle passe en fin de file (tri par lastSeenAt) et les suivantes ont leur tour.
+        if (ftOnline === true) {
+          await prisma.$transaction([
+            prisma.jobSourceLink.updateMany({ where: { source: link.source, sourceJobId: link.sourceJobId }, data: { lastSeenAt: now } }),
+            prisma.job.update({ where: { id: job.id }, data: { lastSeenAt: now } }),
+          ]);
+        }
       }
       verdicts.push(linkVerdict(link, job, now, ftOnline));
     }

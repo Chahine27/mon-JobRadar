@@ -5,7 +5,7 @@ import Icon from "../components/Icon.vue";
 import PageHeader from "../components/PageHeader.vue";
 import ScoreBadge from "../components/ScoreBadge.vue";
 import SourceLogo from "../components/SourceLogo.vue";
-import { REMOTE_LABELS, SOURCE_LABELS, STATUS_LABELS, formatSalary, timeAgo, timeUntil } from "../format";
+import { REMOTE_LABELS, SOURCE_LABELS, STATUS_LABELS, formatSalary, sourceBadge, timeAgo, timeUntil } from "../format";
 import type { AutoCheckStatus, CollectionStatus, JobSummary } from "../types";
 
 const FILTERS_KEY = "jobradar.filters";
@@ -162,7 +162,9 @@ async function loadStatus() {
   try {
     const s = await api.collectionStatus();
     const finishedNewRun = s.lastRun && s.lastRun.id !== lastRunId && s.lastRun.status !== "running";
-    if (finishedNewRun && lastRunId !== null) {
+    // Collecte JobScraper finie (elle n'est pas dans lastRun, réservé au bouton « Actualiser ») : flux rechargé aussi.
+    const scraperFinished = !!collection.value?.progress.length && s.progress.length === 0 && !s.running;
+    if ((finishedNewRun && lastRunId !== null) || scraperFinished) {
       await load(true);
       void feedCheck(false); // nouvelles offres : l'IA vérifie les meilleures
     }
@@ -171,10 +173,13 @@ async function loadStatus() {
     // Source mémorisée mais désactivée depuis : on revient à « Toutes les sources ».
     if (filters.source && filters.source !== "manual" && !s.sources.some((x) => x.enabled && x.source === filters.source)) filters.source = "";
     clock.value = new Date();
-    if (!s.running && fastPoll) {
+    // Une collecte tourne (« Actualiser » ou file JobScraper) : avancement rafraîchi toutes les 2 s.
+    const live = s.running || s.progress.length > 0;
+    if (live && !fastPoll) fastPoll = setInterval(loadStatus, 2000);
+    if (!live && fastPoll) {
       clearInterval(fastPoll);
       fastPoll = undefined;
-      if (s.lastRun) refreshMessage.value = `Collecte terminée : ${s.lastRun.created} nouvelle(s) offre(s).`;
+      if (s.lastRun && refreshMessage.value) refreshMessage.value = `Collecte terminée : ${s.lastRun.created} nouvelle(s) offre(s).`;
     }
   } catch {
     /* serveur momentanément injoignable : on réessaiera */
@@ -201,6 +206,7 @@ const runningText = computed(() => {
   const c = collection.value;
   const r = c?.lastRun?.status === "running" ? c.lastRun : null;
   const since = r ? ` (lancée ${timeAgo(r.startedAt, clock.value)})` : "";
+  if (c?.finishing) return `Collecte terminée${since} — descriptions, vérification IA et notifications…`;
   const step = c?.step ? ` — en cours : ${SOURCE_LABELS[c.step] ?? c.step}` : "";
   return `Collecte en cours${since}${step}…`;
 });
@@ -270,12 +276,9 @@ const STATUS_TABS:Array<{ value: NonNullable<JobQuery["status"]>; label: string 
   { value: "all", label: "Toutes" },
 ];
 
-function sourceState(s: CollectionStatus["sources"][number]) {
-  if (s.lastStatus === "OK") return { tone: "good", text: "OK" };
-  if (s.lastStatus === "SOURCE_UNAVAILABLE") return { tone: "", text: "non configurée" };
-  if (s.lastStatus) return { tone: "bad", text: "erreur" };
-  return { tone: "", text: "jamais lancée" };
-}
+/** Pastille d'une source : avancement si elle fait partie d'une collecte en cours, sinon son dernier résultat. */
+const badgeOf = (s: CollectionStatus["sources"][number]) =>
+  sourceBadge(s, collection.value?.progress.find((p) => p.source === s.source));
 
 function place(job: JobSummary) {
   return [job.city, job.department && !job.city?.includes(job.department) ? `(${job.department})` : null]
@@ -328,8 +331,17 @@ function place(job: JobSummary) {
       >
         <SourceLogo :source="s.source" :size="22" />
         <strong>{{ SOURCE_LABELS[s.source] ?? s.source }}</strong>
-        <span class="dot" :class="sourceState(s).tone" />
-        <span class="muted">{{ sourceState(s).text }} · prochaine {{ timeUntil(s.nextRunAt, clock) }}</span>
+        <template v-if="badgeOf(s).busy">
+          <Icon name="refresh" :size="13" class="spin muted" />
+          <span class="muted">{{ badgeOf(s).text }}</span>
+          <span v-if="badgeOf(s).pct !== null" class="bar pill-bar" role="progressbar" :aria-valuenow="badgeOf(s).pct!" aria-valuemin="0" aria-valuemax="100">
+            <span class="good" :style="{ width: `${badgeOf(s).pct}%` }" />
+          </span>
+        </template>
+        <template v-else>
+          <span class="dot" :class="badgeOf(s).tone" />
+          <span class="muted">{{ badgeOf(s).text }} · prochaine {{ timeUntil(s.nextRunAt, clock) }}</span>
+        </template>
       </button>
       <button
         type="button"
@@ -518,6 +530,8 @@ function place(job: JobSummary) {
 .source-pill:hover { border-color: var(--border-strong); }
 .source-pill.active { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent) inset; }
 .source-pill.active strong { color: var(--accent); }
+.pill-bar { display: inline-block; width: 56px; height: 5px; }
+.pill-bar > span { display: block; height: 100%; border-radius: 99px; transition: width 0.4s ease; }
 .tab-rows { display: flex; flex-wrap: wrap; gap: 0.6rem; }
 .toolbar { display: grid; gap: 0.9rem; padding: 0.9rem 1rem; }
 .filters { display: grid; grid-template-columns: minmax(220px, 2fr) minmax(180px, 1.3fr) minmax(150px, 1fr) auto; gap: 0.9rem 1.1rem; align-items: end; }

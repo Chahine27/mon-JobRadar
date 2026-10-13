@@ -1,7 +1,7 @@
 import { CV_RULES_VERSION, buildJobForCv, hashOf, type JobForCv, tailorCv, type TailoredCvDraft } from "@job-radar/cv-tailor";
 import { type CvEngine, fitToPage } from "@job-radar/cv-render";
-import { type CvMaster, CvMasterSchema, type CvOverrides, DEFAULT_PROFILE, isAbridged, type TemplateId } from "@job-radar/shared";
-import { analysisHash, readVerdict, toProfileInput } from "./ai-context";
+import { type CvMaster, CvMasterSchema, type CvOverrides, isAbridged, type TemplateId } from "@job-radar/shared";
+import { analysisFitsJob, readVerdict } from "./ai-context";
 import type { JobRow, Stores, TailoredCvRow } from "./stores";
 
 /**
@@ -13,9 +13,8 @@ export function createCvService(stores: Stores, opts: { aiModel?: string | undef
     let analysis: { required: string[]; bonus: string[] } | null = null;
     const profile = await stores.profiles.get(userId);
     if (opts.aiModel && !isAbridged(job)) {
-      const [latest, kit] = await Promise.all([stores.analyses.latest(job.id), stores.letterKits.get(userId)]);
-      const input = toProfileInput(profile?.profile ?? DEFAULT_PROFILE, kit);
-      const v = latest && latest.inputHash === analysisHash(job, input, opts.aiModel) ? readVerdict(latest.result) : null;
+      const latest = await stores.analyses.latest(job.id);
+      const v = latest && analysisFitsJob(latest.inputHash, job) ? readVerdict(latest.result) : null;
       if (v) analysis = { required: v.required, bonus: v.bonus };
     }
     // Compétences du profil : ajoutées à la liste du CV quand l'offre les cite (tu les as déclarées).

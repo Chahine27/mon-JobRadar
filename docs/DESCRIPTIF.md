@@ -419,7 +419,7 @@ Tant que l'application tourne :
 
 | Tâche | Fréquence |
 |---|---|
-| Collecte des sources API | Planificateur toutes les `CRON_INTERVAL_MINUTES` (5 min) ; chaque source a son propre rythme et son backoff |
+| Collecte des sources API | Planificateur toutes les `CRON_INTERVAL_MINUTES` (30 min) ; chaque source a son propre rythme et son backoff |
 | File JobScraper | 1 fois par jour par défaut (15 min minimum) |
 | Expiration des offres | Toutes les 6 h |
 | Suivi des mails | Toutes les 15 min |

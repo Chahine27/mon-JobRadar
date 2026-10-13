@@ -39,6 +39,8 @@ export interface JobSource {
    * `skipped` : rien demandé cette fois (ex. trop tôt depuis la dernière fois).
    */
   searchAll?(queries: SearchParams[]): Promise<{ jobs: RawJob[]; errors: string[]; skipped?: string }>;
+  /** false = rien à collecter (ex. aucune entreprise suivie) : la source n'est pas lancée. Absent = toujours. */
+  hasWork?(): Promise<boolean>;
 }
 
 /** Source non configurée ou sans accès autorisé : ne doit jamais bloquer les autres. */

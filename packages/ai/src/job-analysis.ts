@@ -5,16 +5,23 @@ import type { OllamaClient } from "./ollama";
 /** Changer ce numéro quand la consigne change : les analyses déjà faites seront refaites à la demande. */
 export const ANALYSIS_PROMPT_VERSION = "2026-10-03.2";
 
+/**
+ * Liste rendue par l'IA : éléments vides retirés, trop longs coupés, liste coupée à `max`. Une liste un peu
+ * trop longue (16 compétences) faisait refuser toute l'analyse, relancée ensuite à chaque collecte.
+ */
+const list = (max: number, len: number) =>
+  z.array(z.string()).transform((a) => a.map((s) => s.trim().slice(0, len).trim()).filter(Boolean).slice(0, max));
+
 /** Ce que l'IA doit rendre (validé : une réponse hors format est refusée). */
 export const JobAnalysisSchema = z.object({
   resume: z.string().trim().min(1).max(600),
-  missions: z.array(z.string().trim().min(1).max(200)).max(6),
-  competences_obligatoires: z.array(z.string().trim().min(1).max(60)).max(15),
-  competences_bonus: z.array(z.string().trim().min(1).max(60)).max(15),
+  missions: list(6, 200),
+  competences_obligatoires: list(15, 60),
+  competences_bonus: list(15, 60),
   niveau: z.enum(["junior", "confirme", "senior", "inconnu"]),
   experience_min_ans: z.number().int().min(0).max(30).nullable(),
   employeur: z.enum(["direct", "esn_ou_cabinet", "inconnu"]),
-  points_attention: z.array(z.string().trim().min(1).max(200)).max(6),
+  points_attention: list(6, 200),
   adequation: z.enum(["forte", "moyenne", "faible"]),
   avis: z.string().trim().min(1).max(400),
 });

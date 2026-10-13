@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSalary, safeUrl, scoreTone, timeAgo } from "./format";
+import { formatSalary, safeUrl, scoreTone, sourceBadge, timeAgo } from "./format";
 
 describe("format", () => {
   it("formatSalary", () => {
@@ -28,5 +28,24 @@ describe("format", () => {
     expect(safeUrl("https://candidat.francetravail.fr/offres/123")).toBe("https://candidat.francetravail.fr/offres/123");
     expect(safeUrl("javascript:alert(1)")).toBeNull();
     expect(safeUrl("pas une url")).toBeNull();
+  });
+});
+
+describe("pastille d'une source", () => {
+  const last = { lastStatus: "OK", lastError: null };
+  const p = (extra: object) => ({ source: "adzuna", state: "running" as const, done: 0, total: 0, found: 0, status: null, ...extra });
+  it("pendant la collecte : attente, recherches, enregistrement, terminée", () => {
+    expect(sourceBadge(last, p({ state: "pending" }))).toMatchObject({ text: "en attente", busy: true });
+    expect(sourceBadge(last, p({ done: 3, total: 12, found: 1 }))).toEqual({ tone: "", text: "3/12 recherches · 1 offre", busy: true, pct: 25 });
+    expect(sourceBadge(last, p({ done: 12, total: 12, found: 40 }))).toMatchObject({ text: "enregistrement de 40 offres…", pct: 100 });
+    expect(sourceBadge(last, p({ total: 0 }))).toMatchObject({ text: "collecte…", pct: null });
+    expect(sourceBadge(last, p({ state: "done", status: "OK", found: 2 }))).toMatchObject({ tone: "good", text: "terminée · 2 offres", busy: false });
+  });
+  it("hors collecte : IP bloquée ≠ non configurée", () => {
+    const blocked = { lastStatus: "SOURCE_UNAVAILABLE", lastError: "IP bloquée — LinkedIn limite tes requêtes (HTTP 429)" };
+    expect(sourceBadge(blocked).text).toBe("bloquée");
+    expect(sourceBadge({ lastStatus: "SOURCE_UNAVAILABLE", lastError: "JobScraper est désactivé." }).text).toBe("non configurée");
+    expect(sourceBadge({ lastStatus: null, lastError: null }).text).toBe("jamais lancée");
+    expect(sourceBadge({ lastStatus: "ERROR", lastError: "x" })).toMatchObject({ tone: "bad", text: "erreur" });
   });
 });

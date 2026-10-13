@@ -4,6 +4,7 @@ import { PrimRoutingService, nextWeekdayMorning } from "./prim";
 import { originKeyOf, routeKeyOf, travelModeOf } from "./travel";
 import { OsrmRoutingService } from "./osrm";
 import { findCompanySite } from "./company";
+import { communeOf } from "./departments";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
@@ -166,5 +167,24 @@ describe("trajet voiture (OSRM), adresse d'entreprise, choix du mode", () => {
       { nom_raison_sociale: "SOGERES", siege: { ...site("TILLE", 49.6, 2.3), liste_enseignes: ["ISAGRI"] } },
     ]);
     expect(await findCompanySite("ISAGRI SAS", { city: "Tille", department: "60" }, { fetch })).toMatchObject({ lat: 49.4551 });
+  });
+});
+
+describe("commune → département", () => {
+  const f = (name: string, citycode: string, coordinates?: [number, number]) => ({ properties: { name, citycode }, ...(coordinates ? { geometry: { coordinates } } : {}) });
+  const api = (features: object[]) => (async () => new Response(JSON.stringify({ features }), { status: 200 })) as never;
+  it("nom identique, un seul résultat : département et centre", async () => {
+    const r = await communeOf("Vitry-Sur-Seine", [], api([f("Vitry-sur-Seine", "94081", [2.39, 48.79])]));
+    expect(r).toEqual({ department: "94", lat: 48.79, lng: 2.39 });
+  });
+  it("homonymes : celle de tes zones, puis celle d'Île-de-France, sinon rien", async () => {
+    const stDenis = api([f("Saint-Denis", "97411"), f("Saint-Denis", "93066"), f("Saint-Denis", "11339")]);
+    expect((await communeOf("Saint-Denis", ["60"], stDenis))?.department).toBe("93");
+    expect((await communeOf("Montigny", ["18"], api([f("Montigny", "76446"), f("Montigny", "18151")])))?.department).toBe("18");
+    expect(await communeOf("Montigny", ["60"], api([f("Montigny", "76446"), f("Montigny", "18151")]))).toBeNull();
+    expect((await communeOf("Ajaccio", [], api([f("Ajaccio", "2A004")])))?.department).toBe("2A");
+  });
+  it("nom approchant seulement : rien", async () => {
+    expect(await communeOf("Lyon", [], api([f("Cognat-Lyonne", "03080")]))).toBeNull();
   });
 });

@@ -32,12 +32,25 @@ export function toProfileInput(p: Profile, kit: LetterKit | null): AnalysisProfi
   };
 }
 
-/** Même offre + même profil + même modèle + même consigne = même analyse (pas de nouvel appel). */
+const sha = (v: unknown, n: number) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, n);
+const annoncePart = (job: Pick<JobRow, "contentHash">) => sha(job.contentHash, 12);
+
+/**
+ * « <annonce>:<tout> ». Même offre + même profil + même modèle + même consigne = même analyse (pas de nouvel appel).
+ * La 1ʳᵉ partie ne dépend que de l'annonce : cf. analysisFitsJob.
+ */
 export function analysisHash(job: Pick<JobRow, "contentHash">, profile: AnalysisProfileInput, model: string): string {
-  return createHash("sha256")
-    .update(JSON.stringify([job.contentHash, profile, model, ANALYSIS_PROMPT_VERSION]))
-    .digest("hex")
-    .slice(0, 32);
+  return `${annoncePart(job)}:${sha([job.contentHash, profile, model, ANALYSIS_PROMPT_VERSION], 32)}`;
+}
+
+/**
+ * L'analyse porte-t-elle sur l'annonce telle qu'elle est ? Un changement de profil, de CV ou de modèle ne la jette
+ * plus (sinon chaque retouche du profil relançait l'IA sur tout le flux : jusqu'à 27 analyses pour une offre) :
+ * elle reste appliquée, et se refait si l'annonce change ou si tu cliques « Relancer ».
+ * Ancien format (sans « : ») : annonce supposée inchangée, pour ne pas tout réanalyser d'un coup.
+ */
+export function analysisFitsJob(inputHash: string, job: Pick<JobRow, "contentHash">): boolean {
+  return !inputHash.includes(":") || inputHash.startsWith(`${annoncePart(job)}:`);
 }
 
 export type Adequation = "forte" | "moyenne" | "faible";

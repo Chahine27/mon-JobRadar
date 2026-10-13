@@ -11,8 +11,8 @@ import {
   notifyNewMatches,
   notifyNotice,
 } from "@job-radar/notifications";
-import { CollectionRunner, type RunnerOptions, completeJobScraperDescriptions, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
-import { OsrmRoutingService, PrimRoutingService, ensureTravelTimes, geocode } from "@job-radar/routing";
+import { type CollectReport, CollectionRunner, type RunnerOptions, completeJobScraperDescriptions, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
+import { OsrmRoutingService, PrimRoutingService, ensureTravelTimes, fillDepartments, geocode } from "@job-radar/routing";
 import { scoreJob, scoringInputFromJob } from "@job-radar/scoring";
 import { parseProfile } from "@job-radar/shared";
 import {
@@ -114,57 +114,68 @@ const joobleQuota = prismaJoobleQuota(prisma, joobleKey);
 const lbb = new LaBonneBoiteClient({ clientId: e.FRANCE_TRAVAIL_CLIENT_ID?.trim(), clientSecret: e.FRANCE_TRAVAIL_CLIENT_SECRET?.trim() });
 
 const autoFeed: AutoFeed = {};
+/** Dernier passage complet après une collecte (trajets, IA, notifications, préchauffage). */
+let lastAfterCollectAt = 0;
+
+/** Après une collecte : expiration, puis trajets → vérification IA → notifications des nouvelles offres compatibles. */
+async function afterCollect(report: CollectReport, changed: boolean) {
+  if (Date.now() - lastExpiryAt > 6 * 3600_000) {
+    lastExpiryAt = Date.now();
+    await expireJobs({
+      prisma,
+      ftIsOnline: (id) => franceTravail.isStillOnline(id),
+      // Offre LinkedIn close (« candidatures plus acceptées ») → expirée, retirée du flux.
+      ...(env.JOBSCRAPER_ENABLED ? { linkedinIsOpen: (id: string) => linkedinJobIsOpen(id) } : {}),
+      log: (m) => log(m),
+    }).catch((err) =>
+      log(`Expiration : ${String(err)}`),
+    );
+  }
+  // Rien de nouveau ni de modifié : tout est déjà fait (France Travail passait toutes les 5 min pour ~1 offre par jour,
+  // et chaque passage recalculait le flux 3 fois). Un passage par heure quand même : IA rallumée, avis en attente.
+  if (!changed && Date.now() - lastAfterCollectAt < 3600_000) return;
+  lastAfterCollectAt = Date.now();
+  // Ville sans département (LinkedIn) : complété d'abord, le lieu, le score et le mode de trajet en dépendent.
+  await fillDepartments({ prisma, log: (m) => log(m) }).catch((err) => log(`Départements : ${String(err)}`));
+  const run = await prisma.collectionRun.findUnique({ where: { id: report.runId }, select: { startedAt: true } });
+  const row = await prisma.profile.findFirst();
+  if (!run || !row) return;
+  const profile = parseProfile(row.data);
+  // Offres pas encore annoncées des dernières 24 h : celle qui attendait l'avis de l'IA (Ollama éteint) a une nouvelle chance.
+  const since = new Date(Math.min(run.startedAt.getTime(), Date.now() - 24 * 3600_000));
+  // 1) temps de trajet des seules nouvelles offres qui peuvent être notifiées (≥ seuil − 5, car un bon
+  //    trajet peut faire monter le score), 2) vérification IA, 3) notifications. Les autres : calcul à l'ouverture de l'offre.
+  const candidates = await notifyRepo.candidates(since);
+  const likely = candidates
+    .filter((j) => {
+      const s = scoreJob(scoringInputFromJob(j), profile);
+      return !s.hidden && s.final >= profile.minScoreForNotification - 5;
+    })
+    .map((j) => j.id);
+  await ensureTravelTimes({ prisma, ...routing, jobIds: likely, maxRoutes: 30, log: (m) => log(m) }).catch((err) =>
+    log(`Trajets : ${String(err)}`),
+  );
+  // L'IA vérifie les meilleures offres du flux, même sans onglet ouvert (Ollama éteint : réessai à la collecte suivante).
+  // Les notifications attendent son avis : jamais de mail pour une offre que l'IA aurait déclassée.
+  await autoFeed.run?.(row.userId).catch((err) => log(`Vérification IA : ${String(err)}`));
+  const aiScores = await autoFeed.scores?.(row.userId);
+  await notifyNewMatches({
+    repo: notifyRepo,
+    notifiers,
+    profile,
+    since,
+    appUrl: env.APP_URL,
+    ...(aiScores ? { aiScores } : {}),
+    log: (m) => log(m),
+  });
+  void warmFeed();
+}
+
 const runnerBase = {
   log: (msg) => log(msg),
   repo: createPrismaRunRepo(prisma),
   collect: prismaCollect(prisma, env.CRON_INTERVAL_MINUTES),
-  // Après chaque collecte : annonce les nouvelles offres compatibles.
-  onFinished: async (report) => {
-    if (Date.now() - lastExpiryAt > 6 * 3600_000) {
-      lastExpiryAt = Date.now();
-      await expireJobs({
-        prisma,
-        ftIsOnline: (id) => franceTravail.isStillOnline(id),
-        // Offre LinkedIn close (« candidatures plus acceptées ») → expirée, retirée du flux.
-        ...(env.JOBSCRAPER_ENABLED ? { linkedinIsOpen: (id: string) => linkedinJobIsOpen(id) } : {}),
-        log: (m) => log(m),
-      }).catch((err) =>
-        log(`Expiration : ${String(err)}`),
-      );
-    }
-    const run = await prisma.collectionRun.findUnique({ where: { id: report.runId }, select: { startedAt: true } });
-    const row = await prisma.profile.findFirst();
-    if (!run || !row) return;
-    const profile = parseProfile(row.data);
-    // Offres pas encore annoncées des dernières 24 h : celle qui attendait l'avis de l'IA (Ollama éteint) a une nouvelle chance.
-    const since = new Date(Math.min(run.startedAt.getTime(), Date.now() - 24 * 3600_000));
-    // 1) temps de trajet des seules nouvelles offres qui peuvent être notifiées (≥ seuil − 5, car un bon
-    //    trajet peut faire monter le score), 2) vérification IA, 3) notifications. Les autres : calcul à l'ouverture de l'offre.
-    const candidates = await notifyRepo.candidates(since);
-    const likely = candidates
-      .filter((j) => {
-        const s = scoreJob(scoringInputFromJob(j), profile);
-        return !s.hidden && s.final >= profile.minScoreForNotification - 5;
-      })
-      .map((j) => j.id);
-    await ensureTravelTimes({ prisma, ...routing, jobIds: likely, maxRoutes: 30, log: (m) => log(m) }).catch((err) =>
-      log(`Trajets : ${String(err)}`),
-    );
-    // L'IA vérifie les meilleures offres du flux, même sans onglet ouvert (Ollama éteint : réessai à la collecte suivante).
-    // Les notifications attendent son avis : jamais de mail pour une offre que l'IA aurait déclassée.
-    await autoFeed.run?.(row.userId).catch((err) => log(`Vérification IA : ${String(err)}`));
-    const aiScores = await autoFeed.scores?.(row.userId);
-    await notifyNewMatches({
-      repo: notifyRepo,
-      notifiers,
-      profile,
-      since,
-      appUrl: env.APP_URL,
-      ...(aiScores ? { aiScores } : {}),
-      log: (m) => log(m),
-    });
-    void warmFeed();
-  },
+  onFinished: (report) => afterCollect(report, report.created + report.updated > 0),
 } satisfies Omit<RunnerOptions, "sources">;
 
 // Bouton « Actualiser » + planificateur : sources API (rapides).
@@ -195,10 +206,10 @@ const scraperRunner = new CollectionRunner({
   // D'abord : offres arrivées sans description ni date (LinkedIn, HelloWork) complétées depuis leur page publique.
   // Ensuite seulement trajets, IA et notifications : ils travaillent une seule fois, sur l'annonce entière.
   onFinished: async (report) => {
-    await completeJobScraperDescriptions({ prisma, fetchDetails: (l) => fetchJobScraperDetails(l), log: (m) => log(m) }).catch((err) =>
-      log(`Descriptions JobScraper : ${String(err)}`),
-    );
-    await runnerBase.onFinished(report);
+    const completed = await completeJobScraperDescriptions({ prisma, fetchDetails: (l) => fetchJobScraperDetails(l), log: (m) => log(m) })
+      .then((r) => r.completed)
+      .catch((err) => (log(`Descriptions JobScraper : ${String(err)}`), 0));
+    await afterCollect(report, report.created + report.updated + completed > 0);
   },
   // Un processus Python par recherche : une collecte peut durer bien plus de 15 min.
   staleMs: 90 * 60_000,
@@ -247,7 +258,11 @@ const app = await buildApp({
   stores: createPrismaStores(prisma),
   collector: {
     start: (trigger) => runner.start(trigger),
-    status: () => runner.status(),
+    // « running » : la file d'« Actualiser » seulement (le bouton) ; avancement source par source : les deux files.
+    status: async () => {
+      const [api, scraper] = await Promise.all([runner.status(), scraperRunner.status()]);
+      return { ...api, progress: [...api.progress, ...scraper.progress] };
+    },
     // Chaque source dans sa file : JobScraper ne bloque pas les sources API, et inversement.
     // « jobscraper » : tous ses sites actifs d'un coup (une seule file, ils passeraient de toute façon l'un après l'autre).
     startSource: (source) =>

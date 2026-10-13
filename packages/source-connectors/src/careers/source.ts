@@ -33,6 +33,10 @@ export class CompanyCareersSource implements JobSource {
     this.limiter = new RateLimiter(1000, opts.now, opts.sleep);
   }
 
+  async hasWork(): Promise<boolean> {
+    return (await this.opts.companies()).some((c) => c.enabled);
+  }
+
   async search(_params: SearchParams): Promise<RawJob[]> {
     return (await this.fetchAll()).jobs;
   }

@@ -58,3 +58,13 @@ describe("HelloWork : lieu « ville - département »", () => {
     expect([job?.city, job?.department]).toEqual([city, department]);
   });
 });
+
+describe("WTTJ : télétravail partiel", () => {
+  it("hybride, pas télétravail complet ; département lu dans « Cergy, Val-d'Oise »", () => {
+    const job = normalize({
+      source: "jobscraper:wttj", sourceJobId: "wttj_1", collectedAt: new Date(),
+      data: { id: "wttj_1", source: "wttj", url: "https://www.welcometothejungle.com/fr/companies/a/jobs/b", title: "Dev", company: "A", location: "Cergy, Val-d'Oise", remote: null, workplace: "hybrid" },
+    });
+    expect(job).toMatchObject({ remoteType: "hybrid", city: "Cergy", department: "95" });
+  });
+});

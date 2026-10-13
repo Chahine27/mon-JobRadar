@@ -101,6 +101,84 @@ export function classifyProbe(provider: JobScraperProvider, status: number, fina
   return { status: "UNREACHABLE", detail: `${site} : page sans offres (site modifié, ou blocage silencieux)` };
 }
 
+/** Index de recherche public du site WTTJ (clés publiques de leur page), trié du plus récent au plus ancien. */
+const WTTJ_SEARCH_URL = "https://csekhvms53-dsn.algolia.net/1/indexes/wttj_jobs_production_fr_published_at_desc/query";
+const WTTJ_HEADERS = {
+  "Content-Type": "application/json",
+  "X-Algolia-API-Key": "4bd8f6215d0cc52b26430765769e65a0",
+  "X-Algolia-Application-Id": "CSEKHVMS53",
+  Referer: "https://www.welcometothejungle.com/",
+  Origin: "https://www.welcometothejungle.com",
+};
+const WTTJ_CONTRACTS: Record<string, string> = {
+  full_time: "cdi", part_time: "cdi", fixed_term: "cdd", temporary: "interim",
+  internship: "stage", apprenticeship: "alternance", freelance: "freelance", vie: "cdd",
+};
+
+type WttjHit = {
+  reference?: string; objectID?: string; name?: string; slug?: string; summary?: string | null;
+  organization?: { name?: string; slug?: string };
+  offices?: Array<{ city?: string | null; district?: string | null; country?: string | null }>;
+  contract_type?: string | null; remote?: string | null; published_at?: string | null;
+  salary_minimum?: number | null; salary_yearly_minimum?: number | null; salary_maximum?: number | null; salary_currency?: string | null;
+  experience_level_minimum?: number | null;
+};
+
+/** Résultat WTTJ → même format qu'une offre JobScraper (même source, mêmes identifiants qu'avant). */
+export function wttjHitToOffer(hit: WttjHit): JobScraperOffer | null {
+  const id = hit.reference || hit.objectID;
+  const title = hit.name?.trim();
+  const org = hit.organization;
+  if (!id || !title || !org?.slug || !hit.slug) return null;
+  const office = hit.offices?.[0];
+  // « Cergy, Val-d'Oise » : le département se lit dans son nom (JobScraper donnait « Cergy, France »).
+  const location = [office?.city, office?.district ?? office?.country].filter(Boolean).join(", ") || "France";
+  const exp = hit.experience_level_minimum;
+  return {
+    id: `wttj_${id}`,
+    source: "wttj",
+    url: `https://www.welcometothejungle.com/fr/companies/${org.slug}/jobs/${hit.slug}`,
+    title,
+    company: org.name?.trim() || null,
+    location,
+    description: hit.summary ?? "",
+    salary_min: hit.salary_minimum ?? hit.salary_yearly_minimum ?? null,
+    salary_max: hit.salary_maximum ?? null,
+    salary_currency: hit.salary_currency ?? "EUR",
+    contract_type: WTTJ_CONTRACTS[hit.contract_type ?? ""] ?? null,
+    experience_level: exp == null ? null : exp <= 1 ? "junior" : exp <= 3 ? "mid" : exp <= 6 ? "senior" : "lead",
+    // « partial » = hybride : ce n'est pas du télétravail complet (JobScraper le comptait comme tel).
+    remote: hit.remote === "fulltime" ? true : hit.remote === "no" ? false : null,
+    ...(hit.remote === "partial" ? { workplace: "hybrid" } : {}),
+    posted_at: hit.published_at ?? null,
+  };
+}
+
+/**
+ * WTTJ interrogé directement : JobScraper ignore la date et le tri, il renvoyait les offres « les plus pertinentes »
+ * (souvent vieilles de plusieurs semaines, écartées ensuite) → 0 offre sur 79 publiées en 24 h à Paris.
+ */
+export async function searchWttj(params: SearchParams, max: number, fetchImpl: typeof fetch = fetch, now = new Date()): Promise<JobScraperOffer[]> {
+  const days = params.publishedSinceDays;
+  const label = params.locationLabel || params.department;
+  const res = await fetchImpl(WTTJ_SEARCH_URL, {
+    method: "POST",
+    headers: { ...WTTJ_HEADERS, "User-Agent": BROWSER_HEADERS["User-Agent"] },
+    body: JSON.stringify({
+      // Expression exacte : sans guillemets, la tolérance aux fautes ramenait « QA Analyst » ou « Chef de projet marketing ».
+      query: [`"${params.keywords.replace(/"/g, "")}"`, label && label !== "France" ? label : ""].filter(Boolean).join(" "),
+      advancedSyntax: true,
+      hitsPerPage: max,
+      ...(days ? { numericFilters: [`published_at_timestamp>${Math.floor(now.getTime() / 1000) - days * 86_400}`] } : {}),
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (res.status === 429 || res.status === 403) throw new SourceUnavailableError(`IP bloquée — Welcome to the Jungle refuse l'accès (HTTP ${res.status}).`);
+  if (!res.ok) throw new Error(`Recherche Welcome to the Jungle en erreur (HTTP ${res.status})`);
+  const { hits } = (await res.json()) as { hits?: WttjHit[] };
+  return (hits ?? []).flatMap((h) => wttjHitToOffer(h) ?? []);
+}
+
 /** Une requête (celle que ferait JobScraper) depuis ce PC : dit si le site bloque ton IP. */
 export async function probeJobScraperSite(provider: JobScraperProvider, fetchImpl: typeof fetch = fetch): Promise<BlockCheck> {
   const headers = {
@@ -268,6 +346,8 @@ export type JobScraperOptions = {
   timeoutMs?: number;
   /** Sonde de blocage (remplaçable dans les tests). */
   probe?: (provider: JobScraperProvider) => Promise<BlockCheck>;
+  /** Requêtes HTTP directes (WTTJ ; remplaçable dans les tests). */
+  fetch?: typeof fetch;
 };
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../../..");
@@ -302,7 +382,8 @@ export class JobScraperSource implements JobSource {
         cwd: this.root,
         // Le paquet est dans src/ : chemin donné ici, car l'installation « pip install -e » garde l'ancien chemin
         // du dossier quand le projet est déplacé ou renommé (→ « No module named 'jobscraper' »).
-        env: { ...process.env, PYTHONPATH: path.join(this.root, "src") },
+        // UTF-8 : sous Windows (cp1252), « → » dans l'aide de indeed.py faisait planter le diagnostic.
+        env: { ...process.env, PYTHONPATH: path.join(this.root, "src"), PYTHONIOENCODING: "utf-8" },
         timeout: this.timeoutMs,
         maxBuffer: 1024 * 1024,
         windowsHide: true,
@@ -325,6 +406,11 @@ export class JobScraperSource implements JobSource {
 
   async search(params: SearchParams): Promise<RawJob[]> {
     if (!this.enabled) throw new SourceUnavailableError("JobScraper est désactivé (JOBSCRAPER_ENABLED=false).");
+    if (this.opts.provider === "wttj") {
+      const collectedAt = new Date();
+      const offers = await searchWttj(params, Math.min(params.maxResults ?? JOBSCRAPER_MAX_PER_SEARCH, JOBSCRAPER_MAX_PER_SEARCH), this.opts.fetch);
+      return offers.flatMap((o) => mapJobScraperOfferToRawJob(o, "wttj", collectedAt) ?? []);
+    }
     const dir = await mkdtemp(path.join(os.tmpdir(), "job-radar-jobscraper-"));
     const output = path.join(dir, "jobs.json");
     const days = params.publishedSinceDays;

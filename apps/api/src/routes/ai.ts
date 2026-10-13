@@ -209,6 +209,18 @@ export async function aiRoutes(
   /** Ollama éteint : on ne réessaie pas avant cette date (pas de file bloquée pour rien). */
   let offlineUntil = 0;
   let offlineMessage: string | null = null;
+  /** Offre dont l'analyse a échoué (réponse inutilisable) : pas de nouvel essai automatique avant 6 h (sinon à chaque collecte). */
+  const failedAt = new Map<string, number>();
+  const recentlyFailed = (jobId: string) => Date.now() - (failedAt.get(jobId) ?? 0) < 6 * 3600_000;
+  const enqueue = (userId: string, ids: string[]) => {
+    let n = 0;
+    for (const jobId of ids) {
+      if (jobId === current || recentlyFailed(jobId) || queue.some((q) => q.jobId === jobId)) continue;
+      queue.push({ userId, jobId });
+      n++;
+    }
+    return n;
+  };
 
   async function pump() {
     if (pumping) return;
@@ -226,6 +238,7 @@ export async function aiRoutes(
             offlineMessage = e.body.message;
             queue.length = 0;
           } else {
+            failedAt.set(item.jobId, Date.now());
             app.log.warn({ jobId: item.jobId, err: e.body.message }, "vérification IA impossible");
           }
         } finally {
@@ -256,10 +269,7 @@ export async function aiRoutes(
     if (!body.success) return reply.code(400).send({ error: "INVALID_BODY" });
     const threshold = await thresholdOf(request.userId!);
     if (!ai || Date.now() < offlineUntil) return autoStatus(threshold);
-    const wanted = await opts.jobs.autoCandidates(request.userId!, body.data.jobIds, threshold);
-    for (const jobId of wanted) {
-      if (jobId !== current && !queue.some((q) => q.jobId === jobId)) queue.push({ userId: request.userId!, jobId });
-    }
+    enqueue(request.userId!, await opts.jobs.autoCandidates(request.userId!, body.data.jobIds, threshold));
     void pump();
     return autoStatus(threshold);
   });
@@ -280,14 +290,8 @@ export async function aiRoutes(
       includeHidden: false,
       sort: "score",
     });
-    const wanted = (await opts.jobs.autoCandidates(userId, list.map((j) => j.id), threshold)).slice(0, limit);
-    let queued = 0;
-    for (const jobId of wanted) {
-      if (jobId !== current && !queue.some((q) => q.jobId === jobId)) {
-        queue.push({ userId, jobId });
-        queued++;
-      }
-    }
+    const wanted = (await opts.jobs.autoCandidates(userId, list.map((j) => j.id), threshold)).filter((id) => !recentlyFailed(id)).slice(0, limit);
+    const queued = enqueue(userId, wanted);
     void pump();
     return { ...autoStatus(threshold), queued };
   }

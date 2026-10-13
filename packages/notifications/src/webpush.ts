@@ -55,6 +55,7 @@ export function createWebPushNotifier(cfg: WebPushConfig, sender?: Sender): Noti
   return {
     channel: "webpush",
     isConfigured: () => configured,
+    hasRecipients: async () => (await cfg.subscriptions.list()).length > 0,
     async sendAlerts(alerts: JobAlert[]) {
       if (!alerts.length) return;
       const max = cfg.maxIndividual ?? 3;

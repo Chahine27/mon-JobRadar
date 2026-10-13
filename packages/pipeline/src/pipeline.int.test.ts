@@ -149,6 +149,27 @@ describe("source → normalisation → base (README §32)", () => {
     expect(byTitle["Dev sauvegardé"]).toBe("SAVED");
   });
 
+  it("LinkedIn : pages vérifiées une à une, espacées ; les ouvertes passent en fin de file ; arrêt si LinkedIn bloque", async () => {
+    const li = (n: number) =>
+      mapJobScraperOfferToRawJob({ id: `linkedin_${4400000 + n}`, source: "linkedin", url: `https://www.linkedin.com/jobs/view/${4400000 + n}`, title: `Dev ${n}`, company: `Boîte ${n}`, location: "Paris" }, "linkedin")!;
+    for (let n = 1; n <= 3; n++) await ingestJob(prisma, normalize(li(n))!, new Date(Date.now() - n * 86_400_000));
+    const pauses: number[] = [];
+    const asked: string[] = [];
+    await expireJobs({ prisma, sleep: async (ms) => void pauses.push(ms), linkedinIsOpen: async (id) => (asked.push(id), true) });
+    expect(asked).toHaveLength(3);
+    expect(pauses).toEqual([1500, 1500]);
+    // Ouvertes : « revues » maintenant, donc derrière les autres au passage suivant.
+    expect((await prisma.job.findMany({ where: { lastSeenAt: { lt: new Date(Date.now() - 3600_000) } } })).length).toBe(0);
+
+    asked.length = 0;
+    await expireJobs({ prisma, sleep: async () => {}, linkedinIsOpen: async (id) => (asked.push(id), null) });
+    expect(asked).toHaveLength(3); // 3 réponses illisibles d'affilée : on arrête là (ici, il n'y en a que 3)
+    for (let n = 4; n <= 6; n++) await ingestJob(prisma, normalize(li(n))!);
+    asked.length = 0;
+    await expireJobs({ prisma, sleep: async () => {}, linkedinIsOpen: async (id) => (asked.push(id), null) });
+    expect(asked).toHaveLength(3);
+  });
+
   it("Jooble : offres enregistrées, appels comptés en base, pas de 2ᵉ appel le même jour", async () => {
     const quota = prismaJoobleQuota(prisma, "abcd-1234-efgh");
     let calls = 0;
@@ -216,6 +237,17 @@ describe("source → normalisation → base (README §32)", () => {
     expect(job.technologies).toEqual(expect.arrayContaining(["Vue.js", "TypeScript"])); // score technique sur le vrai texte
     // Déjà complétée : rien à refaire au passage suivant.
     expect((await completeJobScraperDescriptions({ prisma, sleep: async () => {}, fetchDetails: async () => null })).checked).toBe(0);
+  });
+
+  it("page illisible : essai noté, pas retentée au passage suivant (seulement le lendemain)", async () => {
+    const offer = { id: "linkedin_4475563099", source: "linkedin", title: "Dev", company: "Acme", location: "Paris", url: "https://www.linkedin.com/jobs/view/4475563099" };
+    await ingestJob(prisma, normalize(mapJobScraperOfferToRawJob(offer, "linkedin")!)!);
+    expect((await completeJobScraperDescriptions({ prisma, sleep: async () => {}, fetchDetails: async () => null })).checked).toBe(1);
+    expect((await completeJobScraperDescriptions({ prisma, sleep: async () => {}, fetchDetails: async () => null })).checked).toBe(0);
+    const link = await prisma.jobSourceLink.findFirstOrThrow();
+    const yesterday = new Date(Date.now() - 25 * 3600_000).toISOString();
+    await prisma.jobSourceLink.update({ where: { id: link.id }, data: { rawData: { ...(link.rawData as object), detailTriedAt: yesterday } } });
+    expect((await completeJobScraperDescriptions({ prisma, sleep: async () => {}, fetchDetails: async () => null })).checked).toBe(1);
   });
 
   it("résumé WTTJ : remplacé par l'annonce entière, que la collecte suivante n'écrase plus", async () => {

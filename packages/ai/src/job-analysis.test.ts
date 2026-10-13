@@ -87,6 +87,15 @@ describe("IA locale (Ollama)", () => {
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("« A ou B »");
   });
 
+  it("listes un peu trop longues ou avec des vides : coupées et nettoyées, pas refusées", async () => {
+    const many = Array.from({ length: 18 }, (_, i) => `Outil${i}`);
+    const reply = { ...GOOD, competences_obligatoires: many, missions: ["", " Coder ", "x".repeat(250)] };
+    const client = new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify(reply) } }) });
+    const { result } = await analyzeJobWithAi(client, JOB, PROFILE);
+    expect(result.competences_obligatoires).toHaveLength(15);
+    expect(result.missions).toEqual(["Coder", "x".repeat(200)]);
+  });
+
   it("réponse hors format : redemandée une fois, puis erreur claire", async () => {
     let calls = 0;
     const client = new OllamaClient({ fetch: async () => (calls++, json({ message: { content: JSON.stringify({ resume: "x" }) } })) });

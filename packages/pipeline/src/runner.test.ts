@@ -63,7 +63,7 @@ function state(source: string, extra: Partial<SourceStatus> = {}): SourceStatus 
   };
 }
 
-function setup(opts: { states?: SourceStatus[]; activeInDb?: string | null; collect?: Collect } = {}) {
+function setup(opts: { states?: SourceStatus[]; activeInDb?: string | null; collect?: Collect; adzunaIdle?: boolean } = {}) {
   const runs: Array<{ id: string; trigger: string; status: string }> = [];
   const repo: RunRepo = {
     createRun: async (trigger) => {
@@ -92,7 +92,7 @@ function setup(opts: { states?: SourceStatus[]; activeInDb?: string | null; coll
     });
   const sources: JobSource[] = [
     { name: "france-travail", search: async () => [], healthCheck: async () => ({ status: "OK" }) },
-    { name: "adzuna", search: async () => [], healthCheck: async () => ({ status: "OK" }) },
+    { name: "adzuna", search: async () => [], healthCheck: async () => ({ status: "OK" }), hasWork: async () => !opts.adzunaIdle },
   ];
   const runner = new CollectionRunner({ repo, sources, collect, now: () => NOW });
   return { runner, runs, calls, release };
@@ -125,6 +125,48 @@ describe("CollectionRunner", () => {
     release();
     await runner.idle();
     expect(calls[0]!.sources.map((s) => s.name)).toEqual(["france-travail"]);
+  });
+
+  it("avancement source par source pendant la collecte, puis plus rien une fois finie", async () => {
+    let step: () => void = () => {};
+    const { runner } = setup({
+      states: [state("france-travail"), state("adzuna")],
+      collect: async (args) => {
+        args.onSource?.("france-travail");
+        args.onProgress?.("france-travail", { done: 1, total: 4, found: 7 });
+        await new Promise<void>((r) => (step = r));
+        args.onSourceDone?.({ source: "france-travail", status: "OK", fetched: 9, errors: [], durationMs: 1 });
+        args.onSource?.("adzuna");
+        await new Promise<void>((r) => (step = r));
+        return { runId: args.runId, status: "done", fetched: 9, created: 0, updated: 0, unchanged: 0, duplicates: 0, rejected: 0, sources: [] };
+      },
+    });
+    await runner.start("manual");
+    await new Promise((r) => setTimeout(r, 0));
+    const mid = await runner.status();
+    expect(mid.progress).toEqual([
+      { source: "france-travail", state: "running", done: 1, total: 4, found: 7, status: null },
+      { source: "adzuna", state: "pending", done: 0, total: 0, found: 0, status: null },
+    ]);
+    step();
+    await new Promise((r) => setTimeout(r, 0));
+    expect((await runner.status()).progress.map((p) => [p.source, p.state, p.found, p.status])).toEqual([
+      ["france-travail", "done", 9, "OK"],
+      ["adzuna", "running", 0, null],
+    ]);
+    step();
+    await runner.idle();
+    expect((await runner.status()).progress).toEqual([]);
+  });
+
+  it("source sans rien à collecter (sites carrières sans entreprise) : pas lancée", async () => {
+    const { runner, calls, release } = setup({ states: [state("france-travail"), state("adzuna")], adzunaIdle: true });
+    await runner.start("manual");
+    release();
+    await runner.idle();
+    expect(calls[0]!.sources.map((s) => s.name)).toEqual(["france-travail"]);
+    const alone = setup({ states: [state("adzuna")], adzunaIdle: true });
+    expect(await alone.runner.start("manual")).toBeNull();
   });
 
   it("planificateur : ne lance rien si aucune source n'est due", async () => {

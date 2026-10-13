@@ -22,6 +22,10 @@ export type CollectOptions = {
   log?: (line: string) => void;
   /** Appelé au début de chaque source (affichage « en cours : … »). */
   onSource?: (name: string) => void;
+  /** Progression de la source en cours : recherches faites / à faire, offres reçues jusque-là. */
+  onProgress?: (name: string, p: { done: number; total: number; found: number }) => void;
+  /** Source terminée (offres enregistrées), avec son résultat. */
+  onSourceDone?: (report: SourceReport) => void;
 };
 
 export type SourceReport = {
@@ -117,7 +121,9 @@ export async function collectOnce(opts: CollectOptions): Promise<CollectReport> 
       }
     }
 
-    for (const q of source.fetchAll || source.searchAll ? [] : queries) {
+    const perQuery = source.fetchAll || source.searchAll ? [] : queries;
+    opts.onProgress?.(source.name, { done: 0, total: perQuery.length, found: raws.size });
+    for (const [i, q] of perQuery.entries()) {
       try {
         const found = await source.search(q);
         for (const r of found) raws.set(r.sourceJobId, r);
@@ -131,6 +137,8 @@ export async function collectOnce(opts: CollectOptions): Promise<CollectReport> 
         const msg = err instanceof Error ? err.message : String(err);
         sr.errors.push(`« ${q.keywords} » ${q.department ?? ""} : ${msg}`);
         log(`  ${source.name} « ${q.keywords} » : ERREUR ${msg}`);
+      } finally {
+        opts.onProgress?.(source.name, { done: i + 1, total: perQuery.length, found: raws.size });
       }
     }
     if (!source.fetchAll && !source.searchAll && sr.status === "OK" && sr.errors.length > 0 && sr.errors.length >= queries.length) {
@@ -154,6 +162,7 @@ export async function collectOnce(opts: CollectOptions): Promise<CollectReport> 
 
     sr.durationMs = Date.now() - started;
     report.sources.push(sr);
+    opts.onSourceDone?.(sr);
     await prisma.sourceRun.create({
       data: {
         runId: run.id,

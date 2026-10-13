@@ -117,8 +117,8 @@ describe("vérification automatique des meilleures offres affichées", () => {
     expect(aiCalls).toHaveLength(high.length);
   });
 
-  it("« forte » ne monte jamais le score ; profil modifié → correction retirée (analyse dépassée)", async () => {
-    const { req, aiState } = await setup();
+  it("« forte » ne monte jamais le score ; profil modifié → avis gardé, annonce modifiée → avis retiré et offre revérifiée", async () => {
+    const { req, aiState, jobs, aiCalls } = await setup();
     const list = (await req("GET", "/api/jobs?limit=10")).json().items as Array<any>;
     const top = (await req("GET", `/api/jobs/${list[0].id}`)).json();
     aiState.adequation = "forte";
@@ -130,7 +130,28 @@ describe("vérification automatique des meilleures offres affichées", () => {
 
     const { profile } = (await req("GET", "/api/profile")).json();
     await req("PUT", "/api/profile", { profile: { ...profile, skills: [...profile.skills, "Rust"] } });
+    expect((await req("GET", `/api/jobs/${top.id}`)).json().ai).toMatchObject({ adequation: "forte" });
+    expect((await req("POST", "/api/ai/auto/feed", {})).json().pending).not.toContain(top.id);
+    await waitIdle(req);
+    const calls = aiCalls.length;
+
+    jobs.set(top.id, { ...jobs.get(top.id)!, contentHash: "annonce-modifiee" });
     expect((await req("GET", `/api/jobs/${top.id}`)).json().ai).toBeNull();
+    await req("POST", "/api/ai/auto", { jobIds: [top.id] });
+    await waitIdle(req);
+    expect(aiCalls.length).toBe(calls + 1);
+  });
+
+  it("réponse inutilisable : pas de nouvel essai automatique à chaque collecte", async () => {
+    const { req, aiState, aiCalls } = await setup();
+    aiState.badFormat = true;
+    await req("POST", "/api/ai/auto/feed", {});
+    await waitIdle(req);
+    const calls = aiCalls.length;
+    expect(calls).toBeGreaterThan(0);
+    expect((await req("POST", "/api/ai/auto/feed", {})).json().queued).toBe(0);
+    await waitIdle(req);
+    expect(aiCalls).toHaveLength(calls);
   });
 
   it("tout le flux (bouton « Actualiser » / « Vérifier avec l'IA ») : même les offres pas affichées, seulement ≥ seuil du profil, une seule fois", async () => {

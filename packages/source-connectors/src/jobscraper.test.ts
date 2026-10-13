@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { JobScraperSource, classifyProbe, detailsFromPage, fetchJobScraperDetails, relativeAge, isJobScraperNoResultsOutput, jobScraperLocation, linkedinJobIsOpen, mapJobScraperOfferToRawJob } from "./jobscraper";
+import { JobScraperSource, classifyProbe, detailsFromPage, fetchJobScraperDetails, relativeAge, isJobScraperNoResultsOutput, jobScraperLocation, linkedinJobIsOpen, mapJobScraperOfferToRawJob, searchWttj } from "./jobscraper";
 import { SourceUnavailableError } from "./types";
 
 const offer = {
@@ -157,5 +157,46 @@ describe("jobScraperLocation", () => {
     expect(jobScraperLocation("indeed", { keywords: "dev", locationLabel: "Oise (60)", department: "60" })).toBe("Oise (60)");
     expect(jobScraperLocation("linkedin", { keywords: "dev", locationLabel: "Oise", department: "60" })).toBe("Oise");
     expect(jobScraperLocation("indeed", { keywords: "dev" })).toBe("France");
+  });
+});
+
+describe("Welcome to the Jungle (index de recherche du site, interrogé directement)", () => {
+  const hit = {
+    reference: "d2b9", name: "Développeur Vue.js", slug: "dev-vue_cergy", summary: "Résumé",
+    organization: { name: "Acme", slug: "acme" }, offices: [{ city: "Cergy", district: "Val-d'Oise", country: "France" }],
+    contract_type: "full_time", remote: "partial", published_at: "2026-10-12T22:03:18Z", experience_level_minimum: 2,
+  };
+  const NOW = new Date("2026-10-13T12:00:00Z");
+
+  it("offres du jour seulement, triées par date, au format JobScraper (mêmes identifiants qu'avant)", async () => {
+    let body: object | null = null;
+    let url = "";
+    const fetchImpl = (async (u: string, init: RequestInit) => {
+      url = u;
+      body = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ hits: [hit, { name: "sans référence" }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const offers = await searchWttj({ keywords: "Développeur", locationLabel: "Paris", publishedSinceDays: 1 }, 25, fetchImpl, NOW);
+    expect(url).toContain("published_at_desc");
+    expect(body).toEqual({ query: '"Développeur" Paris', advancedSyntax: true, hitsPerPage: 25, numericFilters: [`published_at_timestamp>${NOW.getTime() / 1000 - 86_400}`] });
+    expect(offers).toEqual([
+      expect.objectContaining({
+        id: "wttj_d2b9", source: "wttj", url: "https://www.welcometothejungle.com/fr/companies/acme/jobs/dev-vue_cergy",
+        location: "Cergy, Val-d'Oise", contract_type: "cdi", experience_level: "mid", remote: null, workplace: "hybrid",
+        posted_at: "2026-10-12T22:03:18Z",
+      }),
+    ]);
+  });
+
+  it("refus du site (429) : source suspendue comme un blocage d'IP", async () => {
+    const fetchImpl = (async () => new Response("", { status: 429 })) as unknown as typeof fetch;
+    await expect(searchWttj({ keywords: "x" }, 25, fetchImpl)).rejects.toBeInstanceOf(SourceUnavailableError);
+  });
+
+  it("passe par la source jobscraper:wttj sans Python", async () => {
+    const fetchImpl = (async () => new Response(JSON.stringify({ hits: [hit] }), { status: 200 })) as unknown as typeof fetch;
+    const source = new JobScraperSource({ provider: "wttj", enabled: true, python: "introuvable.exe", fetch: fetchImpl });
+    const raws = await source.search({ keywords: "Développeur", publishedSinceDays: 1 });
+    expect(raws.map((r) => [r.source, r.sourceJobId])).toEqual([["jobscraper:wttj", "wttj_d2b9"]]);
   });
 });

@@ -40,7 +40,7 @@ async function main() {
   });
 
   const sources = [
-    { source: "france-travail", intervalMinutes: 5, enabled: true },
+    { source: "france-travail", intervalMinutes: 30, enabled: true },
     { source: "adzuna", intervalMinutes: 60, enabled: false },
     { source: "company-careers", intervalMinutes: 30, enabled: false },
     { source: "jooble", intervalMinutes: 1440, enabled: false },

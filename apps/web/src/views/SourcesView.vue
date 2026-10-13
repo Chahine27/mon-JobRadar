@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { ApiError, api } from "../api";
 import Icon, { type IconName } from "../components/Icon.vue";
 import PageHeader from "../components/PageHeader.vue";
 import SourceLogo from "../components/SourceLogo.vue";
-import { timeAgo, timeUntil } from "../format";
-import type { Company, SourceItem } from "../types";
+import { sourceBadge, timeAgo, timeUntil } from "../format";
+import type { Company, SourceItem, SourceProgress } from "../types";
 
 const sources = ref<SourceItem[]>([]);
 const companies = ref<Company[]>([]);
@@ -33,7 +33,25 @@ async function load() {
   companies.value = c.items;
   drafts.value = Object.fromEntries(s.items.map((i) => [i.source, i.intervalMinutes]));
 }
-onMounted(load);
+// Avancement des collectes en cours : toutes les 2 s pendant une collecte, sinon toutes les 30 s (pour voir la suivante démarrer).
+const progress = ref<SourceProgress[]>([]);
+let poll: ReturnType<typeof setTimeout> | undefined;
+async function loadProgress() {
+  try {
+    const s = await api.collectionStatus();
+    const wasLive = progress.value.length > 0;
+    progress.value = s.progress;
+    if (wasLive && s.progress.length === 0) await load(); // collecte finie : dernière réussite, erreurs, prochaine à jour
+  } catch {
+    /* serveur momentanément injoignable : on réessaiera */
+  }
+  poll = setTimeout(loadProgress, progress.value.length ? 2000 : 30_000);
+}
+onMounted(() => {
+  void load();
+  void loadProgress();
+});
+onUnmounted(() => clearTimeout(poll));
 
 async function act(fn: () => Promise<unknown>, ok: string) {
   busy.value = true;
@@ -61,20 +79,13 @@ function quotaTone(q: { used: number; limit: number }) {
   return ratio < 0.6 ? "good" : ratio < 0.9 ? "mid" : "low";
 }
 
-function statusTone(s: SourceItem) {
-  const t = statusText(s);
-  return t === "OK" ? "good" : t === "erreur" ? "bad" : "";
-}
-
 const isJobScraperDisabled = (s: SourceItem) => s.source.startsWith("jobscraper:") && !s.configured;
 
-function statusText(s: SourceItem) {
-  if (isJobScraperDisabled(s)) return "désactivée dans .env";
-  if (!s.configured) return "non configurée";
-  if (!s.lastStatus) return "jamais lancée";
-  if (s.lastStatus === "OK") return "OK";
-  if (s.lastStatus === "SOURCE_UNAVAILABLE") return "non configurée";
-  return "erreur";
+/** Pastille : avancement pendant une collecte, sinon dernier résultat (« bloquée » si le site bloque l'IP). */
+function badgeOf(s: SourceItem) {
+  if (isJobScraperDisabled(s)) return { tone: "", text: "désactivée dans .env", busy: false, pct: null };
+  if (!s.configured) return { tone: "", text: "non configurée", busy: false, pct: null };
+  return sourceBadge(s, progress.value.find((p) => p.source === s.source));
 }
 
 const addCompany = () =>
@@ -102,7 +113,13 @@ const addCompany = () =>
             <h2 style="margin: 0">{{ s.label }}</h2>
             <span class="muted small">{{ HELP[s.source] }}</span>
           </div>
-          <span class="chip" :class="statusTone(s)"><span class="dot" :class="statusTone(s)" />{{ statusText(s) }}</span>
+          <span class="chip" :class="badgeOf(s).tone">
+            <Icon v-if="badgeOf(s).busy" name="refresh" :size="13" class="spin" />
+            <span v-else class="dot" :class="badgeOf(s).tone" />{{ badgeOf(s).text }}
+          </span>
+        </div>
+        <div v-if="badgeOf(s).busy" class="bar" role="progressbar" :aria-label="`Collecte ${s.label}`" :aria-valuenow="badgeOf(s).pct ?? undefined" aria-valuemin="0" aria-valuemax="100">
+          <div class="good" :class="{ indeterminate: badgeOf(s).pct === null }" :style="{ width: `${badgeOf(s).pct ?? 35}%` }" />
         </div>
         <p v-if="isJobScraperDisabled(s)" class="muted small" style="margin: 0">
           Les offres déjà importées restent dans le feed. Pour reprendre les collectes, définis <code>JOBSCRAPER_ENABLED=true</code> dans <code>.env</code>, puis redémarre l’API.
@@ -173,6 +190,9 @@ const addCompany = () =>
 </template>
 
 <style scoped>
+.bar .indeterminate { animation: slide 1.2s ease-in-out infinite alternate; }
+@keyframes slide { from { margin-left: 0; } to { margin-left: 65%; } }
+@media (prefers-reduced-motion: reduce) { .bar .indeterminate { animation: none; } }
 .sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; }
 .source.wide { grid-column: 1 / -1; }
 .source.off { opacity: 0.75; }

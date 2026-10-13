@@ -26,6 +26,10 @@ Sous Linux/macOS, utiliser `python3 -m venv tools/jobscraper/.venv`, puis `tools
 
 Le dépôt amont consulté pour cette intégration était au commit `0bb9fa3c863c77e85d58f63c961c401d9aef54b1`. Aucun fichier `LICENSE` n'était présent dans cette copie. Le code amont n'est donc pas redistribué dans ce dépôt; l'utilisateur clone et installe séparément JobScraper. Vérifier les conditions de licence amont avant redistribution ou déploiement.
 
+## Welcome to the Jungle (sans JobScraper, depuis le 13 octobre 2026)
+
+JobScraper ignorait la date et le tri pour WTTJ : il renvoyait les offres « les plus pertinentes », souvent vieilles de plusieurs semaines, que Job Radar écartait ensuite (0 offre gardée sur 79 publiées en 24 h pour « développeur Paris »). La source `jobscraper:wttj` interroge maintenant directement l'index de recherche public du site (`wttj_jobs_production_fr_published_at_desc`, trié par date) avec un filtre sur la date de publication et l'expression exacte des mots-clés (sans guillemets, la tolérance aux fautes ramenait « QA Analyst »). Même nom de source et mêmes identifiants qu'avant : rien ne change en base. Le lieu devient « Ville, Département » (département reconnu), et le télétravail partiel (`partial`) est un hybride, plus un télétravail complet. Python n'est plus nécessaire pour cette source.
+
 ## Indeed (JobSpy)
 
 JobScraper ne couvre pas Indeed. La source `jobscraper:indeed` appelle à la place `packages/source-connectors/python/indeed.py`, qui utilise [JobSpy](https://github.com/speedyapply/JobSpy) (`python-jobspy`, licence MIT, API mobile d'Indeed, `country_indeed="France"`). Le script accepte les mêmes options que la CLI JobScraper et écrit le même format `JobOffer` : file, intervalle, normalisation et diagnostic sont partagés. Il s'installe dans le même environnement Python :
@@ -34,7 +38,7 @@ JobScraper ne couvre pas Indeed. La source `jobscraper:indeed` appelle à la pla
 uv pip install --python tools/jobscraper/.venv/Scripts/python.exe python-jobspy
 ```
 
-Indeed donne la description complète, la date de publication (jour), et souvent le salaire, converti en annuel par le script (mensuel ×12, journalier ×218, horaire ×1607). `is_remote=false` de JobSpy veut seulement dire « pas mentionné » : il est traité comme inconnu. Un refus d'Indeed (HTTP 403) est journalisé par JobSpy et remonté comme erreur de la source.
+Indeed donne la description complète, la date de publication (jour), et souvent le salaire, converti en annuel par le script (mensuel ×12, journalier ×218, horaire ×1607). `is_remote=false` de JobSpy veut seulement dire « pas mentionné » : il est traité comme inconnu. Un refus d'Indeed (HTTP 403) est journalisé par JobSpy et remonté comme erreur de la source. Python est lancé avec `PYTHONIOENCODING=utf-8` : sous Windows (cp1252), le caractère « → » de l'aide faisait planter le diagnostic.
 
 ## Configuration
 

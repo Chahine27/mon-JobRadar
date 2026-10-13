@@ -1,7 +1,7 @@
 import type { JobStatus, Profile } from "@job-radar/shared";
 import { DEFAULT_RULES, hashProfile, scoreJob, scoringInputFromJob, type ScoreResult, type ScoringRules } from "@job-radar/scoring";
 import { distanceKm } from "../routes/leads";
-import { AI_SCORE_CAPS, type Adequation, analysisHash, isAbridged, readVerdict, toProfileInput } from "../ai-context";
+import { AI_SCORE_CAPS, type Adequation, analysisFitsJob, isAbridged, readVerdict } from "../ai-context";
 import { type JobEdits, type JobRow, type Stores, yearsText } from "../stores";
 
 export { ABRIDGED_SOURCES, isAbridged } from "../ai-context";
@@ -91,7 +91,10 @@ const aiSkillsOf = (v: Verdict) => (v && v.required.length + v.bonus.length > 0 
  * les règles se trompent sur les annonces ambiguës (« Exp. 1 à 7 ans » + « Exp. + 7 ans »).
  */
 const withAiExperience = (job: JobRow, v: Verdict): JobRow =>
-  v && v.experience !== null && job.userEdits?.experienceMinYrs === undefined // corrigée à la main : elle prime && (v.experience !== job.experienceMinYrs || !job.experienceText)
+  v &&
+  v.experience !== null &&
+  job.userEdits?.experienceMinYrs === undefined && // corrigée à la main : elle prime
+  (v.experience !== job.experienceMinYrs || !job.experienceText)
     ? {
         ...job,
         experienceMinYrs: v.experience,
@@ -176,7 +179,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
     const aiKey = aiSkills ? `${aiSkills.required.join("|")}#${aiSkills.bonus.join("|")}` : "-";
     const home = homes.get(profile) ?? null;
     const km = home && job.latitude !== null && job.longitude !== null ? distanceKm(home, { lat: job.latitude, lng: job.longitude }) : null;
-    const key = `${job.id}:${job.contentHash}:${job.experienceMinYrs ?? "-"}:${job.travelMinutes ?? "-"}:${job.travelMode ?? "-"}:${aiKey}:${profileHash}:${rules.version}:${km === null ? "-" : Math.round(km)}`;
+    const key = `${job.id}:${job.contentHash}:${job.department ?? "-"}:${job.experienceMinYrs ?? "-"}:${job.travelMinutes ?? "-"}:${job.travelMode ?? "-"}:${aiKey}:${profileHash}:${rules.version}:${km === null ? "-" : Math.round(km)}`;
     let s = cache.get(key);
     if (!s) {
       s = scoreJob({ ...scoringInputFromJob(job), aiSkills, distanceKm: km }, profile, rules);
@@ -194,19 +197,17 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
   }
 
   /**
-   * Avis de l'IA pour chaque offre, seulement si l'analyse est à jour (même annonce, même profil, même CV,
-   * même modèle) : une analyse dépassée ne corrige plus le score.
+   * Avis de l'IA pour chaque offre, tant que l'annonce n'a pas changé (un profil ou un CV retouché ne le jette pas :
+   * cf. analysisFitsJob). Annonce modifiée → l'avis ne corrige plus le score et l'offre est réanalysée.
    */
-  async function loadVerdicts(userId: string, profile: Profile): Promise<(job: JobRow) => Verdict> {
-    const model = opts.aiModel;
-    if (!model) return () => null;
-    const [analyses, kit] = await Promise.all([stores.analyses.latestAll(), stores.letterKits.get(userId)]);
+  async function loadVerdicts(): Promise<(job: JobRow) => Verdict> {
+    if (!opts.aiModel) return () => null;
+    const analyses = await stores.analyses.latestAll();
     if (analyses.size === 0) return () => null;
-    const input = toProfileInput(profile, kit);
     return (job) => {
       const a = analyses.get(job.id);
       // Analyse faite sur un extrait : elle ne corrige pas le score (elle serait biaisée).
-      if (!a || isAbridged(job) || a.inputHash !== analysisHash(job, input, model)) return null;
+      if (!a || isAbridged(job) || !analysisFitsJob(a.inputHash, job)) return null;
       return readVerdict(a.result);
     };
   }
@@ -214,7 +215,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
   return {
     async list(userId: string, f: JobFilters): Promise<JobSummary[]> {
       const { profile, hash } = await loadProfile(userId);
-      const verdictOf = await loadVerdicts(userId, profile);
+      const verdictOf = await loadVerdicts();
       const q = f.q?.trim().toLowerCase();
       const items = (await stores.jobs.list())
         .filter((j) => (f.status === "all" ? true : f.status === "active" ? !OUT_OF_FEED.includes(j.status) : j.status === f.status))
@@ -247,7 +248,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
      */
     async listApplications(userId: string): Promise<Array<JobSummary & { appliedAt: Date | null }>> {
       const { profile, hash } = await loadProfile(userId);
-      const verdictOf = await loadVerdicts(userId, profile);
+      const verdictOf = await loadVerdicts();
       const applied = await stores.jobs.appliedDates();
       return (await stores.jobs.list())
         .filter((j) => j.status === "APPLIED" || (j.status === "REJECTED" && applied.has(j.id)))
@@ -262,7 +263,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
     /** Offres ajoutées à la main, les plus récentes d'abord. */
     async listManual(userId: string): Promise<JobSummary[]> {
       const { profile, hash } = await loadProfile(userId);
-      const verdictOf = await loadVerdicts(userId, profile);
+      const verdictOf = await loadVerdicts();
       return (await stores.jobs.list())
         .filter(isManual)
         .sort((a, b) => b.firstSeenAt.getTime() - a.firstSeenAt.getTime())
@@ -277,7 +278,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       const job = await stores.jobs.get(id);
       if (!job) return null;
       const { profile, hash } = await loadProfile(userId);
-      const verdict = (await loadVerdicts(userId, profile))(job);
+      const verdict = (await loadVerdicts())(job);
       const scored = withAiExperience(job, verdict);
       const s = scoreOf(scored, profile, hash, verdict);
       const summary = toSummary(scored, s, verdict);
@@ -346,7 +347,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
     async autoCandidates(userId: string, ids: string[], threshold: number): Promise<string[]> {
       if (!opts.aiModel) return [];
       const { profile, hash } = await loadProfile(userId);
-      const verdictOf = await loadVerdicts(userId, profile);
+      const verdictOf = await loadVerdicts();
       const out: string[] = [];
       for (const id of ids) {
         const job = await stores.jobs.get(id);

@@ -10,7 +10,7 @@ const EnvSchema = z.object({
   APP_URL: z.url().default("http://localhost:5173"),
   API_HOST: z.string().default("127.0.0.1"),
   API_PORT: z.coerce.number().int().positive().default(3000),
-  CRON_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440).default(5),
+  CRON_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440).default(30),
   SCHEDULER_ENABLED: z
     .enum(["true", "false"])
     .default("true")

@@ -1,4 +1,4 @@
-import type { JobStatus, RemoteType } from "./types";
+import type { JobStatus, RemoteType, SourceProgress } from "./types";
 
 const k = (n: number) => `${Math.round(n / 1000)}k`;
 
@@ -115,4 +115,35 @@ export function linkLabel(source: string, url: string): string {
 /** Recherche Google Maps : adresse précise ou simple ville, Maps fait au mieux. */
 export function mapsUrl(...parts: Array<string | null | undefined>): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parts.filter(Boolean).join(" "))}`;
+}
+
+export type SourceBadge = {
+  tone: "good" | "bad" | "";
+  text: string;
+  /** Collecte de cette source en cours (ou en attente de son tour). */
+  busy: boolean;
+  /** Avancement 0–100 pendant la collecte ; null si inconnu (une seule récupération). */
+  pct: number | null;
+};
+
+const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? "s" : ""}`;
+
+/**
+ * Pastille d'état d'une source : pendant une collecte, son avancement (en attente → recherches faites → enregistrement →
+ * terminée) ; sinon le résultat de sa dernière collecte. Une IP bloquée n'est pas une source « non configurée ».
+ */
+export function sourceBadge(s: { lastStatus: string | null; lastError: string | null }, p?: SourceProgress | null): SourceBadge {
+  if (p?.state === "pending") return { tone: "", text: "en attente", busy: true, pct: 0 };
+  if (p?.state === "running") {
+    if (!p.total) return { tone: "", text: "collecte…", busy: true, pct: null };
+    if (p.done >= p.total) return { tone: "", text: `enregistrement de ${plural(p.found, "offre")}…`, busy: true, pct: 100 };
+    return { tone: "", text: `${p.done}/${p.total} recherches · ${plural(p.found, "offre")}`, busy: true, pct: Math.round((p.done / p.total) * 100) };
+  }
+  if (p?.state === "done" && p.status === "OK") return { tone: "good", text: `terminée · ${plural(p.found, "offre")}`, busy: false, pct: null };
+  const status = p?.status ?? s.lastStatus;
+  if (status === "OK") return { tone: "good", text: "OK", busy: false, pct: null };
+  if (s.lastError?.startsWith("IP bloquée")) return { tone: "bad", text: "bloquée", busy: false, pct: null };
+  if (status === "SOURCE_UNAVAILABLE") return { tone: "", text: "non configurée", busy: false, pct: null };
+  if (status) return { tone: "bad", text: "erreur", busy: false, pct: null };
+  return { tone: "", text: "jamais lancée", busy: false, pct: null };
 }

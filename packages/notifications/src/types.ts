@@ -30,6 +30,8 @@ export interface Notifier {
   readonly channel: Channel;
   /** false = identifiants absents du .env → canal ignoré sans erreur. */
   isConfigured(): boolean;
+  /** Quelqu'un pour recevoir ? (notification du navigateur : au moins un navigateur abonné). Absent = oui. */
+  hasRecipients?(): Promise<boolean>;
   sendAlerts(alerts: JobAlert[]): Promise<void>;
   /** Information ponctuelle : seulement les canaux qui savent l'afficher (notification du navigateur). */
   sendNotice?(notice: Notice): Promise<void>;

@@ -221,6 +221,17 @@ describe("notifyNewMatches", () => {
     expect(res.errors[0]).toContain("SMTP refusé");
   });
 
+  it("aucun navigateur abonné : canal sauté sans échec tracé, l'email part quand même", async () => {
+    const { repo, rows } = memoryRepo([job("a")]);
+    const email = fakeNotifier("email");
+    const push = { ...fakeNotifier("webpush"), hasRecipients: async () => false };
+    const res = await run(repo, [email, push]);
+    expect(email.batches).toHaveLength(1);
+    expect(push.batches).toHaveLength(0);
+    expect(rows.has("a:webpush:apply")).toBe(false);
+    expect(res.errors).toEqual([]);
+  });
+
   it("IA branchée : seulement après sa vérification, avec son score", async () => {
     const { repo, notified } = memoryRepo([job("ok"), job("declassee"), job("pas-vue"), job("extrait", { sources: [{ source: "adzuna" }] })]);
     const email = fakeNotifier("email");

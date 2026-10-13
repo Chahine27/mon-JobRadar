@@ -394,6 +394,8 @@ export function createFakeCollector() {
       return {
         running: starts.length > 0,
         step: null,
+        progress: [],
+        finishing: false,
         lastRun: null,
         sources: [],
         newJobs: 3,
@@ -413,7 +415,7 @@ export async function createTestApp(extra: Partial<AppOptions> = {}) {
   const lbbSearches: unknown[] = [];
   /** Fausse IA : compte les appels, peut simuler Ollama éteint. */
   const aiCalls: Array<{ title: string; skills: string[] }> = [];
-  const aiState: { online: boolean; adequation: "forte" | "moyenne" | "faible" } = { online: true, adequation: "forte" };
+  const aiState: { online: boolean; adequation: "forte" | "moyenne" | "faible"; badFormat?: boolean } = { online: true, adequation: "forte" };
   const notifiers: Notifier[] = [
     { channel: "email", isConfigured: () => true, sendAlerts: async () => {}, sendTest: async () => void tests.push("email") },
     {
@@ -473,6 +475,7 @@ export async function createTestApp(extra: Partial<AppOptions> = {}) {
       analyze: async (job, profile) => {
         if (!aiState.online) throw Object.assign(new Error("Ollama ne répond pas : lance l'appli Ollama sur ce PC."), { code: "AI_UNAVAILABLE" });
         aiCalls.push({ title: job.title, skills: profile.skills });
+        if (aiState.badFormat) throw new Error("Réponse de l'IA hors format : competences_obligatoires");
         return {
           model: "fake-model",
           durationMs: 5,
