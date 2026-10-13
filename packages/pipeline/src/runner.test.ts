@@ -219,4 +219,14 @@ describe("redémarrage de l'API", () => {
       [new Date(NOW.getTime() - 15 * 60_000), false], // file principale : `pnpm collect` peut tourner à côté
     ]);
   });
+
+  it("une collecte « en cours » plantée depuis plus de 15 min n'est plus affichée comme en cours", async () => {
+    const run = (min: number) => ({ id: "r", trigger: "scheduler", status: "running", startedAt: new Date(NOW.getTime() - min * 60_000), finishedAt: null, fetched: 0, created: 0, duplicates: 0 });
+    let lastRun = run(20);
+    const repo = { status: async () => ({ lastRun, sources: [], newJobs: 0 }) } as unknown as RunRepo;
+    const runner = new CollectionRunner({ repo, sources: [], collect: async () => { throw new Error(); }, now: () => NOW });
+    expect((await runner.status()).running).toBe(false);
+    lastRun = run(2);
+    expect((await runner.status()).running).toBe(true);
+  });
 });

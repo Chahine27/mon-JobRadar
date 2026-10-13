@@ -20,6 +20,8 @@ export type CollectOptions = {
   /** Relance à la main d'une source (page Réglages) : le rythme des collectes automatiques n'est pas touché. */
   keepSchedule?: boolean;
   log?: (line: string) => void;
+  /** Appelé au début de chaque source (affichage « en cours : … »). */
+  onSource?: (name: string) => void;
 };
 
 export type SourceReport = {
@@ -82,6 +84,7 @@ export async function collectOnce(opts: CollectOptions): Promise<CollectReport> 
   };
 
   for (const source of opts.sources) {
+    opts.onSource?.(source.name);
     const started = Date.now();
     const sr: SourceReport = { source: source.name, status: "OK", fetched: 0, errors: [], durationMs: 0 };
     const raws = new Map<string, RawJob>();

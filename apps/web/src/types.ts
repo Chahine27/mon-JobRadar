@@ -99,6 +99,7 @@ export type SourceStatus = {
 
 export type CollectionStatus = {
   running: boolean;
+  step: string | null;
   lastRun: {
     id: string;
     trigger: string;

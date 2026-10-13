@@ -197,6 +197,13 @@ async function refreshNow() {
 }
 
 const running = computed(() => collection.value?.running ?? false);
+const runningText = computed(() => {
+  const c = collection.value;
+  const r = c?.lastRun?.status === "running" ? c.lastRun : null;
+  const since = r ? ` (lancée ${timeAgo(r.startedAt, clock.value)})` : "";
+  const step = c?.step ? ` — en cours : ${SOURCE_LABELS[c.step] ?? c.step}` : "";
+  return `Collecte en cours${since}${step}…`;
+});
 const lastRunText = computed(() => {
   const r = collection.value?.lastRun;
   if (!r) return "Aucune collecte pour l'instant.";
@@ -267,7 +274,7 @@ function place(job: JobSummary) {
       <span v-if="collection?.newJobs" class="chip solid">{{ collection.newJobs }} nouvelle(s)</span>
     </template>
     <p class="subtitle">
-      <template v-if="running">Collecte en cours…</template>
+      <template v-if="running">{{ runningText }}</template>
       <template v-else>{{ lastRunText }}</template>
     </p>
     <template #actions>

@@ -1,0 +1,69 @@
+<!doctype html>
+<!-- Page de chargement ouverte par lancer.ps1 dès le double-clic : affiche l'étape en cours (demarrage-etat.js)
+     et bascule sur le site quand le lanceur indique 100 (site et serveur prêts). -->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Radar démarre…</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #6b7280; --accent: #2563eb; --track: #e5e7eb; --bad: #dc2626; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111318; --card: #1b1e25; --text: #e7e9ee; --muted: #9aa1ad; --accent: #60a5fa; --track: #2c3039; --bad: #f87171; } }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+  .card { width: min(420px, calc(100vw - 32px)); padding: 28px; border-radius: 14px; background: var(--card); box-shadow: 0 4px 24px rgb(0 0 0 / 0.08); }
+  h1 { margin: 0 0 18px; font-size: 20px; }
+  .track { height: 10px; border-radius: 99px; background: var(--track); overflow: hidden; }
+  .bar { height: 100%; width: 3%; background: var(--accent); border-radius: inherit; transition: width 0.6s ease; }
+  p { margin: 12px 0 0; color: var(--muted); }
+  .bad .bar { background: var(--bad); }
+  .bad #step { color: var(--bad); }
+</style>
+</head>
+<body>
+  <main class="card" id="card">
+    <h1>Job Radar démarre…</h1>
+    <div class="track"><div class="bar" id="bar"></div></div>
+    <p id="step">Démarrage de Job Radar…</p>
+    <p id="elapsed"></p>
+  </main>
+<script>
+  const SITE = "http://localhost:5173";
+  const started = Date.now();
+  const $ = (id) => document.getElementById(id);
+
+  // file:// ne peut pas lire un fichier local avec fetch : on recharge le script d'état à chaque tour.
+  function readStatus() {
+    return new Promise((resolve) => {
+      const s = document.createElement("script");
+      s.src = `demarrage-etat.js?t=${Date.now()}`;
+      s.onload = s.onerror = () => { s.remove(); resolve(window.jrStatus); };
+      document.head.append(s);
+    });
+  }
+  // Le lanceur passe à 100 quand le site ET le serveur répondent (une page file:// ne peut pas joindre le serveur elle-même).
+  async function tick() {
+    const st = await readStatus();
+    const secs = Math.round((Date.now() - started) / 1000);
+    if (st?.pct < 0) {
+      $("card").classList.add("bad");
+      $("step").textContent = st.text;
+      $("elapsed").textContent = "Corrige le problème puis relance Job Radar.";
+      return;
+    }
+    if (st) {
+      $("bar").style.width = `${Math.max(3, st.pct)}%`;
+      $("step").textContent = st.text;
+    }
+    $("elapsed").textContent = secs > 180 ? `${secs} s… c'est long : regarde le fichier job-radar.log.` : `${secs} s`;
+    if (st?.pct >= 100) {
+      $("bar").style.width = "100%";
+      $("step").textContent = "Prêt, ouverture…";
+      location.replace(SITE);
+      return;
+    }
+    setTimeout(tick, 1000);
+  }
+  tick();
+</script>
+</body>
+</html>

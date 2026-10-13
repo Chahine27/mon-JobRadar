@@ -23,6 +23,8 @@ export type SourceStatus = {
 
 export type CollectionStatus = {
   running: boolean;
+  /** Source en cours de collecte (null si rien ne tourne dans ce processus). */
+  step: string | null;
   lastRun: {
     id: string;
     trigger: string;
@@ -45,7 +47,7 @@ export interface RunRepo {
   findActiveRun(since: Date, scraper: boolean): Promise<string | null>;
   markStaleRunsFailed(before: Date, scraper: boolean): Promise<number>;
   sourceStates(): Promise<SourceStatus[]>;
-  status(scraper: boolean): Promise<Omit<CollectionStatus, "running">>;
+  status(scraper: boolean): Promise<Omit<CollectionStatus, "running" | "step">>;
   loadProfile(): Promise<Profile>;
 }
 
@@ -56,6 +58,7 @@ export type Collect = (args: {
   profile: Profile;
   publishedSinceDays: PublishedDays;
   keepSchedule?: boolean;
+  onSource?: (name: string) => void;
 }) => Promise<CollectReport>;
 
 export type RunnerOptions = {
@@ -79,7 +82,7 @@ export type StartResult = { status: "started" | "already_running"; runId: string
  * toutes les sources actives pour le bouton « Actualiser ».
  */
 export class CollectionRunner {
-  private current: { runId: string; done: Promise<void> } | null = null;
+  private current: { runId: string; done: Promise<void>; step: string | null } | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly now: () => Date;
   private readonly log: (msg: string, extra?: unknown) => void;
@@ -125,7 +128,10 @@ export class CollectionRunner {
       try {
         const profile = await this.opts.repo.loadProfile();
         this.log(`Collecte ${trigger} : ${wanted.map((s) => s.name).join(", ")} (${days} j)`);
-        const report = await this.opts.collect({ runId, trigger, sources: wanted, profile, publishedSinceDays: days, keepSchedule });
+        const onSource = (name: string) => {
+          if (this.current) this.current.step = name;
+        };
+        const report = await this.opts.collect({ runId, trigger, sources: wanted, profile, publishedSinceDays: days, keepSchedule, onSource });
         this.log(`Collecte terminée : ${report.status}, ${report.created} nouvelle(s)`, report);
         await this.opts.onFinished?.(report);
       } catch (err) {
@@ -136,7 +142,7 @@ export class CollectionRunner {
         this.current = null;
       }
     })();
-    this.current = { runId, done };
+    this.current = { runId, done, step: null };
     return { status: "started", runId };
   }
 
@@ -172,7 +178,9 @@ export class CollectionRunner {
 
   async status(): Promise<CollectionStatus> {
     const s = await this.opts.repo.status(this.scraper);
-    return { ...s, running: this.current !== null || s.lastRun?.status === "running" };
+    // Une collecte « en cours » trop vieille est plantée : l'interface ne doit pas rester bloquée dessus.
+    const alive = s.lastRun?.status === "running" && this.now().getTime() - s.lastRun.startedAt.getTime() < this.staleMs;
+    return { ...s, running: this.current !== null || alive, step: this.current?.step ?? null };
   }
 }
 
@@ -196,8 +204,10 @@ export function createPrismaRunRepo(prisma: PrismaClient): RunRepo {
       return run?.id ?? null;
     },
     async markStaleRunsFailed(before, scraper) {
+      // Appelé au démarrage de l'API : ses propres collectes (tout sauf « cli ») encore « en cours » sont forcément mortes,
+      // quel que soit leur âge ; seule `pnpm collect` (autre processus) peut tourner à côté, on ne la coupe que si elle est vieille.
       const r = await prisma.collectionRun.updateMany({
-        where: { status: "running", startedAt: { lt: before }, trigger: lane(scraper) },
+        where: { status: "running", trigger: lane(scraper), OR: [{ startedAt: { lt: before } }, { trigger: { not: "cli" } }] },
         data: { status: "failed", finishedAt: new Date() },
       });
       return r.count;
@@ -242,6 +252,6 @@ export function createPrismaRunRepo(prisma: PrismaClient): RunRepo {
 
 /** Fonction de collecte réelle (PostgreSQL). */
 export function prismaCollect(prisma: PrismaClient, defaultIntervalMinutes = 5, log?: (l: string) => void): Collect {
-  return ({ runId, trigger, sources, profile, publishedSinceDays, keepSchedule }) =>
-    collectOnce({ prisma, runId, trigger, sources, profile, publishedSinceDays, defaultIntervalMinutes, keepSchedule, ...(log ? { log } : {}) });
+  return ({ runId, trigger, sources, profile, publishedSinceDays, keepSchedule, onSource }) =>
+    collectOnce({ prisma, runId, trigger, sources, profile, publishedSinceDays, defaultIntervalMinutes, keepSchedule, onSource, ...(log ? { log } : {}) });
 }

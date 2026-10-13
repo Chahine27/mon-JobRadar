@@ -393,6 +393,7 @@ export function createFakeCollector() {
     async status() {
       return {
         running: starts.length > 0,
+        step: null,
         lastRun: null,
         sources: [],
         newJobs: 3,

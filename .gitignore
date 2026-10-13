@@ -22,3 +22,6 @@ jobradar-resume.md
 # Python
 __pycache__/
 .venv/
+
+# État du démarrage lu par la page de chargement (écrit par scripts/lancer.ps1)
+scripts/demarrage-etat.js
