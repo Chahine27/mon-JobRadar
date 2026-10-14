@@ -15,6 +15,14 @@ export type ScoringRules = {
   titleWeight: number;
   /** Techno que tu n'as pas, sur un poste junior ou avec formation proposée (sans maîtrise exigée) : comptée à moitié. */
   learnableCredit: number;
+  /** Compétence vue seulement en projets (pas en entreprise) : comptée à moitié. */
+  projectCredit: number;
+  /** Note technique maximum quand la techno principale de l'offre n'est vue qu'en projets. */
+  projectOnlyMainCap: number;
+  /** Malus quand l'annonce exige un anglais courant / bilingue (ou de candidater en anglais). */
+  fluentEnglishPoints: number;
+  /** Plafond « adéquation faible » : au moins 2 compétences exigées manquantes, ou poste orienté IA sans IA en entreprise. */
+  weakFitCap: number;
   /** Masquer du flux principal les contrats hors profil (ils restent en base). */
   hideNonMatchingContract: boolean;
   /** Masquer au-delà de « ton expérience max » + N années demandées (null = jamais masquer, seulement pénaliser). */
@@ -35,11 +43,15 @@ export type ScoringRules = {
 };
 
 export const DEFAULT_RULES: ScoringRules = {
-  version: "2026-10-12.1",
+  version: "2026-10-13.1",
   neutral: 60,
   technicalPoints: 80,
   titleWeight: 3,
   learnableCredit: 0.5,
+  projectCredit: 0.5,
+  projectOnlyMainCap: 50,
+  fluentEnglishPoints: -10,
+  weakFitCap: 40,
   hideNonMatchingContract: true,
   hideYearsOverMax: 1,
   hideSenior: true,

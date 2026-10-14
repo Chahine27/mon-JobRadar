@@ -159,6 +159,12 @@ const when = computed(() =>
           </div>
         </div>
 
+        <ul v-if="a.exigees_en_entreprise" class="clean list small">
+          <li><strong>Exigées, que tu as en entreprise :</strong> {{ a.exigees_en_entreprise.join(", ") || "aucune" }}</li>
+          <li><strong>Exigées, vues seulement en projets :</strong> {{ a.exigees_en_projets?.join(", ") || "aucune" }}</li>
+          <li><strong>Exigées, qui te manquent :</strong> {{ a.exigees_manquantes?.join(", ") || "aucune" }}</li>
+        </ul>
+
         <div v-if="a.points_attention.length">
           <h3>Points d'attention</h3>
           <ul class="clean list warn-list"><li v-for="p in a.points_attention" :key="p">{{ p }}</li></ul>

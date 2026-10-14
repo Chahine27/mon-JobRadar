@@ -23,6 +23,7 @@ export function toJobInput(job: JobRow): AnalysisJobInput {
 export function toProfileInput(p: Profile, kit: LetterKit | null): AnalysisProfileInput {
   return {
     skills: p.skills,
+    projectSkills: p.projectSkills,
     experienceMin: p.experienceMin,
     experienceMax: p.experienceMax,
     contracts: p.contracts,
@@ -35,8 +36,6 @@ export function toProfileInput(p: Profile, kit: LetterKit | null): AnalysisProfi
 const sha = (v: unknown, n: number) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, n);
 /** Ce que l'IA lit de l'offre, avec sa consigne et son modèle (« i » : jamais le début d'une ancienne empreinte, en hexadécimal). */
 const readPart = (job: JobRow, model: string) => `i${sha([toJobInput(job), ANALYSIS_PROMPT_VERSION, model], 11)}`;
-/** Consigne des analyses faites avant ce format : elles restent valables tant qu'elle ne change pas. */
-const LEGACY_PROMPT_VERSION = "2026-10-03.2";
 
 /**
  * « <ce que l'IA lit>:<tout> ». Même offre + même profil + même modèle + même consigne = même analyse (pas de nouvel appel).
@@ -53,16 +52,14 @@ export function analysisHash(job: JobRow, profile: AnalysisProfileInput, model: 
  * relançait l'IA sur tout le flux : jusqu'à 27 analyses pour une offre) : « Relancer » le fait à la demande.
  */
 export function analysisFitsJob(a: { inputHash: string; model: string }, job: JobRow, model: string): boolean {
-  if (a.inputHash.startsWith("i")) return a.inputHash.startsWith(`${readPart(job, model)}:`);
-  // Analyses d'avant : gardées tant que la consigne et le modèle n'ont pas changé (sinon tout serait refait d'un coup).
-  const sameAnnonce = !a.inputHash.includes(":") || a.inputHash.startsWith(`${sha(job.contentHash, 12)}:`);
-  return sameAnnonce && a.model === model && ANALYSIS_PROMPT_VERSION === LEGACY_PROMPT_VERSION;
+  // Analyses d'avant ce format (sans « i ») : faites avec une ancienne consigne, donc périmées.
+  return a.inputHash.startsWith(`${readPart(job, model)}:`);
 }
 
 export type Adequation = "forte" | "moyenne" | "faible";
 
 /** Score maximum selon l'avis de l'IA : elle ne fait que baisser un score trop optimiste, jamais le monter. */
-export const AI_SCORE_CAPS: Record<Adequation, number> = { forte: 100, moyenne: 75, faible: 50 };
+export const AI_SCORE_CAPS: Record<Adequation, number> = { forte: 100, moyenne: 75, faible: 40 };
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 20) : []);
 

@@ -26,8 +26,7 @@ describe("l'avis de l'IA vaut-il encore ?", () => {
     expect(analysisFitsJob(done(), job, "llama")).toBe(false);
   });
 
-  it("analyses d'avant ce format : gardées avec le même modèle et la même consigne", () => {
-    expect(analysisFitsJob({ inputHash: "0123456789abcdef0123456789abcdef", model: "gemma" }, job, "gemma")).toBe(true);
-    expect(analysisFitsJob({ inputHash: "0123456789abcdef0123456789abcdef", model: "gemma" }, job, "llama")).toBe(false);
+  it("analyses d'avant ce format : faites avec une ancienne consigne, donc à refaire", () => {
+    expect(analysisFitsJob({ inputHash: "0123456789abcdef0123456789abcdef", model: "gemma" }, job, "gemma")).toBe(false);
   });
 });

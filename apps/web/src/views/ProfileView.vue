@@ -155,6 +155,11 @@ async function save() {
           <p class="muted small hint">Sert au pourcentage technique : part des compétences de l'offre que tu as.</p>
         </div>
         <TagInput v-model="profile.skills" placeholder="Ex. PostgreSQL" />
+        <div>
+          <h3>Vues seulement en projets</h3>
+          <p class="muted small hint">Jamais utilisées en entreprise : comptent à moitié dans le score, et l'IA ne les présente pas comme acquises.</p>
+        </div>
+        <TagInput v-model="profile.projectSkills" placeholder="Ex. Python" />
       </section>
 
       <section class="card stack">

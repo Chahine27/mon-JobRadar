@@ -256,3 +256,48 @@ export function productExperienceRequired(title: string, description: string, ex
   });
   return ids.size ? { ids: [...ids], years } : null;
 }
+
+/** « un plus », « apprécié », « nice to have » : ce qui suit n'est pas exigé. */
+const OPTIONAL = /un plus|apprecie|idealement|serait un atout|bonus|nice to have|strongly preferred|would be a plus/;
+
+/**
+ * Texte de l'annonce sans ce qui n'est pas exigé : lignes « … un plus », et rubriques « Nice to have / Un plus »
+ * (jusqu'au titre de rubrique suivant : ligne courte, sans puce ni ponctuation finale).
+ */
+export function requiredText(description: string): string {
+  return splitRequired(description).required;
+}
+
+/** L'annonce coupée en deux : ce qui est exigé, et ce qui est présenté comme un plus. */
+export function splitRequired(description: string): { required: string; optional: string } {
+  let section = false;
+  const required: string[] = [];
+  const optional: string[] = [];
+  for (const line of description.split(/\n+/)) {
+    const t = normalizeText(line).trim();
+    const heading = t.length > 0 && t.length <= 60 && !/^[•·*-]/.test(t) && !/[.,;:]$/.test(t);
+    if (heading) section = OPTIONAL.test(t);
+    (section || OPTIONAL.test(t) ? optional : required).push(line);
+  }
+  return { required: required.join("\n"), optional: optional.join("\n") };
+}
+
+/**
+ * L'annonce exige-t-elle d'avoir déjà fait tourner des services en production (« built and run backend services
+ * in production », « expérience de mise en production ») ? Ce n'est alors pas un poste junior, même sans années écrites.
+ */
+export function productionRequired(description: string): boolean {
+  const t = normalizeText(requiredText(description));
+  return /\b(you have|you've|vous avez|tu as|avoir)\s+(already\s+|deja\s+)?(built and run|built and operated|run|operated|shipped|deploye?d?|maintenu|fait tourner|mis)\b[^.\n]{0,60}\b(in production|en production)\b|\b(production experience|experience (de|en) (la )?(mise en )?production)\b/.test(t);
+}
+
+/** Anglais courant ou bilingue exigé, ou candidature en anglais. Les lignes « un plus » ne comptent pas. */
+export function fluentEnglishRequired(description: string): boolean {
+  const t = normalizeText(requiredText(description));
+  return /\b(fluent|fluency in|bilingual|native)\s+(in\s+)?english\b|\benglish\b[^.\n]{0,20}\b(fluent|fluency|bilingual|courant|native)\b|\banglais\s+(courant|bilingue|fluide|professionnel courant|parfait|natif)\b|\bbilingue\s+(en\s+)?anglais\b|\bapply in english\b|\bcandidat(ure|ez|er) en anglais\b/.test(
+    t,
+  );
+}
+
+/** Le titre vise l'IA / les LLM / le machine learning (domaine à part, au-delà de la techno). */
+export const AI_DOMAIN = /\b(ai|ia|llms?|genai|gen ai|machine learning|ml|mlops|deep learning|data scien\w*|intelligence artificielle|nlp)\b/;

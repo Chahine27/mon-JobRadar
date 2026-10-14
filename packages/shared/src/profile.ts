@@ -64,6 +64,8 @@ export const ProfileSchema = z
   .object({
     /** Ce que tu maîtrises : sert au pourcentage technique. */
     skills: z.array(z.string().trim().min(1)).min(1).default(DEFAULT_SKILLS),
+    /** Compétences vues seulement en projets (jamais en entreprise) : comptent moitié dans le score technique. */
+    projectSkills: z.array(z.string().trim().min(1)).max(100).default([]),
     contracts: z.array(z.string().min(1)).min(1),
     experienceMin: z.number().int().min(0),
     experienceMax: z.number().int().min(0),
@@ -115,6 +117,7 @@ export type Profile = z.infer<typeof ProfileSchema>;
 /** Profil par défaut tiré du README (§2, §3, §17). Modifiable ensuite depuis l'interface. */
 export const DEFAULT_PROFILE: Profile = {
   skills: DEFAULT_SKILLS,
+  projectSkills: [],
   contracts: ["CDI"],
   experienceMin: 1,
   experienceMax: 3,

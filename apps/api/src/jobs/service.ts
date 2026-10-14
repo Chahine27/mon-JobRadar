@@ -93,6 +93,9 @@ const aiSkillsOf = (v: Verdict) => (v && v.required.length + v.bonus.length > 0 
 const withAiExperience = (job: JobRow, v: Verdict): JobRow =>
   v &&
   v.experience !== null &&
+  // « 0 an » sans « junior / débutant » écrit : l'IA a déduit un niveau que l'annonce ne donne pas (« early in your career »).
+  (v.experience > 0 || BEGINNER.test(`${job.title}
+${job.description}`)) &&
   job.userEdits?.experienceMinYrs === undefined && // corrigée à la main : elle prime
   (v.experience !== job.experienceMinYrs || !job.experienceText)
     ? {
@@ -101,6 +104,8 @@ const withAiExperience = (job: JobRow, v: Verdict): JobRow =>
         experienceText: v.experience === 0 ? "débutant accepté (lu par l'IA)" : `${v.experience} an${v.experience > 1 ? "s" : ""} minimum (lu par l'IA)`,
       }
     : job;
+
+const BEGINNER = /\b(junior|jr|d[ée]butant(e|s)?|jeune dipl[ôo]m[ée]e?|sans exp[ée]rience|entry[- ]level|graduate|no experience required)\b/i;
 
 /** « Développeur Java / Angular F/H » et « DEVELOPPEUR JAVA/ANGULAR (H/F) » → même clé. */
 const sameKey = (t: string) =>
@@ -135,7 +140,9 @@ export function urlKey(url: string): string | null {
 /** Rubrique du flux : télétravail complet, lieu connu (dans ta zone, ou masquée si hors zone), lieu non précisé. */
 const zoneOf = (job: JobRow): Zone => (job.remoteType === "remote" ? "remote" : job.department || job.latitude !== null ? "local" : "unknown");
 
-function toSummary(job: JobRow, s: ScoreResult, verdict: Verdict = null): JobSummary {
+function toSummary(job: JobRow, s: ScoreResult, v: Verdict = null): JobSummary {
+  // Adéquation faible vérifiée par le code : l'avis de l'IA ne peut pas dire mieux.
+  const verdict = v && s.weakFit.length ? { ...v, adequation: "faible" as const } : v;
   const cap = verdict ? AI_SCORE_CAPS[verdict.adequation] : 100;
   const final = Math.min(s.final, cap);
   return {

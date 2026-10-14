@@ -31,7 +31,8 @@ const GOOD = {
 describe("IA locale (Ollama)", () => {
   it("consigne : profil + annonce, sans rien inventer", () => {
     const p = buildAnalysisPrompt(JOB, PROFILE);
-    expect(p).toContain("Compétences : Vue.js, TypeScript");
+    expect(p).toContain("Compétences EN ENTREPRISE : Vue.js, TypeScript");
+    expect(p).toContain("Compétences vues SEULEMENT EN PROJETS (pas en entreprise) : aucune");
     expect(p).toContain("Lieu : Levallois-Perret (92)");
     expect(p).toContain("Salaire : non indiqué");
     expect(p).toContain("Pour l'un de nos clients");
@@ -132,7 +133,7 @@ describe("points d'attention sur le contrat", () => {
     ["STAGE", "Développeur Vue.js — Stage", "Stage"],
     ["ALTERNANCE", "Développeur Vue.js — Alternance", "Alternance"],
   ] as const)("le contrat %s influence l'adéquation et les points d'attention", async (contractType, title, label) => {
-    const answer = { ...GOOD, experience_min_ans: null, adequation: "forte", points_attention: [] };
+    const answer = { ...GOOD, experience_min_ans: null, adequation: "forte", points_attention: [], competences_obligatoires: ["Vue.js"] };
     const client = new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify(answer) } }) });
     const job = { ...JOB, title, contractType };
 
@@ -159,5 +160,46 @@ describe("points d'attention sur le contrat", () => {
     const { result } = await analyzeJobWithAi(client, job, PROFILE);
     expect(result.adequation).toBe("faible");
     expect(result.points_attention).toContain("Contrat ALTERNANCE hors de tes critères (tu cherches : CDI)");
+  });
+
+  it("offre Jus Mundi : profil par niveau, jamais « solides bases » pour une techno vue en projets", async () => {
+    const me = {
+      ...PROFILE,
+      skills: ["Vue.js", "Java", "Spring Boot", "PostgreSQL", "SQL", "Git", "Python", "Docker", "CI/CD", "IA"],
+      projectSkills: ["Python", "Docker", "CI/CD", "IA"],
+    };
+    const job = {
+      ...JOB,
+      title: "Backend Engineer — Data Platform & AI Agents",
+      company: "Jus Mundi",
+      description:
+        "Must have\n• You have built and run backend services in Python in production.\n• Fluent English, written and spoken.\n\nWhether you're early in your career or a seasoned professional, apply.",
+    };
+    // Ce qu'a vraiment répondu le modèle sur cette offre.
+    const answer = {
+      ...GOOD,
+      competences_obligatoires: ["Python", "FastAPI", "Postgres", "Docker", "CI/CD", "SQL"],
+      niveau: "senior",
+      experience_min_ans: 0,
+      exigees_en_entreprise: ["Python", "Postgres", "SQL"],
+      exigees_en_projets: [],
+      exigees_manquantes: ["FastAPI"],
+      adequation: "moyenne",
+      avis: "Tu as de solides bases en Python, Java et PostgreSQL, ce qui est un bon point de départ, mais l'accent mis sur les LLM nécessite de te former.",
+    };
+    const client = new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify(answer) } }) });
+
+    const prompt = buildAnalysisPrompt(job, me);
+    expect(prompt).toContain("Compétences EN ENTREPRISE : Vue.js, Java, Spring Boot, PostgreSQL, SQL, Git");
+    expect(prompt).toContain("Compétences vues SEULEMENT EN PROJETS (pas en entreprise) : Python, Docker, CI/CD, IA");
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("JAMAIS une « solide base »");
+
+    const { result } = await analyzeJobWithAi(client, job, me);
+    expect(result.avis).not.toMatch(/solides? bases? en Python/i);
+    expect(result.exigees_en_entreprise).toEqual(["Postgres", "SQL"]);
+    expect(result.exigees_en_projets).toEqual(["Python", "Docker", "CI/CD"]);
+    expect(result.exigees_manquantes).toEqual(["FastAPI"]);
+    expect(result.experience_min_ans).toBeNull(); // aucun nombre d'années écrit
+    expect(result.adequation).toBe("faible"); // poste orienté IA, IA vue seulement en projets
   });
 });

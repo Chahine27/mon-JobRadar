@@ -267,6 +267,10 @@ export type AiAnalysis = {
   experience_min_ans: number | null;
   employeur: "direct" | "esn_ou_cabinet" | "inconnu";
   points_attention: string[];
+  /** Absents des analyses d'avant le 13/10/2026. */
+  exigees_en_entreprise?: string[];
+  exigees_en_projets?: string[];
+  exigees_manquantes?: string[];
   adequation: "forte" | "moyenne" | "faible";
   avis: string;
 };
