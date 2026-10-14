@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { DEPARTMENTS } from "@job-radar/shared/geo";
+import { computed, onMounted, ref } from "vue";
 import { ApiError, api } from "../api";
 import Icon from "../components/Icon.vue";
 import NotificationSettingsCard from "../components/NotificationSettingsCard.vue";
@@ -8,11 +9,24 @@ import TagInput from "../components/TagInput.vue";
 import type { HomeLocation, Profile } from "../types";
 
 const CONTRACTS = ["CDI", "CDD", "Intérim", "Alternance", "Stage", "Freelance"];
+const DEPT_OPTIONS = Object.entries(DEPARTMENTS).map(([code, name]) => ({ code, label: `${code} — ${name}` }));
 
 const profile = ref<Profile | null>(null);
 const home = ref<{ label: string; lat: string; lng: string }>({ label: "", lat: "", lng: "" });
 const status = ref<{ kind: "ok" | "error"; text: string; issues?: string[] } | null>(null);
 const saving = ref(false);
+
+// ───── Départements acceptés en plus des zones de recherche ─────
+const deptToAdd = ref("");
+const freeDepts = computed(() => {
+  const taken = new Set([...(profile.value?.locations.map((l) => l.department) ?? []), ...(profile.value?.extraDepartments ?? [])]);
+  return DEPT_OPTIONS.filter((d) => !taken.has(d.code));
+});
+function addDept() {
+  if (!profile.value || !deptToAdd.value) return;
+  profile.value.extraDepartments = [...(profile.value.extraDepartments ?? []), deptToAdd.value].sort();
+  deptToAdd.value = "";
+}
 
 // ───── Recherche d'adresse du point de départ ─────
 const homeQuery = ref("");
@@ -227,10 +241,28 @@ async function save() {
         <h2><Icon name="pin" :size="17" />Zones de recherche</h2>
         <div v-for="(l, i) in profile.locations" :key="i" class="zone">
           <input v-model="l.label" placeholder="Nom (ex. Oise)" aria-label="Nom de la zone" />
-          <input v-model="l.department" placeholder="Département (ex. 60)" aria-label="Département" />
+          <input v-model="l.department" list="departments" placeholder="Département (ex. 60)" aria-label="Département" />
           <button type="button" class="icon-btn danger" :aria-label="`Retirer ${l.label}`" @click="profile.locations.splice(i, 1)"><Icon name="trash" :size="15" /></button>
         </div>
         <div><button type="button" class="small" @click="addLocation"><Icon name="plus" :size="14" />Ajouter une zone</button></div>
+        <datalist id="departments"><option v-for="d in DEPT_OPTIONS" :key="d.code" :value="d.code">{{ d.label }}</option></datalist>
+        <div>
+          <h3>Départements acceptés en plus</h3>
+          <p class="muted small hint">Dans ta zone sans recherche en plus sur les sites (ex. 92, 93 autour de Paris). Ailleurs : offre masquée et jamais interrogée, sauf télétravail complet.</p>
+        </div>
+        <div v-if="profile.extraDepartments?.length" class="row">
+          <span v-for="d in profile.extraDepartments" :key="d" class="chip">
+            {{ d }} — {{ DEPARTMENTS[d] ?? "?" }}
+            <button type="button" :aria-label="`Retirer ${DEPARTMENTS[d] ?? d}`" @click="profile.extraDepartments = profile.extraDepartments.filter((x) => x !== d)">×</button>
+          </span>
+        </div>
+        <div class="row">
+          <select v-model="deptToAdd" aria-label="Département à accepter">
+            <option value="">Choisir un département…</option>
+            <option v-for="d in freeDepts" :key="d.code" :value="d.code">{{ d.label }}</option>
+          </select>
+          <button type="button" class="small" :disabled="!deptToAdd" @click="addDept"><Icon name="plus" :size="14" />Accepter</button>
+        </div>
         <label>
           Rayon autour du point de départ (km, min. 5, vide = aucun)
           <input v-model.number="profile.searchRadiusKm" type="number" min="5" max="200" placeholder="ex. 30" />

@@ -23,7 +23,7 @@ describe(`scores figés — règles ${DEFAULT_RULES.version}`, () => {
   });
 
   it("version des règles attendue", () => {
-    expect(DEFAULT_RULES.version).toBe("2026-10-13.1");
+    expect(DEFAULT_RULES.version).toBe("2026-10-14.1");
   });
 });
 
@@ -380,7 +380,7 @@ describe("critère Technique calculé sur les compétences lues par l'IA", () =>
 });
 
 describe("zone : départements, rayon, télétravail", () => {
-  const far = { ...PERFECT, department: "13" };
+  const far = { ...PERFECT, department: "13", travelMinutes: null };
   it("hors zone → masquée (sauf télétravail ou lieu inconnu)", () => {
     expect(score(far).hidden).toBe(true);
     expect(score({ ...far, remoteType: "remote" }).hidden).toBe(false);
@@ -390,6 +390,14 @@ describe("zone : départements, rayon, télétravail", () => {
     const withRadius = { ...DEFAULT_PROFILE, searchRadiusKm: 30 };
     expect(score({ ...far, distanceKm: 12 }, withRadius).hidden).toBe(false);
     expect(score({ ...far, distanceKm: 80 }, withRadius).hidden).toBe(true);
+  });
+  it("département accepté en plus (93, sans recherche dédiée) : dans ta zone ; télétravail complet : partout", () => {
+    const stOuen = { ...PERFECT, department: "93" };
+    expect(score(stOuen).hidden).toBe(true);
+    const r = score(stOuen, { ...DEFAULT_PROFILE, extraDepartments: ["93"] });
+    expect(r.hidden).toBe(false);
+    expect(r.reasons).toContain("Dans ta zone : Seine-Saint-Denis");
+    expect(score({ ...far, remoteType: "remote" }).hidden).toBe(false);
   });
 });
 

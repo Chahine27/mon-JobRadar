@@ -14,7 +14,7 @@ import {
 import { type CollectReport, CollectionRunner, type RunnerOptions, completeJobScraperDescriptions, renormalizeJobs, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
 import { OsrmRoutingService, PrimRoutingService, ensureTravelTimes, fillDepartments, geocode } from "@job-radar/routing";
 import { scoreJob, scoringInputFromJob } from "@job-radar/scoring";
-import { parseProfile } from "@job-radar/shared";
+import { parseProfile, zoneDepartments } from "@job-radar/shared";
 import {
   type AtsKind,
   AdzunaSource,
@@ -103,6 +103,12 @@ const franceTravail = new FranceTravailSource({
   clientId: e.FRANCE_TRAVAIL_CLIENT_ID?.trim(),
   clientSecret: e.FRANCE_TRAVAIL_CLIENT_SECRET?.trim(),
 });
+/** Départements de ta zone : les offres ailleurs (masquées) ne déclenchent aucune requête vers les sites. */
+async function currentZone() {
+  const row = await prisma.profile.findFirst({ select: { data: true } });
+  return row ? zoneDepartments(parseProfile(row.data)) : undefined;
+}
+
 /** Vérification des offres expirées : au plus toutes les 6 heures. */
 let lastExpiryAt = 0;
 // IA locale (Ollama, gratuite, sur ce PC). Réglages facultatifs : OLLAMA_URL, OLLAMA_MODEL.
@@ -121,8 +127,10 @@ let lastAfterCollectAt = 0;
 async function afterCollect(report: CollectReport, changed: boolean) {
   if (Date.now() - lastExpiryAt > 6 * 3600_000) {
     lastExpiryAt = Date.now();
+    const zone = await currentZone();
     await expireJobs({
       prisma,
+      ...(zone ? { zone } : {}),
       ftIsOnline: (id) => franceTravail.isStillOnline(id),
       // Offre LinkedIn close (« candidatures plus acceptées ») → expirée, retirée du flux.
       ...(env.JOBSCRAPER_ENABLED ? { linkedinIsOpen: (id: string) => linkedinJobIsOpen(id) } : {}),
@@ -206,7 +214,8 @@ const scraperRunner = new CollectionRunner({
   // D'abord : offres arrivées sans description ni date (LinkedIn, HelloWork) complétées depuis leur page publique.
   // Ensuite seulement trajets, IA et notifications : ils travaillent une seule fois, sur l'annonce entière.
   onFinished: async (report) => {
-    const completed = await completeJobScraperDescriptions({ prisma, fetchDetails: (l) => fetchJobScraperDetails(l), log: (m) => log(m) })
+    const zone = await currentZone();
+    const completed = await completeJobScraperDescriptions({ prisma, fetchDetails: (l) => fetchJobScraperDetails(l), ...(zone ? { zone } : {}), log: (m) => log(m) })
       .then((r) => r.completed)
       .catch((err) => (log(`Descriptions JobScraper : ${String(err)}`), 0));
     await afterCollect(report, report.created + report.updated + completed > 0);

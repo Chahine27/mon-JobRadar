@@ -240,6 +240,25 @@ describe("source → normalisation → base (README §32)", () => {
     expect((await completeJobScraperDescriptions({ prisma, sleep: async () => {}, fetchDetails: async () => null })).checked).toBe(0);
   });
 
+  it("page refusée (429) : plus rien demandé à ce site pendant le passage", async () => {
+    for (const id of ["linkedin_4400011", "linkedin_4400012", "linkedin_4400013"]) {
+      await ingestJob(prisma, normalize(mapJobScraperOfferToRawJob({ id, source: "linkedin", url: `https://www.linkedin.com/jobs/view/${id.slice(9)}`, title: `Dev ${id}`, company: `Boîte ${id}`, location: "Paris" }, "linkedin")!)!);
+    }
+    const asked: string[] = [];
+    await completeJobScraperDescriptions({ prisma, sleep: async () => {}, fetchDetails: async (l) => (asked.push(l.sourceJobId), null) });
+    expect(asked).toHaveLength(1);
+  });
+
+  it("offre hors de ta zone : sa page n'est pas demandée", async () => {
+    const li = (id: string, location: string) =>
+      ingestJob(prisma, normalize(mapJobScraperOfferToRawJob({ id, source: "linkedin", url: `https://www.linkedin.com/jobs/view/${id.slice(9)}`, title: `Dev ${id}`, company: `Boîte ${id}`, location }, "linkedin")!)!);
+    await li("linkedin_4400021", "Paris, Île-de-France");
+    await li("linkedin_4400022", "Marseille, Provence-Alpes-Côte d'Azur");
+    const asked: string[] = [];
+    await completeJobScraperDescriptions({ prisma, sleep: async () => {}, zone: new Set(["75"]), fetchDetails: async (l) => (asked.push(l.sourceJobId), null) });
+    expect(asked).toEqual(["linkedin_4400021"]);
+  });
+
   it("règles changées depuis : réappliquées aux offres déjà en base, sans toucher aux ajouts manuels ni aux fusions", async () => {
     const li = (id: string, extra: object = {}) =>
       normalize(mapJobScraperOfferToRawJob({ id, source: "linkedin", url: `https://www.linkedin.com/jobs/view/${id.slice(9)}`, title: `Dev ${id}`, company: `Boîte ${id}`, location: "Paris", experience_level: "senior", ...extra }, "linkedin")!)!;

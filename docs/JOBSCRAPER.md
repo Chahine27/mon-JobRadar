@@ -104,6 +104,14 @@ Les objets amont donnent des listes vides par défaut pour `skills` et `benefits
 
 HelloWork a renommé la classe de ses étiquettes de carte (`tw-tag-secondary-s` → `tag-secondary-s`) : JobScraper ne lisait plus ni le lieu (toujours « France ») ni le contrat. Dans `tools/jobscraper/src/jobscraper/scrapers/hellowork.py`, le sélecteur des tags est devenu `card.select("div.tw-tag-secondary-s, div.tag-secondary-s")`. Ce clone n'est pas versionné : à refaire après un nouveau `git clone`. Le lieu arrive au format « Beauvais - 60 », lu par le normaliseur (ville + département).
 
+## Blocages LinkedIn (14 octobre 2026)
+
+Du 11 au 14 octobre, LinkedIn a répondu HTTP 429 à environ une collecte sur cinq (intervalle de 20 min, 6 recherches × 2 zones). Trois causes de rafale, corrigées :
+
+- **Recherches enchaînées** : les 12 recherches partaient en 40 s environ. `JobScraperSource` attend maintenant 10 à 15 s (aléatoire) entre deux recherches LinkedIn (`LINKEDIN_PAUSE_MS`). Une collecte dure donc environ 3 min.
+- **Compléments insistants** : `completeJobScraperDescriptions` demandait jusqu'à 30 pages à la suite, même après un refus. Au premier refus d'un site, il ne lui demande plus rien pendant ce passage. Les pages LinkedIn sont espacées de 5 s (1,5 s pour les autres sites).
+- **Réessais sur 429** : JobScraper réessayait 3 fois chaque page refusée. Correctif local dans `tools/jobscraper/src/jobscraper/scrapers/base.py` : pas de réessai sur 429 ni sur 999 (`retry_if_exception`, `reraise=True`). Ce clone n'est pas versionné : à refaire après un nouveau `git clone`.
+
 ## Vérification des zones par source (9 octobre 2026, « Développeur », Oise)
 
 | Source | Lieu envoyé | Résultat |

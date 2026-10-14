@@ -1,4 +1,4 @@
-import { type Profile, type RemoteType, type ScoreRule } from "@job-radar/shared";
+import { departmentName, type Profile, type RemoteType, type ScoreRule, zoneDepartments } from "@job-radar/shared";
 import { extractSkills, getSkill, normalizeText, resolveSkill, type Skill } from "@job-radar/skills";
 import { DEFAULT_RULES, type ScoringRules } from "./rules";
 import { salaryOfJob } from "./salary";
@@ -323,8 +323,11 @@ function scoreLocation(input: ScoringInput, profile: Profile): Part {
   const dept = input.department;
   const km = input.distanceKm ?? null;
   if (!dept && km === null) return { score: 50, reasons: [], warnings: ["Lieu de travail non précisé"] };
-  const target = dept ? profile.locations.find((l) => l.department === dept) : undefined;
-  if (target) return { score: 100, reasons: [`Dans ta zone : ${target.label}`], warnings: [] };
+  // Départements de tes recherches, ou acceptés en plus (ex. 93 : Saint-Ouen sans recherche dédiée).
+  if (dept && zoneDepartments(profile).has(dept)) {
+    const label = profile.locations.find((l) => l.department === dept)?.label ?? departmentName(dept) ?? dept;
+    return { score: 100, reasons: [`Dans ta zone : ${label}`], warnings: [] };
+  }
   const radius = profile.searchRadiusKm;
   if (radius !== null && km !== null && km <= radius) {
     return { score: 80, reasons: [`À ${Math.round(km)} km de chez toi (rayon ${radius} km)`], warnings: [] };

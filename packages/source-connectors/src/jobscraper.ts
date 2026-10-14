@@ -348,7 +348,12 @@ export type JobScraperOptions = {
   probe?: (provider: JobScraperProvider) => Promise<BlockCheck>;
   /** Requêtes HTTP directes (WTTJ ; remplaçable dans les tests). */
   fetch?: typeof fetch;
+  /** Pause entre deux recherches LinkedIn (remplaçable dans les tests). */
+  sleep?: (ms: number) => Promise<void>;
 };
+
+/** LinkedIn bloque l'IP (HTTP 429) après une rafale : 12 recherches enchaînées en 40 s suffisaient. */
+export const LINKEDIN_PAUSE_MS = 10_000;
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../../..");
 const INDEED_SCRIPT = path.resolve(import.meta.dirname, "../python/indeed.py");
@@ -365,6 +370,7 @@ export class JobScraperSource implements JobSource {
   private readonly timeoutMs: number;
   private readonly enabled: boolean;
   private lastProbe: { at: number; check: BlockCheck } | null = null;
+  private lastSearchAt = 0;
 
   constructor(private readonly opts: JobScraperOptions) {
     this.name = `jobscraper:${opts.provider}`;
@@ -410,6 +416,11 @@ export class JobScraperSource implements JobSource {
       const collectedAt = new Date();
       const offers = await searchWttj(params, Math.min(params.maxResults ?? JOBSCRAPER_MAX_PER_SEARCH, JOBSCRAPER_MAX_PER_SEARCH), this.opts.fetch);
       return offers.flatMap((o) => mapJobScraperOfferToRawJob(o, "wttj", collectedAt) ?? []);
+    }
+    if (this.opts.provider === "linkedin") {
+      // 10 à 15 s depuis la recherche précédente (un rythme fixe ressemble davantage à un robot).
+      const wait = this.lastSearchAt + LINKEDIN_PAUSE_MS + Math.random() * 5000 - Date.now();
+      if (wait > 0) await (this.opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms))))(wait);
     }
     const dir = await mkdtemp(path.join(os.tmpdir(), "job-radar-jobscraper-"));
     const output = path.join(dir, "jobs.json");
@@ -469,6 +480,7 @@ export class JobScraperSource implements JobSource {
       const detail = error instanceof Error && "stderr" in error ? String(error.stderr).trim().slice(-500) : "";
       throw new Error(`JobScraper ${this.opts.provider} : ${error instanceof Error ? error.message : String(error)}${detail ? ` — ${detail}` : ""}`);
     } finally {
+      this.lastSearchAt = Date.now();
       await rm(dir, { recursive: true, force: true });
     }
   }

@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@job-radar/db";
+import { outOfZone } from "@job-radar/shared";
 
 /**
  * Offres expirées (plus en ligne). On ne devine pas : chaque source a sa règle.
@@ -58,6 +59,8 @@ export async function expireJobs(opts: {
   linkedinIsOpen?: (id: string) => Promise<boolean | null>;
   /** Pause entre deux pages LinkedIn (remplaçable dans les tests). */
   sleep?: (ms: number) => Promise<void>;
+  /** Départements de ta zone (zoneDepartments) : les offres LinkedIn ailleurs, masquées, ne sont pas vérifiées. */
+  zone?: Set<string>;
   now?: Date;
   log?: (m: string) => void;
 }): Promise<ExpiryReport> {
@@ -81,6 +84,8 @@ export async function expireJobs(opts: {
       id: true,
       publishedAt: true,
       firstSeenAt: true,
+      department: true,
+      remoteType: true,
       sources: { select: { source: true, sourceJobId: true, lastSeenAt: true } },
     },
     orderBy: { lastSeenAt: "asc" },
@@ -105,7 +110,7 @@ export async function expireJobs(opts: {
           await prisma.jobSourceLink.updateMany({ where: { source: link.source, sourceJobId: link.sourceJobId }, data: { lastSeenAt: now } });
         }
       }
-      if (link.source === "jobscraper:linkedin" && opts.linkedinIsOpen && report.linkedinChecks < EXPIRY.maxLinkedinChecks && linkedinFailures < 3) {
+      if (link.source === "jobscraper:linkedin" && opts.linkedinIsOpen && !(opts.zone && outOfZone(job, opts.zone)) && report.linkedinChecks < EXPIRY.maxLinkedinChecks && linkedinFailures < 3) {
         // Une page à la fois, espacées : une rafale de 100 pages faisait bloquer l'IP (HTTP 429).
         if (report.linkedinChecks > 0) await sleep(1500);
         report.linkedinChecks++;

@@ -76,6 +76,8 @@ export const ProfileSchema = z
     salaryTarget: z.number().int().positive().nullable(),
     salaryMinimum: z.number().int().positive().nullable(),
     locations: z.array(LocationTargetSchema).min(1),
+    /** Départements acceptés en plus de tes zones (ex. 92, 93) : dans ta zone, sans recherche en plus sur les sites. */
+    extraDepartments: z.array(LocationTargetSchema.shape.department).max(110).default([]),
     /** Rayon autour du point de départ : une offre à moins de N km est « dans ta zone » même hors de tes départements. null = désactivé. */
     searchRadiusKm: z.number().int().min(5).max(200).nullable().default(null),
     /**
@@ -129,6 +131,7 @@ export const DEFAULT_PROFILE: Profile = {
     { label: "Oise", department: "60" },
     { label: "Paris", department: "75" },
   ],
+  extraDepartments: [],
   searchRadiusKm: null,
   preferredTechs: [
     { name: "Vue.js", weight: 1 },
@@ -159,4 +162,18 @@ export const DEFAULT_PROFILE: Profile = {
 /** Profil enregistré. Les anciens champs (poids du score) sont ignorés. */
 export function parseProfile(data: unknown): Profile {
   return ProfileSchema.parse(data);
+}
+
+/** Départements de ta zone : ceux de tes recherches et ceux acceptés en plus. */
+export function zoneDepartments(profile: Pick<Profile, "locations" | "extraDepartments">): Set<string> {
+  return new Set([...profile.locations.map((l) => l.department), ...(profile.extraDepartments ?? [])]);
+}
+
+/**
+ * Offre hors de ta zone d'après son seul département (sans réseau) : on ne lui envoie aucune requête (page, expiration).
+ * Télétravail complet ou département inconnu : jamais hors zone.
+ */
+// ponytail: le rayon autour du point de départ (searchRadiusKm) n'est compté que dans le score, pas ici.
+export function outOfZone(job: { department: string | null; remoteType: string | null }, zone: Set<string>): boolean {
+  return !!job.department && job.remoteType !== "remote" && !zone.has(job.department);
 }

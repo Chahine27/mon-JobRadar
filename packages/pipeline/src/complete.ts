@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@job-radar/db";
 import { htmlToText, normalize } from "@job-radar/job-normalizer";
+import { outOfZone } from "@job-radar/shared";
 import { ingestJob } from "./ingest";
 
 /** Description (HTML) et date de publication lues sur la page publique d'une offre (null : page illisible). */
@@ -31,6 +32,8 @@ export async function completeJobScraperDescriptions(opts: {
   max?: number;
   sleep?: (ms: number) => Promise<void>;
   log?: (m: string) => void;
+  /** Départements de ta zone (zoneDepartments) : une offre ailleurs, sans télétravail complet, n'est pas lue. */
+  zone?: Set<string>;
 }): Promise<{ checked: number; completed: number }> {
   const { prisma, log = () => {} } = opts;
   const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
@@ -42,10 +45,12 @@ export async function completeJobScraperDescriptions(opts: {
         source: { startsWith: "jobscraper:" },
         OR: [{ job: { ...active, description: "" } }, { job: { ...active, publishedAt: null } }, { source: { in: SUMMARY_ONLY }, job: active }],
       },
-      select: { id: true, source: true, sourceJobId: true, sourceUrl: true, rawData: true, job: { select: { description: true, publishedAt: true } } },
+      select: { id: true, source: true, sourceJobId: true, sourceUrl: true, rawData: true, job: { select: { description: true, publishedAt: true, department: true, remoteType: true } } },
       orderBy: { firstSeenAt: "desc" },
     })
   )
+    // Hors de ta zone : masquée du flux, inutile de demander sa page (LinkedIn bloque vite l'IP).
+    .filter((l) => !opts.zone || !outOfZone(l.job, opts.zone))
     // Filtres en JS : en SQL, « clé JSON absente » ne se teste pas proprement avec NOT.
     .filter((l) => {
       const tried = (l.rawData as Record<string, unknown> | null)?.[DETAIL_TRIED_AT];
@@ -58,13 +63,19 @@ export async function completeJobScraperDescriptions(opts: {
     )
     .slice(0, opts.max ?? 30);
   let completed = 0;
-  for (const [i, link] of links.entries()) {
-    if (i > 0) await sleep(1500); // pas de rafale vers le même site
+  let fetched = 0;
+  /** Site qui a refusé une page (429, blocage) : on ne lui redemande plus rien de ce passage (insister prolonge le blocage). */
+  const refused = new Set<string>();
+  for (const link of links) {
+    if (refused.has(link.source)) continue;
+    // Pas de rafale vers le même site ; LinkedIn bloque l'IP plus vite que les autres.
+    if (fetched++ > 0) await sleep(link.source === "jobscraper:linkedin" ? 5000 : 1500);
     const details = await opts.fetchDetails(link);
     // Page illisible, ou sans texte alors qu'il en manque : essai noté, on retentera demain (pas à chaque passage).
     const tried = () =>
       prisma.jobSourceLink.update({ where: { id: link.id }, data: { rawData: { ...(link.rawData as object), [DETAIL_TRIED_AT]: new Date().toISOString() } } });
     if (!details) {
+      refused.add(link.source);
       await tried();
       continue;
     }
