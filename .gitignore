@@ -8,16 +8,19 @@ coverage/
 *.log
 .DS_Store
 
-# Captures d'écran envoyées par Claude (pas du code)
-Claude outputs/
 job-radar.stop
 
 # Base locale, sauvegardes et CV : données personnelles
 data/
 
-# Réglages locaux de Claude Code et notes personnelles
+# Réglages locaux de Claude Code
 .claude/
-jobradar-resume.md
+
+# Rangement (14/10/2026) : notes et transmissions (rapports pour l'agent de la version publique, résumé du projet,
+# sorties de Claude), archives (brouillons de débogage, anciens journaux, tests de CV), journaux de l'appli
+notes/
+archives/
+logs/
 
 # Python
 __pycache__/

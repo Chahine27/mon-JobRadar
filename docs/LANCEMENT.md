@@ -8,7 +8,7 @@ Toutes les commandes se tapent dans un terminal ouvert dans le dossier `monPisto
 **Le plus simple : double-clic sur « Lancer Job Radar.cmd »** (à la racine de `mon JobRadar`), ou sur le raccourci « Job Radar » du Bureau.
 Il démarre la base de données (intégrée, sans Docker : fichiers dans `data\postgres`), Ollama, installe les mises à jour (`pnpm install` si besoin,
 migrations de la base), lance `pnpm dev` et ouvre http://localhost:5173 tout seul. Si Job Radar tourne déjà, il arrête l'ancienne version et relance tout (pour toujours avoir la dernière version).
-Tout tourne **en arrière-plan, sans fenêtre** ; ce qui s'affichait dans la fenêtre est écrit dans `job-radar.log`.
+Tout tourne **en arrière-plan, sans fenêtre** ; ce qui s'affichait dans la fenêtre est écrit dans `logs/job-radar.log`.
 En cas de problème au démarrage, un message s'affiche (par exemple si le port 5173 ou 3000 est pris par un autre programme).
 **Pour arrêter : bouton « Arrêter Job Radar » en bas du menu du site** (avec confirmation). La base de données reste allumée en arrière-plan (elle ne consomme presque rien).
 Pour créer le raccourci du Bureau (une seule fois) : clic droit sur `scripts\creer-raccourci.ps1` → « Exécuter avec PowerShell ».

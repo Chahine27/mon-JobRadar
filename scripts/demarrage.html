@@ -54,7 +54,7 @@
       $("bar").style.width = `${Math.max(3, st.pct)}%`;
       $("step").textContent = st.text;
     }
-    $("elapsed").textContent = secs > 180 ? `${secs} s… c'est long : regarde le fichier job-radar.log.` : `${secs} s`;
+    $("elapsed").textContent = secs > 180 ? `${secs} s… c'est long : regarde le fichier logs/job-radar.log.` : `${secs} s`;
     if (st?.pct >= 100) {
       $("bar").style.width = "100%";
       $("step").textContent = "Prêt, ouverture…";

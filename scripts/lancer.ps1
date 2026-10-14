@@ -1,6 +1,6 @@
 ﻿# Lance Job Radar en un double-clic : base de données (intégrée, sans Docker), Ollama (IA), mises à jour, puis « pnpm dev ».
 # Appelé par « Lancer Job Radar.cmd » à la racine du projet, en arrière-plan (aucune fenêtre) :
-# le journal de l'appli va dans job-radar.log, et le bouton « Arrêter Job Radar » du site arrête tout.
+# le journal de l'appli va dans logs/job-radar.log, et le bouton « Arrêter Job Radar » du site arrête tout.
 # « Continue » : avec « Stop », Windows PowerShell 5 s'arrête dès qu'un programme écrit sur sa sortie d'erreur.
 $ErrorActionPreference = "Continue"
 # Titre obligatoire : avec un titre de console vide, Node plante (« Assertion failed: process_title »).
@@ -8,7 +8,10 @@ $Host.UI.RawUI.WindowTitle = "Job Radar"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $PSScriptRoot "db.ps1")
 $url = "http://localhost:5173"
-$log = Join-Path (Get-Location) "job-radar.log"
+$log = Join-Path (Get-Location) "logs/job-radar.log"
+New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
+# Ancien emplacement (racine du projet, avant le 14/10/2026) : rangé une fois dans logs/.
+if (Test-Path "job-radar.log") { Move-Item "job-radar.log" (Join-Path (Split-Path $log) "job-radar-ancien.log") -Force -ErrorAction SilentlyContinue }
 
 # Page de chargement ouverte tout de suite dans le navigateur : elle lit l'étape en cours dans demarrage-etat.js
 # et bascule d'elle-même sur le site dès que le site et le serveur répondent.
@@ -104,7 +107,7 @@ Write-Host "Tout est à jour." -ForegroundColor Green
 
 # 4. Lance l'appli, ouvre le site quand le site ET le serveur répondent.
 # Tourne caché jusqu'au bouton « Arrêter Job Radar » du site : le serveur crée alors job-radar.stop, et on arrête
-# tout ce que « pnpm dev » a lancé (serveur + site). Sa sortie (pour comprendre un problème) va dans job-radar.log.
+# tout ce que « pnpm dev » a lancé (serveur + site). Sa sortie (pour comprendre un problème) va dans logs/job-radar.log.
 $stopFile = Join-Path (Get-Location) "job-radar.stop"
 Remove-Item $stopFile -ErrorAction SilentlyContinue
 $env:JOB_RADAR_STOP_FILE = $stopFile
@@ -115,7 +118,7 @@ for ($i = 0; $i -lt 180 -and -not $app.HasExited; $i++) {
   if ((Responds $url) -and (Responds "$url/api/health")) { break }
   Start-Sleep -Seconds 1
 }
-if ($app.HasExited) { Fail "le serveur s'est arrêté au démarrage. Regarde le fichier job-radar.log pour le détail." }
+if ($app.HasExited) { Fail "le serveur s'est arrêté au démarrage. Regarde le fichier logs/job-radar.log pour le détail." }
 Progress 100 "Prêt"
 while (-not $app.HasExited -and -not (Test-Path $stopFile)) { Start-Sleep -Seconds 1 }
 taskkill /PID $app.Id /T /F 2>&1 | Out-Null

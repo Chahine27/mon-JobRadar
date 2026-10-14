@@ -442,7 +442,7 @@ Tant que l'application tourne :
 ## 18. Lancement, configuration, outils
 
 ### Lancement
-- **Double-clic sur « Lancer Job Radar.cmd »** (ou le raccourci du Bureau) : démarre la base (intégrée, sans Docker), Ollama, installe les mises à jour et les migrations, lance l'API et le site **en arrière-plan sans fenêtre**, puis ouvre http://localhost:5173. Journal dans `job-radar.log`. S'il tourne déjà, il redémarre tout.
+- **Double-clic sur « Lancer Job Radar.cmd »** (ou le raccourci du Bureau) : démarre la base (intégrée, sans Docker), Ollama, installe les mises à jour et les migrations, lance l'API et le site **en arrière-plan sans fenêtre**, puis ouvre http://localhost:5173. Journal dans `logs/job-radar.log`. S'il tourne déjà, il redémarre tout.
 - **Arrêt** : bouton « Arrêter Job Radar » dans le menu.
 - À la main : `pnpm db:server` puis `pnpm dev`.
 
