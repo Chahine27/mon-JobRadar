@@ -220,10 +220,20 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
     };
   }
 
+  /** Profil + avis de l'IA chargés une fois, puis résumé (score compris) de chaque offre. */
+  async function summarizer(userId: string) {
+    const { profile, hash } = await loadProfile(userId);
+    const verdictOf = await loadVerdicts();
+    return (j: JobRow) => {
+      const v = verdictOf(j);
+      const jj = withAiExperience(j, v);
+      return toSummary(jj, scoreOf(jj, profile, hash, v), v);
+    };
+  }
+
   return {
     async list(userId: string, f: JobFilters): Promise<JobSummary[]> {
-      const { profile, hash } = await loadProfile(userId);
-      const verdictOf = await loadVerdicts();
+      const summarize = await summarizer(userId);
       const q = f.q?.trim().toLowerCase();
       // Statut filtré en base : seulement les offres demandées sont lues (pas les expirées ou ignorées pour le flux).
       const statuses = f.status === "all" ? undefined : f.status === "active" ? JOB_STATUSES.filter((s) => !OUT_OF_FEED.includes(s)) : [f.status];
@@ -231,11 +241,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
         .filter((j) => !q || `${j.title} ${j.company ?? ""} ${j.city ?? ""}`.toLowerCase().includes(q))
         .filter((j) => !f.source || j.sources.some((s) => s.source === f.source))
         .filter((j) => !f.contract || (j.contractType ?? "unknown") === f.contract)
-        .map((j) => {
-          const v = verdictOf(j);
-          const jj = withAiExperience(j, v);
-          return toSummary(jj, scoreOf(jj, profile, hash, v), v);
-        })
+        .map(summarize)
         .filter((s) => !f.zone || s.zone === f.zone)
         .filter((s) => s.score.final >= f.minScore)
         // Une offre ajoutée à la main n'est jamais masquée : tu l'as choisie. Sauf hors de ta zone :
@@ -256,31 +262,21 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
      * `appliedAt` = date où tu as marqué l'offre comme postulée.
      */
     async listApplications(userId: string): Promise<Array<JobSummary & { appliedAt: Date | null }>> {
-      const { profile, hash } = await loadProfile(userId);
-      const verdictOf = await loadVerdicts();
+      const summarize = await summarizer(userId);
       const applied = await stores.jobs.appliedDates();
       return (await stores.jobs.list(["APPLIED", "REJECTED"]))
         .filter((j) => j.status === "APPLIED" || (j.status === "REJECTED" && applied.has(j.id)))
-        .map((j) => {
-          const v = verdictOf(j);
-          const jj = withAiExperience(j, v);
-          return { ...toSummary(jj, scoreOf(jj, profile, hash, v), v), appliedAt: applied.get(j.id) ?? null };
-        })
+        .map((j) => ({ ...summarize(j), appliedAt: applied.get(j.id) ?? null }))
         .sort((a, b) => (b.appliedAt?.getTime() ?? 0) - (a.appliedAt?.getTime() ?? 0));
     },
 
     /** Offres ajoutées à la main, les plus récentes d'abord. */
     async listManual(userId: string): Promise<JobSummary[]> {
-      const { profile, hash } = await loadProfile(userId);
-      const verdictOf = await loadVerdicts();
+      const summarize = await summarizer(userId);
       return (await stores.jobs.list())
         .filter(isManual)
         .sort((a, b) => b.firstSeenAt.getTime() - a.firstSeenAt.getTime())
-        .map((j) => {
-          const v = verdictOf(j);
-          const jj = withAiExperience(j, v);
-          return toSummary(jj, scoreOf(jj, profile, hash, v), v);
-        });
+        .map(summarize);
     },
 
     async get(userId: string, id: string): Promise<JobDetail | null> {

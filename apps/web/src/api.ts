@@ -10,6 +10,9 @@ export class ApiError extends Error {
   }
 }
 
+/** Message d'erreur lisible : celui du serveur, sinon le texte par défaut. */
+export const errorMessage = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
+
 let onUnauthorized: () => void = () => {};
 export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;

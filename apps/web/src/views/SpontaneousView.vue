@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { goBack } from "../router";
-import { ApiError, api } from "../api";
+import { api, errorMessage } from "../api";
 import Icon from "../components/Icon.vue";
 import PageHeader from "../components/PageHeader.vue";
 import type { SpontaneousApplicationState } from "../types";
@@ -89,7 +89,7 @@ async function write() {
   try {
     apply(await api.writeApplicationLetter(props.id, title.value.trim() || state.value!.title));
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : "L'écriture de la lettre a échoué.";
+    error.value = errorMessage(e, "L'écriture de la lettre a échoué.");
   } finally {
     clearInterval(timer);
     running.value = false;
@@ -129,7 +129,7 @@ async function send() {
     );
     sentNow.value = true;
   } catch (e) {
-    sendError.value = e instanceof ApiError ? e.message : "L'email n'est pas parti.";
+    sendError.value = errorMessage(e, "L'email n'est pas parti.");
   } finally {
     sending.value = false;
     await nextTick();

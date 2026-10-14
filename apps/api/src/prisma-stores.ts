@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from "@job-radar/db";
 import { buildManualJob, removeManualJob, saveManualJob } from "@job-radar/pipeline";
 import { contractOfJob, salaryOfJob } from "@job-radar/scoring";
 import type { TailoredCvDraft } from "@job-radar/cv-tailor";
-import { type CvMaster, CvMasterSchema, CvOverridesSchema, EMPTY_OVERRIDES, LetterKitSchema, parseProfile, ProfileSchema, type TemplateId } from "@job-radar/shared";
+import { type CvMaster, CvMasterSchema, CvOverridesSchema, EMPTY_OVERRIDES, LetterKitSchema, parseProfile, type TemplateId } from "@job-radar/shared";
 import { applyEdits, type FullTextInfo, type HomeLocation, type JobEdits, type JobRow, type ProfileRecord, type Stores } from "./stores";
 
 const jobInclude = {

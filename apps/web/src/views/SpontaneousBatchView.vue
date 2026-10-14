@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { goBack } from "../router";
-import { ApiError, api } from "../api";
+import { api, errorMessage } from "../api";
 import Icon, { type IconName } from "../components/Icon.vue";
 import PageHeader from "../components/PageHeader.vue";
 import type { SpontaneousApplicationState, SpontaneousBatchState } from "../types";
@@ -54,7 +54,7 @@ async function prepare() {
   try {
     await api.prepareApplicationBatch();
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : "Préparation impossible.";
+    error.value = errorMessage(e, "Préparation impossible.");
   }
   await load();
 }
@@ -100,7 +100,7 @@ async function deliver(i: SpontaneousApplicationState, step: SendStep) {
     selected.value.delete(i.lead.id);
   } catch (e) {
     step.status = "failed";
-    step.error = e instanceof ApiError ? e.message : "L'email n'est pas parti.";
+    step.error = errorMessage(e, "L'email n'est pas parti.");
   }
 }
 

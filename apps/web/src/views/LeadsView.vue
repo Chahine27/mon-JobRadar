@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onActivated, onUnmounted, ref, watch } from "vue";
-import { ApiError, api } from "../api";
+import { api, errorMessage } from "../api";
 import Icon from "../components/Icon.vue";
 import LeadZoneCard from "../components/LeadZoneCard.vue";
 import PageHeader from "../components/PageHeader.vue";
@@ -109,7 +109,7 @@ async function refresh() {
     message.value = { ok: true, text: `${r.found} entreprise(s) trouvée(s) (${r.around}) : ${r.created} nouvelle(s).` };
     await load();
   } catch (e) {
-    message.value = { ok: false, text: e instanceof ApiError ? e.message : "La Bonne Boîte ne répond pas." };
+    message.value = { ok: false, text: errorMessage(e, "La Bonne Boîte ne répond pas.") };
   } finally {
     busy.value = false;
   }

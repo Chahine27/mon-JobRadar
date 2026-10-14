@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { ApiError, api } from "../api";
+import { ApiError, api, errorMessage } from "../api";
 import type { LetterState } from "../types";
 import Icon from "./Icon.vue";
 
@@ -65,7 +65,7 @@ async function write(force: boolean) {
     apply(await api.writeLetter(props.jobId, force));
   } catch (e) {
     if (e instanceof ApiError && e.code === "AI_UNAVAILABLE") offline.value = true;
-    error.value = e instanceof ApiError ? e.message : "L'écriture de la lettre a échoué.";
+    error.value = errorMessage(e, "L'écriture de la lettre a échoué.");
   } finally {
     clearInterval(timer);
     running.value = false;
@@ -106,7 +106,7 @@ async function savePdf() {
     setTimeout(() => (pdfSaved.value = null), 8000);
   } catch (e) {
     if (e instanceof ApiError && e.code === "PDF_FOLDER_MISSING") printPdf();
-    else error.value = e instanceof ApiError ? e.message : "Enregistrement du PDF impossible.";
+    else error.value = errorMessage(e, "Enregistrement du PDF impossible.");
   } finally {
     pdfSaving.value = false;
   }

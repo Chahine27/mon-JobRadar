@@ -158,3 +158,7 @@ const plain = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").t
 export function skillRuleKind(title: string, skill: string): "title" | "text" {
   return plain(title).includes(plain(skill)) ? "title" : "text";
 }
+
+/** « Saint-Ouen-sur-Seine (93) » ; le département n'est pas répété s'il est déjà dans la ville (« Paris 75009 »). */
+export const place = (j: { city: string | null; department: string | null }) =>
+  [j.city, j.department && !j.city?.includes(j.department) ? `(${j.department})` : null].filter(Boolean).join(" ");

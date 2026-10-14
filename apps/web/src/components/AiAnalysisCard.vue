@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { ApiError, api } from "../api";
+import { ApiError, api, errorMessage } from "../api";
 import type { StoredAiAnalysis } from "../types";
 import Icon from "./Icon.vue";
 
@@ -48,7 +48,7 @@ async function run(force: boolean) {
     lastDuration.value = res.durationMs !== undefined ? Math.round(res.durationMs / 1000) : null;
   } catch (e) {
     if (e instanceof ApiError && e.code === "AI_UNAVAILABLE") offline.value = true;
-    error.value = e instanceof ApiError ? e.message : "L'analyse a échoué.";
+    error.value = errorMessage(e, "L'analyse a échoué.");
   } finally {
     clearInterval(timer);
     running.value = false;

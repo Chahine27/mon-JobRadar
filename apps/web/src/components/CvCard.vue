@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { ApiError, api } from "../api";
+import { ApiError, api, errorMessage } from "../api";
 import type { CvMaster, CvOverrides, CvPicked, CvState, CvTemplateInfo, TemplateId } from "../types";
 import Icon from "./Icon.vue";
 
@@ -56,7 +56,7 @@ async function load() {
     previewKey.value++;
   } catch (e) {
     state.value = null;
-    error.value = e instanceof ApiError ? e.message : "Impossible de charger le CV adapté.";
+    error.value = errorMessage(e, "Impossible de charger le CV adapté.");
   }
 }
 
@@ -80,7 +80,7 @@ async function run(what: string, fn: () => Promise<unknown>) {
   try {
     await fn();
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : "L'opération a échoué.";
+    error.value = errorMessage(e, "L'opération a échoué.");
     if (e instanceof ApiError && e.code === "CHECKS_FAILED") await load();
   } finally {
     busy.value = null;

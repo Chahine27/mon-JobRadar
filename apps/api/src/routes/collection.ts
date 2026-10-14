@@ -1,6 +1,7 @@
 import type { CollectionStatus, StartResult } from "@job-radar/pipeline";
 import type { FastifyInstance } from "fastify";
 import { requireAuth } from "../auth";
+import type { createJobService } from "../jobs/service";
 
 /** Ce dont les routes ont besoin du CollectionRunner (interface → testable). */
 export interface Collector {
@@ -10,7 +11,7 @@ export interface Collector {
   startSource(source: string): Promise<StartResult | null>;
 }
 
-export async function collectionRoutes(app: FastifyInstance, opts: { collector: Collector }) {
+export async function collectionRoutes(app: FastifyInstance, opts: { collector: Collector; jobs?: Pick<ReturnType<typeof createJobService>, "list"> }) {
   app.addHook("preHandler", requireAuth);
 
   // README §13 : empêche les refresh simultanés, lance la collecte en arrière-plan.
@@ -35,5 +36,11 @@ export async function collectionRoutes(app: FastifyInstance, opts: { collector: 
     },
   );
 
-  app.get("/api/collection/status", async () => opts.collector.status());
+  app.get("/api/collection/status", async (request) => {
+    const status = await opts.collector.status();
+    if (!opts.jobs) return status;
+    // Nouvelles offres de ton flux, pas toutes celles en base (hors zone, senior… masquées : 1 498 au lieu de ~100).
+    const feed = await opts.jobs.list(request.userId!, { status: "NEW", includeHidden: false, minScore: 0, sort: "score" });
+    return { ...status, newJobs: feed.length };
+  });
 }

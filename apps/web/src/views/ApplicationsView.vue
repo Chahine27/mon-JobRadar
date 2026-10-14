@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onActivated, ref } from "vue";
-import { ApiError, api } from "../api";
+import { api, errorMessage } from "../api";
 import Icon from "../components/Icon.vue";
 import PageHeader from "../components/PageHeader.vue";
 import ScoreBadge from "../components/ScoreBadge.vue";
 import SourceLogo from "../components/SourceLogo.vue";
-import { mapsUrl, timeAgo } from "../format";
+import { mapsUrl, timeAgo, place } from "../format";
 import type { Application, ApplicationMail, ApplicationStage, JobStatus, MailTracking, SpontaneousItem } from "../types";
 
 /** Au-delà, pas de nouvelles : un petit rappel pour relancer. */
@@ -100,7 +100,7 @@ async function check() {
     tracking.value = await api.checkApplicationMails();
     await load();
   } catch (e) {
-    error.value = e instanceof ApiError ? e.message : "La vérification des mails a échoué.";
+    error.value = errorMessage(e, "La vérification des mails a échoué.");
   } finally {
     checking.value = false;
   }
@@ -136,8 +136,6 @@ async function setStatus(j: Application, status: JobStatus) {
   }
 }
 
-const place = (a: { city: string | null; department: string | null }) =>
-  [a.city, a.department && !a.city?.includes(a.department) ? `(${a.department})` : null].filter(Boolean).join(" ");
 const day = (d: string) => new Date(d).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 </script>
 

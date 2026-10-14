@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { ApiError, api } from "../api";
+import { ApiError, api, errorMessage } from "../api";
 import Icon from "../components/Icon.vue";
 import PageHeader from "../components/PageHeader.vue";
 import SkillPicker from "../components/SkillPicker.vue";
@@ -98,7 +98,7 @@ async function importSeed() {
     message.value = { ok: true, text: `Fichier de départ importé. ${res.toValidate} phrase(s) à valider.` };
   } catch (e) {
     if (e instanceof ApiError && e.issues.length) issues.value = e.issues;
-    message.value = { ok: false, text: e instanceof ApiError ? e.message : "Import impossible." };
+    message.value = { ok: false, text: errorMessage(e, "Import impossible.") };
   } finally {
     importing.value = false;
   }

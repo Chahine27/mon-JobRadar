@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { ApiError, api } from "../api";
+import { ApiError, api, errorMessage } from "../api";
 import AiAnalysisCard from "../components/AiAnalysisCard.vue";
 import CoverLetterCard from "../components/CoverLetterCard.vue";
 import CvCard from "../components/CvCard.vue";
@@ -46,14 +46,26 @@ async function waitForTravel() {
   if (job.value?.travelPending) job.value = { ...job.value, travelPending: false };
 }
 
-async function setStatus(status: JobStatus) {
+/** Erreur d'une action (statut, compétence, « Pas pour moi »…) : sans elle, le bouton ne faisait rien en silence. */
+const actionError = ref<string | null>(null);
+
+/** Lance une action : bouton occupé pendant l'appel, message si le serveur refuse ou ne répond pas. */
+async function act(fn: () => Promise<void>) {
   busy.value = true;
+  actionError.value = null;
   try {
-    job.value = await api.setJobStatus(props.id, status);
+    await fn();
+  } catch (e) {
+    actionError.value = errorMessage(e, "Action impossible : le serveur ne répond pas. Réessaie dans un instant.");
   } finally {
     busy.value = false;
   }
 }
+
+const setStatus = (status: JobStatus) =>
+  act(async () => {
+    job.value = await api.setJobStatus(props.id, status);
+  });
 
 /** Après une analyse IA : le score a pu être corrigé. */
 async function reloadJob() {
@@ -74,7 +86,7 @@ async function complete() {
     completing.value = false;
     fullText.value = "";
   } catch (e) {
-    completeError.value = e instanceof ApiError ? e.message : "Enregistrement impossible.";
+    completeError.value = errorMessage(e, "Enregistrement impossible.");
   } finally {
     busy.value = false;
   }
@@ -92,20 +104,16 @@ async function saveDescription() {
     job.value = { ...(await api.completeJob(props.id, descText.value)), travelIssue: job.value?.travelIssue ?? null };
     editingDesc.value = false;
   } catch (e) {
-    descError.value = e instanceof ApiError ? e.message : "Enregistrement impossible.";
+    descError.value = errorMessage(e, "Enregistrement impossible.");
   } finally {
     busy.value = false;
   }
 }
 
-async function resetFull() {
-  busy.value = true;
-  try {
+const resetFull = () =>
+  act(async () => {
     job.value = { ...(await api.resetFullText(props.id)), travelIssue: job.value?.travelIssue ?? null };
-  } finally {
-    busy.value = false;
-  }
-}
+  });
 
 // ───── Infos corrigées à la main (entreprise, lieu, contrat, salaire… manquants ou faux) ─────
 const CONTRACTS = ["CDI", "CDD", "INTERIM", "ALTERNANCE", "STAGE", "FREELANCE"];
@@ -151,26 +159,22 @@ async function saveEdits(reset = false) {
     job.value = { ...(await api.editJob(props.id, edits as JobEdits)), travelIssue: job.value?.travelIssue ?? null };
     editing.value = false;
   } catch (e) {
-    editError.value = e instanceof ApiError ? e.message : "Enregistrement impossible.";
+    editError.value = errorMessage(e, "Enregistrement impossible.");
   } finally {
     busy.value = false;
   }
 }
 
 /** « J'ai cette compétence » : l'ajoute au profil, le score se recalcule. */
-async function addSkill(skill: string) {
-  busy.value = true;
-  try {
+const addSkill = (skill: string) =>
+  act(async () => {
     const { profile } = await api.getProfile();
     if (!profile.skills.some((s) => s.toLowerCase() === skill.toLowerCase())) {
       await api.saveProfile({ ...profile, skills: [...profile.skills, skill] });
     }
     added.value.push(skill);
     job.value = await api.getJob(props.id);
-  } finally {
-    busy.value = false;
-  }
-}
+  });
 
 const links = computed(() =>
   (job.value?.sources ?? []).map((s) => ({ ...s, safe: safeUrl(s.url) })).filter((s) => s.safe),
@@ -208,9 +212,8 @@ const nfmRules = computed<ScoreRule[]>(() => {
   return [];
 });
 
-async function confirmNotForMe() {
-  busy.value = true;
-  try {
+const confirmNotForMe = () =>
+  act(async () => {
     if (nfmRules.value.length) {
       const { profile } = await api.getProfile();
       const same = (a: ScoreRule, b: ScoreRule) => a.kind === b.kind && a.value.toLowerCase() === b.value.toLowerCase();
@@ -219,10 +222,7 @@ async function confirmNotForMe() {
     }
     job.value = await api.setJobStatus(props.id, "IGNORED");
     notForMe.value = false;
-  } finally {
-    busy.value = false;
-  }
-}
+  });
 
 const ruleLabel = (r: ScoreRule) =>
   `${r.points} pts si « ${r.value} » ${r.kind === "title" ? "est dans le titre" : r.kind === "text" ? "est dans l'annonce" : "est l'entreprise"}`;
@@ -307,6 +307,7 @@ const ruleLabel = (r: ScoreRule) =>
       <span>L'annonce était incomplète : elle a été remplacée par le texte de la page, et l'IA l'a relue.</span>
     </p>
 
+    <p v-if="actionError" class="alert" role="alert"><Icon name="alert" :size="16" />{{ actionError }}</p>
     <section class="card actions">
       <a v-for="l in links" :key="l.url" class="btn primary" :href="l.safe!" target="_blank" rel="noopener noreferrer">
         <SourceLogo :source="l.source" :size="22" /> Voir l'offre sur {{ linkLabel(l.source, l.url) }}

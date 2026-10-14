@@ -63,11 +63,11 @@ export async function findCompanySite(
   const results = ((await res.json()) as { results?: Result[] }).results ?? [];
 
   // Raison sociale ou sigle identique d'abord ; l'enseigne seulement à défaut (une cantine peut porter l'enseigne du client).
-  const named = (r: Result, names: Array<string | null | undefined>) => names.some((n) => !!n && companyKey(n) === key);
-  const byLegalName = results.filter((r) => named(r, [r.nom_raison_sociale, r.nom_complet, r.sigle]));
+  const named = (names: Array<string | null | undefined>) => names.some((n) => !!n && companyKey(n) === key);
+  const byLegalName = results.filter((r) => named([r.nom_raison_sociale, r.nom_complet, r.sigle]));
   const sameName = byLegalName.length
     ? byLegalName
-    : results.filter((r) => named(r, [r.siege?.nom_commercial, ...(r.siege?.liste_enseignes ?? [])]));
+    : results.filter((r) => named([r.siege?.nom_commercial, ...(r.siege?.liste_enseignes ?? [])]));
   const sites = sameName
     .flatMap((r) => [...(r.matching_etablissements ?? []), ...(r.siege ? [r.siege] : [])])
     .filter((e) => e.etat_administratif !== "F" && Number.isFinite(num(e.latitude)) && Number.isFinite(num(e.longitude)))

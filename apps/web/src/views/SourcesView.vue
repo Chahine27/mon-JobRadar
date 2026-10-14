@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
-import { ApiError, api } from "../api";
+import { api, errorMessage } from "../api";
 import Icon, { type IconName } from "../components/Icon.vue";
 import PageHeader from "../components/PageHeader.vue";
 import SourceLogo from "../components/SourceLogo.vue";
@@ -61,7 +61,7 @@ async function act(fn: () => Promise<unknown>, ok: string) {
     message.value = { ok: true, text: ok };
     await load();
   } catch (e) {
-    message.value = { ok: false, text: e instanceof ApiError ? e.message : "Erreur inattendue." };
+    message.value = { ok: false, text: errorMessage(e, "Erreur inattendue.") };
   } finally {
     busy.value = false;
   }

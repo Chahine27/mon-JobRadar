@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { ApiError, api } from "../api";
+import { ApiError, api, errorMessage } from "../api";
 import Icon from "../components/Icon.vue";
 import PageHeader from "../components/PageHeader.vue";
 import ScoreBadge from "../components/ScoreBadge.vue";
-import { SOURCE_LABELS, STATUS_LABELS, mapsUrl, originLabel, timeAgo } from "../format";
+import { SOURCE_LABELS, STATUS_LABELS, mapsUrl, originLabel, timeAgo, place } from "../format";
 import type { JobDetail, JobSummary, JobTextAnalysis, ManualJobForm, RemoteType } from "../types";
 
 const DRAFT_KEY = "jobradar.manualDraft";
@@ -84,6 +84,26 @@ function touch(f: Field) {
   detected.delete(f);
 }
 
+/** Remplit les cases lues (lecture simple ou IA), sauf celles modifiées à la main ; badge « lu » sur celles trouvées. */
+function fill(values: Record<Field, unknown>) {
+  for (const f of FIELDS) {
+    if (touched.has(f)) continue;
+    (form as Record<Field, unknown>)[f] = values[f];
+    const found = f === "remoteType" ? values[f] !== "unknown" : values[f] !== "";
+    if (found) detected.add(f);
+    else detected.delete(f);
+  }
+}
+
+/** Brouillon effacé une fois l'offre ajoutée (stockage indisponible : sans importance). */
+function forgetDraft() {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* rien */
+  }
+}
+
 watch(
   () => form.description,
   (text) => {
@@ -100,13 +120,12 @@ async function analyze(text: string) {
   if (text === lastAnalyzed || text === aiText) return; // offre confiée à l'IA : pas de lecture simple
   lastAnalyzed = text;
   readBy.value = "rules";
-  lastAnalyzed = text;
   analyzing.value = true;
   try {
     const a = await api.analyzeJobText(text);
     if (form.description !== text) return; // le texte a encore changé entre-temps
     analysis.value = a;
-    const values: Record<Field, unknown> = {
+    fill({
       title: a.title ?? "",
       company: a.company ?? "",
       location: a.location ?? "",
@@ -116,14 +135,7 @@ async function analyze(text: string) {
       salaryMax: a.salaryMax ?? "",
       experienceYears: a.experienceYears ?? "",
       address: form.address,
-    };
-    for (const f of FIELDS) {
-      if (touched.has(f)) continue;
-      (form as Record<Field, unknown>)[f] = values[f];
-      const found = f === "remoteType" ? a.remoteType !== "unknown" : values[f] !== "";
-      if (found) detected.add(f);
-      else detected.delete(f);
-    }
+    });
     applyHints();
   } catch {
     /* lecture impossible : on remplit à la main */
@@ -184,7 +196,7 @@ async function readWithAi(text: string, hints: { title?: string | null; company?
     const f = res.fields;
     readBy.value = "ai";
     analysis.value = { ...f, text: res.text };
-    const values: Record<Field, unknown> = {
+    fill({
       title: f.title ?? "",
       company: f.company ?? "",
       location: f.location ?? "",
@@ -194,21 +206,14 @@ async function readWithAi(text: string, hints: { title?: string | null; company?
       salaryMax: f.salaryMax ?? "",
       experienceYears: f.experienceYears ?? "",
       address: f.address ?? "",
-    };
-    for (const k of FIELDS) {
-      if (touched.has(k)) continue;
-      (form as Record<Field, unknown>)[k] = values[k];
-      const found = k === "remoteType" ? f.remoteType !== "unknown" : values[k] !== "";
-      if (found) detected.add(k);
-      else detected.delete(k);
-    }
+    });
     // Texte nettoyé (menus, boutons retirés) : c'est lui qui sera enregistré.
     aiText = res.text;
     form.description = res.text;
     return true;
   } catch (e) {
     // IA indisponible : lecture simple + infos de la page, comme avant.
-    aiError.value = e instanceof ApiError ? e.message : "L'IA n'a pas pu lire l'annonce.";
+    aiError.value = errorMessage(e, "L'IA n'a pas pu lire l'annonce.");
     aiText = "";
     lastAnalyzed = "";
     await analyze(text);
@@ -268,11 +273,7 @@ async function autoPipeline(hints: { title?: string | null; company?: string | n
     autoStep.value = "analyze";
     await api.analyzeJob(jobId).catch(() => null); // IA occupée ou en panne : l'offre est quand même ajoutée
     clearForm();
-    try {
-      localStorage.removeItem(DRAFT_KEY);
-    } catch {
-      /* rien */
-    }
+    forgetDraft();
     await router.push({ name: "job", params: { id: jobId } });
   } catch (e) {
     autoNote.value =
@@ -383,14 +384,10 @@ async function completeKnown() {
     await api.completeJob(known.value.id, form.description, form.experienceYears === "" ? null : Number(form.experienceYears), formInfo());
     const id = known.value.id;
     clearForm();
-    try {
-      localStorage.removeItem(DRAFT_KEY);
-    } catch {
-      /* rien */
-    }
+    forgetDraft();
     await router.push({ name: "job", params: { id } });
   } catch (e) {
-    completeError.value = e instanceof ApiError ? e.message : "Impossible de compléter l'offre.";
+    completeError.value = errorMessage(e, "Impossible de compléter l'offre.");
   } finally {
     completing.value = false;
   }
@@ -441,13 +438,8 @@ async function submit() {
   result.value = null;
   try {
     result.value = await api.addManualJob(payload());
-    Object.assign(form, empty());
-    resetDetection();
-    try {
-      localStorage.removeItem(DRAFT_KEY);
-    } catch {
-      /* rien */
-    }
+    clearForm();
+    forgetDraft();
     await loadList();
   } catch (e) {
     if (e instanceof ApiError && e.issues.length) {
@@ -487,8 +479,6 @@ async function remove(job: JobSummary) {
   await loadList();
 }
 
-const place = (j: JobSummary) =>
-  [j.city, j.department && !j.city?.includes(j.department) ? `(${j.department})` : null].filter(Boolean).join(" ");
 const manualUrl = (j: JobSummary) => j.sources.find((s) => s.source === "manual")?.url ?? "";
 </script>
 

@@ -135,7 +135,7 @@ export async function buildApp(opts: AppOptions) {
     const engine = opts.cvEngine;
     app.addHook("onClose", () => engine.close());
   }
-  if (opts.collector) await app.register(collectionRoutes, { collector: opts.collector });
+  if (opts.collector) await app.register(collectionRoutes, { collector: opts.collector, jobs: jobService });
   await app.register(leadRoutes, {
     stores: opts.stores,
     ...(opts.searchCompanies ? { searchCompanies: opts.searchCompanies } : {}),
