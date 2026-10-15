@@ -26,10 +26,15 @@ jobs:
           OCI_KEY: ${{ secrets.OCI_KEY }}
         run: |
           mkdir -p ~/.oci
-          printf '%s\n' "$OCI_CONFIG" > ~/.oci/config
-          printf '%s\n' "$OCI_KEY" > ~/.oci/oci_api_key.pem
+          # Copiés depuis Windows : fins de ligne \r retirées (sinon le chemin de la clé ne correspond à rien).
+          printf '%s\n' "$OCI_CONFIG" | tr -d '\r' > ~/.oci/config
+          printf '%s\n' "$OCI_KEY" | tr -d '\r' > ~/.oci/oci_api_key.pem
           chmod 600 ~/.oci/config ~/.oci/oci_api_key.pem
-      - run: python -u tools/oracle/create-instance.py --once
+          # Contrôle sans rien afficher de secret : noms des réglages et début de la clé.
+          sed -E 's/=.*/=…/' ~/.oci/config
+          head -c 11 ~/.oci/oci_api_key.pem; echo
+      # En cas d'erreur, sa dernière ligne devient une annotation (lisible sans ouvrir le journal).
+      - run: python -u tools/oracle/create-instance.py --once 2> err.txt || { cat err.txt; echo "::error::$(tail -n 1 err.txt)"; exit 1; }
       - name: Prévenir et s'arrêter
         if: hashFiles('tools/oracle/instance.txt') != ''
         env:
