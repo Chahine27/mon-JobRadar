@@ -166,7 +166,7 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
     return { part, matched, missing, preferredFound, main: [] as string[], product, requiredIds, missingRequired: [] as string[] };
   }
 
-  const seniority = input.seniority !== undefined ? input.seniority : detectSeniority(input.title);
+  const seniority = titleSeniority(input, profile);
   const learnableWhy = trainingOffered(input.description)
     ? "formation proposée"
     : (seniority === "junior" || input.experienceMinYears === 0) && !productionRequired(input.description)
@@ -220,13 +220,25 @@ const fr = (n: number) => String(n).replace(".", ",");
 
 // ───────── Expérience ─────────
 
+/**
+ * Niveau lu dans le titre. « Architecte » seul ne fait pas un poste de lead quand l'annonce demande
+ * peu d'années (≤ ta cible max) : « Architecte Fullstack, 2 ans » reste dans ton niveau.
+ */
+function titleSeniority(input: ScoringInput, profile: Profile): Seniority | null {
+  if (input.seniority !== undefined) return input.seniority;
+  const s = detectSeniority(input.title);
+  const years = input.experienceMinYears;
+  if (s !== "lead" || years === null || years > profile.experienceMax) return s;
+  return detectSeniority(normalizeText(input.title).replace(/\barchitecte\b/g, " "));
+}
+
 function scoreExperience(input: ScoringInput, profile: Profile, rules: ScoringRules, product: ProductExperience): Part {
   const years = input.experienceMinYears;
   // Niveau de la source (« Niveau senior », LinkedIn le met sur presque tout) : seulement si l'annonce ne dit pas
   // combien d'années. « 2 à 3 ans » lu dans le texte est plus précis qu'une étiquette (il était noté 30 au lieu de 100).
   // Un « Senior » écrit dans le titre, lui, compte toujours.
   const seniority =
-    (input.seniority !== undefined ? input.seniority : detectSeniority(input.title)) ??
+    (titleSeniority(input, profile)) ??
     (years === null && input.experienceText ? detectSeniority(input.experienceText) : null);
   const { experienceMin: min, experienceMax: max } = profile;
   const part: Part = { score: rules.neutral, reasons: [], warnings: [] };
@@ -449,7 +461,7 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
 
   let hiddenReason: string | null = null;
   const kind = contractOfJob(input);
-  const seniority = input.seniority !== undefined ? input.seniority : detectSeniority(input.title);
+  const seniority = titleSeniority(input, profile);
   if (rules.hideNonMatchingContract && kind && breakdown.contract < 100) {
     hiddenReason = `Contrat ${kind} hors profil`;
   } else if (rules.hideSenior && (seniority === "senior" || seniority === "lead")) {

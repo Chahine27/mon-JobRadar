@@ -23,7 +23,7 @@ describe(`scores figés — règles ${DEFAULT_RULES.version}`, () => {
   });
 
   it("version des règles attendue", () => {
-    expect(DEFAULT_RULES.version).toBe("2026-10-14.1");
+    expect(DEFAULT_RULES.version).toBe("2026-10-15.1");
   });
 });
 
@@ -80,6 +80,22 @@ describe("explications", () => {
 
   it("expérience au-dessus de la cible : malus détaillé", () => {
     expect(score(TOO_SENIOR).adjustments).toContainEqual({ label: "Expérience au-dessus de ta cible", points: -25 });
+  });
+
+  it("« Architecte » avec peu d'années demandées n'est pas un poste de lead", () => {
+    const few = score({ ...PERFECT, title: "Architecte Fullstack", experienceMinYears: 2 });
+    expect(few.breakdown.experience).toBe(100);
+    expect(few.hidden).toBe(false);
+    const unknown = score({ ...PERFECT, title: "Architecte Fullstack", experienceMinYears: null });
+    expect(unknown.warnings).toContain("Poste de lead / architecte / manager");
+    expect(score({ ...PERFECT, title: "Architecte Lead Java", experienceMinYears: 2 }).breakdown.experience).toBe(15);
+  });
+
+  it("compétences de l'IA reconnues par leurs synonymes (Fullstack, Architecture technique, Tests automatisés)", () => {
+    const profile = { ...DEFAULT_PROFILE, skills: ["Développement Fullstack", "Architecture logicielle", "Tests unitaires"], projectSkills: [] };
+    const r = scoreJob({ ...PERFECT, aiSkills: { required: ["Fullstack", "Architecture technique", "Tests automatisés"], bonus: [] } }, profile);
+    expect(r.missingSkills).toEqual([]);
+    expect(r.breakdown.technical).toBe(100);
   });
 });
 

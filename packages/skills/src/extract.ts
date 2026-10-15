@@ -73,11 +73,30 @@ export function extractSkills(text: string, extraSkills: Skill[] = []): string[]
 }
 
 /**
+ * Même compétence écrite autrement (par l'IA surtout) → nom du profil. Seulement pour resolveSkill :
+ * rien de plus n'est détecté dans le texte des annonces.
+ */
+const SYNONYMS = new Map(
+  Object.entries({
+    fullstack: "Développement Fullstack",
+    "full stack": "Développement Fullstack",
+    "full-stack": "Développement Fullstack",
+    "développeur fullstack": "Développement Fullstack",
+    "architecture technique": "Architecture logicielle",
+    "architecture applicative": "Architecture logicielle",
+    "tests automatisés": "Tests unitaires",
+    "test automatisé": "Tests unitaires",
+    "tests automatiques": "Tests unitaires",
+  }).map(([k, v]) => [normalizeText(k), normalizeText(v)]),
+);
+
+/**
  * Retrouve une compétence à partir d'un nom saisi dans le profil (« Spring Boot », « vue », « C# »).
  * Nom inconnu → compétence personnalisée (famille inconnue), pour que tout ajout du profil soit détectable.
  */
 export function resolveSkill(name: string): Skill {
-  const n = normalizeText(name.trim());
+  const raw = normalizeText(name.trim());
+  const n = SYNONYMS.get(raw) ?? raw;
   for (const s of SKILLS) {
     if (normalizeText(s.label) === n || s.id === n || s.aliases.some((a) => normalizeText(a) === n)) return s;
     if (s.caseSensitiveAliases?.some((a) => normalizeText(a) === n)) return s;
