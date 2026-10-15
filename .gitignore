@@ -31,3 +31,6 @@ scripts/demarrage-etat.js
 
 # Brouillons et exports de Claude Code (peuvent contenir des offres)
 .tmp-claude/
+
+# Serveur Oracle : adresse du serveur créé
+tools/oracle/instance.txt
