@@ -2,11 +2,14 @@
 Crée le serveur gratuit « jobradar » chez Oracle (Ubuntu 24.04 ARM), en réessayant tant que Paris n'a plus de place.
 Essaie 4 OCPU / 24 Go puis 2 OCPU / 12 Go à chaque tour, toutes les 5 minutes. S'arrête dès qu'un serveur existe.
 
-  tools/oracle/.venv/Scripts/python tools/oracle/create-instance.py
+  tools/oracle/.venv/Scripts/python tools/oracle/create-instance.py           (boucle, sur le PC)
+  python tools/oracle/create-instance.py --once                                (un essai : GitHub Actions)
 
-Lit ~/.oci/config (clé d'API) et ~/.ssh/jobradar_oracle.pub (clé SSH du serveur). Rien de payant : forme
+Lit ~/.oci/config (clé d'API) et jobradar_oracle.pub (clé SSH publique du serveur, à côté de ce script).
+Serveur créé par ce lancement → son adresse est écrite dans instance.txt. Rien de payant : forme
 VM.Standard.A1.Flex « Toujours gratuit », disque par défaut.
 """
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +19,7 @@ import oci
 NAME = "jobradar"
 SHAPES = [(4, 24), (2, 12)]
 WAIT_S = 300
+ONCE = "--once" in sys.argv
 
 cfg = oci.config.from_file()
 tenancy = cfg["tenancy"]
@@ -27,7 +31,7 @@ image = compute.list_images(
     tenancy, operating_system="Canonical Ubuntu", operating_system_version="24.04",
     shape="VM.Standard.A1.Flex", sort_by="TIMECREATED", sort_order="DESC",
 ).data[0]
-ssh_key = (Path.home() / ".ssh" / "jobradar_oracle.pub").read_text().strip()
+ssh_key = (Path(__file__).parent / "jobradar_oracle.pub").read_text().strip()
 
 
 def log(msg: str) -> None:
@@ -57,6 +61,9 @@ def public_ip(instance_id: str) -> str:
 
 
 log(f"Image {image.display_name}, sous-réseau {subnet.display_name}, domaine {ad}.")
+if existing():
+    log(f"Le serveur « {NAME} » existe déjà : rien à faire.")
+    sys.exit(0)
 attempt = 0
 while True:
     inst = existing()
@@ -82,7 +89,11 @@ while True:
             else:
                 raise
     else:
+        if ONCE:
+            sys.exit(0)
         time.sleep(WAIT_S)
         continue
     if not existing():
+        if ONCE:
+            sys.exit(0)
         time.sleep(WAIT_S)
