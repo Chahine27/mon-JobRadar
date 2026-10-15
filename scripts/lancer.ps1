@@ -1,4 +1,4 @@
-﻿# Lance Job Radar en un double-clic : base de données (intégrée, sans Docker), Ollama (IA), mises à jour, puis « pnpm dev ».
+﻿# Lance Job Radar en un double-clic : base de données (intégrée, sans Docker), Ollama (s'il est installé), mises à jour, puis « pnpm dev ».
 # Appelé par « Lancer Job Radar.cmd » à la racine du projet, en arrière-plan (aucune fenêtre) :
 # le journal de l'appli va dans logs/job-radar.log, et le bouton « Arrêter Job Radar » du site arrête tout.
 # « Continue » : avec « Stop », Windows PowerShell 5 s'arrête dès qu'un programme écrit sur sa sortie d'erreur.
@@ -72,21 +72,19 @@ Progress 15 "Base de données…"
 if (-not (StartDatabase)) { Fail "la base de données ne démarre pas. Regarde le fichier data\postgres.log pour le détail." }
 Write-Host "Base de données prête." -ForegroundColor Green
 
-# 2. Ollama (IA locale) : lancé s'il ne tourne pas. Pas bloquant : l'appli marche sans.
-Step "IA locale (Ollama)"
-Progress 25 "IA locale (Ollama)…"
-if (Responds "http://127.0.0.1:11434/api/version") {
-  Write-Host "Ollama tourne déjà." -ForegroundColor Green
-} else {
-  $ollamaApp = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama app.exe"
-  if (Test-Path $ollamaApp) {
+# 2. Ollama (IA locale) : seulement s'il est installé. Sinon l'IA en ligne (clés du .env) fait tout.
+$ollamaApp = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama app.exe"
+if ((Test-Path $ollamaApp) -or (Get-Command ollama -ErrorAction SilentlyContinue)) {
+  Step "IA locale (Ollama)"
+  Progress 25 "IA locale (Ollama)…"
+  if (Responds "http://127.0.0.1:11434/api/version") {
+    Write-Host "Ollama tourne déjà." -ForegroundColor Green
+  } elseif (Test-Path $ollamaApp) {
     Start-Process $ollamaApp
     Write-Host "Ollama démarre." -ForegroundColor Green
-  } elseif (Get-Command ollama -ErrorAction SilentlyContinue) {
+  } else {
     Start-Process ollama -ArgumentList "serve" -WindowStyle Hidden
     Write-Host "Ollama démarre." -ForegroundColor Green
-  } else {
-    Write-Host "Ollama introuvable : l'IA sera indisponible (le reste marche)." -ForegroundColor Yellow
   }
 }
 
