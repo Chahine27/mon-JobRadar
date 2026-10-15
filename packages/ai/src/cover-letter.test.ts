@@ -221,10 +221,22 @@ describe("relecture automatique (cas C-Clerc : Go / gRPC / NestJS)", () => {
     });
     const { content } = await writeCoverLetter(client, { ...JOB, description: job }, kit);
     expect(bodies.length).toBeGreaterThanOrEqual(2);
-    expect(bodies[1].messages[1].content).toMatch(/PROBLÈMES À CORRIGER/);
-    expect(bodies[1].messages[1].content).toMatch(/maîtrise/);
+    // Correction en conversation : même demande qu'au premier appel (cache), la première version, puis les problèmes.
+    const fix = bodies[1].messages;
+    expect(fix.map((m: { role: string }) => m.role)).toEqual(["system", "user", "assistant", "user"]);
+    expect(fix[1].content).toBe(bodies[0].messages[1].content);
+    expect(fix[3].content).toMatch(/PROBLÈMES À CORRIGER/);
+    expect(fix[3].content).toMatch(/maîtrise/);
     expect(content).toContain("Je n'ai pas encore utilisé Go");
     expect(content).not.toContain("opportunité");
+  });
+
+  it("IA payante : une version et une correction au plus, même si la lettre reste fautive", async () => {
+    let calls = 0;
+    const BAD = { correspondances: [], objet: "Candidature au poste de Développeur", paragraphes: ["Je maîtrise Java et Go (Golang).", "Cette opportunité me motive.", "Je serais heureux d'échanger avec vous."] };
+    const client = { model: "claude", paid: true, chatJson: async () => (calls++, BAD) };
+    await writeCoverLetter(client, { ...JOB, description: job }, kit);
+    expect(calls).toBe(2);
   });
 
   it("lettre correcte → un seul appel à l'IA", async () => {

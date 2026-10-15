@@ -3,14 +3,14 @@
  * Chaque client a la même forme que OllamaClient (model, status, chatJson) : les tâches (analyse, lettre…) ne changent pas.
  */
 import Anthropic from "@anthropic-ai/sdk";
-import { AiUnavailableError, OllamaClient, parseJsonReply, type AiStatus, type FetchLike } from "./ollama";
-
-export type ChatOptions = { temperature?: number; contextTokens?: number };
+import { AiUnavailableError, OllamaClient, parseJsonReply, toTurns, type AiStatus, type ChatOptions, type ChatTurn, type FetchLike } from "./ollama";
 
 export type AiClient = {
   readonly model: string;
+  /** IA payante : la lettre se contente d'une version et d'une correction (chaque appel coûte). */
+  readonly paid?: boolean;
   status(): Promise<AiStatus>;
-  chatJson(system: string, user: string, jsonSchema: object, opts?: ChatOptions): Promise<unknown>;
+  chatJson(system: string, user: string | ChatTurn[], jsonSchema: object, opts?: ChatOptions): Promise<unknown>;
 };
 
 type Log = (msg: string) => void;
@@ -34,6 +34,7 @@ export function strictSchema(schema: unknown): unknown {
 
 export class ClaudeClient implements AiClient {
   readonly model: string;
+  readonly paid = true;
   private readonly client: Anthropic;
   private readonly effort: "low" | "medium" | "high";
   private readonly log: Log | undefined;
@@ -50,14 +51,18 @@ export class ClaudeClient implements AiClient {
     return { available: true, model: this.model, installed: true };
   }
 
-  async chatJson(system: string, user: string, jsonSchema: object): Promise<unknown> {
+  async chatJson(system: string, user: string | ChatTurn[], jsonSchema: object, opts: ChatOptions = {}): Promise<unknown> {
+    // cache : la consigne et la première demande (CV, annonce) sont relues à 10 % du prix pendant 5 minutes.
+    const messages: Anthropic.MessageParam[] = toTurns(user).map((t, i) =>
+      i === 0 && opts.cache ? { role: t.role, content: [{ type: "text", text: t.content, cache_control: { type: "ephemeral" } }] } : t,
+    );
     let res: Anthropic.Message;
     try {
       res = await this.client.messages.create({
         model: this.model,
         max_tokens: 16_000,
         system,
-        messages: [{ role: "user", content: user }],
+        messages,
         output_config: {
           effort: this.effort,
           format: { type: "json_schema", schema: strictSchema(jsonSchema) as Record<string, unknown> },
@@ -72,8 +77,13 @@ export class ClaudeClient implements AiClient {
     if (res.stop_reason === "refusal") throw new AiUnavailableError("Claude a refusé de répondre.");
     if (res.stop_reason === "max_tokens") throw new Error("Réponse de Claude coupée (trop longue).");
     const [inPrice, outPrice] = CLAUDE_PRICES[this.model] ?? [0, 0];
-    const cents = ((res.usage.input_tokens * inPrice + res.usage.output_tokens * outPrice) / 1e6) * 100;
-    this.log?.(`IA ${this.model} : ${res.usage.input_tokens} → ${res.usage.output_tokens} tokens (~${cents.toFixed(2)} centime $)`);
+    const u = res.usage;
+    const written = u.cache_creation_input_tokens ?? 0;
+    const read = u.cache_read_input_tokens ?? 0;
+    // Cache : écrit à 125 % du prix, relu à 10 %.
+    const cents = (((u.input_tokens + written * 1.25 + read * 0.1) * inPrice + u.output_tokens * outPrice) / 1e6) * 100;
+    const cached = written || read ? ` (cache : ${written} écrits, ${read} relus)` : "";
+    this.log?.(`IA ${this.model} : ${u.input_tokens + written + read} → ${u.output_tokens} tokens${cached} (~${cents.toFixed(2)} centime $)`);
     const text = res.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
     return parseJsonReply(text);
   }
@@ -92,7 +102,7 @@ export class OpenAiCompatClient implements AiClient {
     return { available: true, model: this.model, installed: true };
   }
 
-  async chatJson(system: string, user: string, jsonSchema: object, opts: ChatOptions = {}): Promise<unknown> {
+  async chatJson(system: string, user: string | ChatTurn[], jsonSchema: object, opts: ChatOptions = {}): Promise<unknown> {
     const fetch = this.opts.fetch ?? ((i, init) => globalThis.fetch(i, init));
     let res: Response;
     try {
@@ -104,10 +114,7 @@ export class OpenAiCompatClient implements AiClient {
           model: this.model,
           temperature: opts.temperature ?? 0.2,
           response_format: { type: "json_schema", json_schema: { name: "reponse", schema: jsonSchema, strict: false } },
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
+          messages: [{ role: "system", content: system }, ...toTurns(user)],
           ...this.opts.extra,
         }),
       });
@@ -134,6 +141,10 @@ export class FallbackAi implements AiClient {
     this.last = clients[0]!.model;
   }
 
+  get paid(): boolean {
+    return this.clients[0]!.paid ?? false;
+  }
+
   /** Modèle qui a répondu au dernier appel (le premier de la liste avant tout appel). */
   // ponytail: partagé entre appels simultanés, un résultat peut porter le nom d'un autre modèle ; à passer par appel si ça gêne.
   get model(): string {
@@ -150,7 +161,7 @@ export class FallbackAi implements AiClient {
     return first!;
   }
 
-  async chatJson(system: string, user: string, jsonSchema: object, opts?: ChatOptions): Promise<unknown> {
+  async chatJson(system: string, user: string | ChatTurn[], jsonSchema: object, opts?: ChatOptions): Promise<unknown> {
     let lastErr: unknown;
     for (const c of this.clients) {
       try {

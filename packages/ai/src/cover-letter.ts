@@ -2,10 +2,11 @@ import type { LetterKit } from "@job-radar/shared";
 import { extractSkills, getSkill } from "@job-radar/skills";
 import { z } from "zod";
 import type { AnalysisJobInput } from "./job-analysis";
-import type { OllamaClient } from "./ollama";
+import type { AiClient } from "./cloud";
+import type { ChatTurn } from "./ollama";
 
 /** Changer ce numéro quand la consigne change : les lettres existantes seront signalées « à refaire ». */
-export const LETTER_PROMPT_VERSION = "2026-10-06.1";
+export const LETTER_PROMPT_VERSION = "2026-10-15.1";
 
 /** Ce que l'IA écrit : l'objet et le corps. L'en-tête, « Madame, Monsieur » et la politesse sont ajoutés par le code. */
 export const LetterDraftSchema = z.object({
@@ -80,7 +81,7 @@ Tu réponds UNIQUEMENT avec le JSON demandé.
 4. STYLE : une lettre écrite par une personne, pas par un robot
 - Première personne, vouvoiement du recruteur, phrases courtes (25 mots maximum), un fait par phrase.
 - Écris comme il parlerait à un recruteur à l'oral : simple, précis, sans jargon RH. Relis chaque phrase : si elle pourrait figurer dans n'importe quelle lettre, remplace-la par un fait précis.
-- Varie les débuts de phrase : jamais plus de deux phrases de suite qui commencent par « J'ai ». Alterne avec le contexte (« Chez LUSIS, … », « Sur CodeNShare, … », « Côté interfaces, … »).
+- Varie les débuts de phrase : jamais plus de deux phrases de suite qui commencent par « J'ai », et « J'ai » dans une phrase sur trois au plus. Alterne avec le contexte (« Chez LUSIS, … », « Sur CodeNShare, … », « Côté interfaces, … »).
 - Pas de récitation chronologique du CV : chaque fait cité est relié en quelques mots à un besoin de l'annonce (« … , ce qui correspond à votre besoin de … » est interdit : dis-le simplement, par exemple « C'est ce type d'API que vous exposez en GraphQL. »).
 - Ne répète pas une même technologie plus de deux fois, ni le même verbe dans un paragraphe (« développé » trois fois).
 - Ne prétends jamais que l'offre « correspond à mon parcours » si des technologies principales lui manquent : dis ce qui est transférable.
@@ -94,7 +95,7 @@ Tu réponds UNIQUEMENT avec le JSON demandé.
 - N'invente jamais un détail pour remplir une phrase vide : supprime-la.
 - La conclusion ne répète pas l'introduction : une phrase qui propose un échange, c'est tout.
 - Mots interdits : « passionné », « dynamique », « challenge », « valeur ajoutée », « opportunité », « je me permets », « n'hésitez pas », « je suis prêt à », « véritable », « parfaite adéquation ».
-- Pas de connecteurs en série (« De plus », « Parallèlement », « En outre ») : au plus un par lettre.
+- Pas de connecteurs en série (« De plus », « Parallèlement », « En outre », « Par ailleurs ») : au plus un par lettre.
 - Ne recopie pas l'annonce (« Votre mission consiste à… »), ne répète pas le nom complet du produit. Corrige les fautes de l'annonce (« Vu.js » → « Vue.js »).
 - Annonce d'un cabinet ou d'une ESN (« nos clients », « pour notre client ») : ne dis pas ce qui l'attire chez le cabinet ; parle du projet et du client décrits.
 - LETTRE EXEMPLE : c'est SA façon d'écrire. Imite-la vraiment : même façon d'ouvrir, d'enchaîner les paragraphes et de conclure, mêmes tournures quand elles s'appliquent, même longueur. Ne reprends jamais son entreprise, son poste ni ses détails.
@@ -211,7 +212,9 @@ ${kit.rules.trim().slice(0, MAX_RULES)}
   const closing = kit.closing?.trim()
     ? `DERNIER PARAGRAPHE : ajouté automatiquement (« ${kit.closing.trim().slice(0, 200)} »). N'écris PAS de conclusion ni de phrase qui propose un échange.\n`
     : "";
-  return `${opts.spontaneous ? SPONTANEOUS_RULES : ""}${own}${mastered}${closing}${table}${missing}
+  // Les mêmes listes que la relecture automatique (findLetterIssues) : l'IA les connaît avant d'écrire.
+  const banned = `MOTS ET FORMULES INTERDITS (la lettre est relue automatiquement : chacun est refusé) : ${[...FORBIDDEN, ...ownBanned(kit)].map(([, name]) => name).join(", ")}\n`;
+  return `${opts.spontaneous ? SPONTANEOUS_RULES : ""}${own}${mastered}${closing}${banned}${table}${missing}
 CV DU CANDIDAT
 """
 ${kit.cvText.slice(0, MAX_CV)}
@@ -681,22 +684,26 @@ type Candidate = { draft: LetterBody; issues: string[] };
 /** Note d'une lettre (plus bas = mieux) : une erreur de vérité pèse trois fois un défaut de style. */
 const penalty = (c: Candidate) => c.issues.reduce((n, i) => n + (isFactIssue(i) ? 3 : 1), 0);
 
-function fixPrompt(prompt: string, draft: LetterBody, issues: string[]): string {
-  return `${prompt}
-
-PREMIÈRE VERSION DE LA LETTRE (à corriger)
-"""
-${draft.paragraphes.join("\n\n")}
-"""
-
-PROBLÈMES À CORRIGER (réécris toute la lettre en les corrigeant, sans en créer d'autres) :
+/**
+ * Correction en conversation : la demande d'origine (identique, donc relue depuis le cache de Claude), la première
+ * version telle que l'IA l'a écrite, puis les problèmes trouvés par la relecture.
+ */
+function fixTurns(prompt: string, draft: LetterBody, issues: string[]): ChatTurn[] {
+  return [
+    { role: "user", content: prompt },
+    { role: "assistant", content: JSON.stringify(draft) },
+    {
+      role: "user",
+      content: `PROBLÈMES À CORRIGER dans ta lettre (réécris toute la lettre en les corrigeant, sans en créer d'autres) :
 ${issues.map((i) => `- ${i}`).join("\n")}
 
-RELECTURE HUMAINE (en réécrivant) : garde tous les faits vrais, supprime les phrases qui n'en contiennent pas, ne répète pas une idée déjà dite, ne rajoute aucun détail absent du CV. Relis chaque phrase : une vraie personne la dirait-elle à voix haute à un recruteur ? Sinon, réécris-la simplement.`;
+RELECTURE HUMAINE (en réécrivant) : garde tous les faits vrais, supprime les phrases qui n'en contiennent pas, ne répète pas une idée déjà dite, ne rajoute aucun détail absent du CV. Relis chaque phrase : une vraie personne la dirait-elle à voix haute à un recruteur ? Sinon, réécris-la simplement.`,
+    },
+  ];
 }
 
 export async function writeCoverLetter(
-  client: Pick<OllamaClient, "chatJson" | "model">,
+  client: Pick<AiClient, "chatJson" | "model" | "paid">,
   job: AnalysisJobInput,
   kit: LetterKit,
   now: Date = new Date(),
@@ -708,8 +715,8 @@ export async function writeCoverLetter(
   let lastError = "";
 
   /** Une version de la lettre, nettoyée et relue (null = réponse hors format ou trop courte). */
-  const generate = async (user: string, temperature: number): Promise<Candidate | null> => {
-    const raw = await client.chatJson(LETTER_SYSTEM_PROMPT, user, LETTER_JSON_SCHEMA, { temperature, contextTokens: LETTER_CONTEXT });
+  const generate = async (user: string | ChatTurn[], temperature: number): Promise<Candidate | null> => {
+    const raw = await client.chatJson(LETTER_SYSTEM_PROMPT, user, LETTER_JSON_SCHEMA, { temperature, contextTokens: LETTER_CONTEXT, cache: true });
     const parsed = LetterDraftSchema.safeParse(raw);
     if (!parsed.success) {
       lastError = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(" ; ");
@@ -728,8 +735,10 @@ export async function writeCoverLetter(
   };
 
   // Plusieurs brouillons ; chacun est corrigé tant qu'il s'améliore ; on garde la meilleure lettre.
+  // IA payante (Claude) : une version et une correction au plus ; les phrases encore fautives sont retirées plus bas.
+  const [maxDrafts, maxFixes] = client.paid ? [1, 1] : [MAX_DRAFTS, MAX_FIXES];
   let best: Candidate | null = null;
-  for (let d = 0; d < MAX_DRAFTS && Date.now() - started < LETTER_BUDGET_MS && best?.issues.length !== 0; d++) {
+  for (let d = 0; d < maxDrafts && Date.now() - started < LETTER_BUDGET_MS && best?.issues.length !== 0; d++) {
     let first: Candidate | null;
     try {
       first = await generate(prompt, d === 0 ? 0.5 : 0.8);
@@ -739,8 +748,8 @@ export async function writeCoverLetter(
     }
     if (!first) continue;
     let cur: Candidate = first;
-    for (let f = 0; f < MAX_FIXES && cur.issues.length && Date.now() - started < LETTER_BUDGET_MS; f++) {
-      const fixed: Candidate | null = await generate(fixPrompt(prompt, cur.draft, cur.issues), 0.3).catch(() => null);
+    for (let f = 0; f < maxFixes && cur.issues.length && Date.now() - started < LETTER_BUDGET_MS; f++) {
+      const fixed: Candidate | null = await generate(fixTurns(prompt, cur.draft, cur.issues), 0.3).catch(() => null);
       if (!fixed || penalty(fixed) >= penalty(cur)) break; // plus d'amélioration : on s'arrête
       cur = fixed;
     }

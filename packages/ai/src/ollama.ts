@@ -10,6 +10,14 @@ export type AiStatus =
   | { available: true; model: string; installed: false; message: string }
   | { available: false; model: string; message: string };
 
+/** Un message d'une conversation (correction d'une lettre : la demande, la première version, puis les problèmes). */
+export type ChatTurn = { role: "user" | "assistant"; content: string };
+
+/** cache : le début de la demande sera renvoyé tel quel (correction d'une lettre) ; seul Claude s'en sert. */
+export type ChatOptions = { temperature?: number; contextTokens?: number; cache?: boolean };
+
+export const toTurns = (user: string | ChatTurn[]): ChatTurn[] => (typeof user === "string" ? [{ role: "user", content: user }] : user);
+
 export class AiUnavailableError extends Error {
   readonly code = "AI_UNAVAILABLE";
 }
@@ -70,7 +78,7 @@ export class OllamaClient {
    * Demande une réponse au format JSON imposé (schéma JSON), sans la « réflexion » du modèle (plus rapide).
    * Renvoie le JSON brut (à valider par l'appelant).
    */
-  async chatJson(system: string, user: string, jsonSchema: object, opts: { temperature?: number; contextTokens?: number } = {}): Promise<unknown> {
+  async chatJson(system: string, user: string | ChatTurn[], jsonSchema: object, opts: ChatOptions = {}): Promise<unknown> {
     let res: Response;
     try {
       res = await this.fetch(`${this.baseUrl}/api/chat`, {
@@ -83,10 +91,7 @@ export class OllamaClient {
           think: false,
           format: jsonSchema,
           options: { temperature: opts.temperature ?? 0.2, num_ctx: opts.contextTokens ?? this.contextTokens },
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
+          messages: [{ role: "system", content: system }, ...toTurns(user)],
         }),
       });
     } catch (err) {
