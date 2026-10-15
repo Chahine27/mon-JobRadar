@@ -440,6 +440,10 @@ model ApplicationMail {
   kind          String
   /// précision lisible : « Test technique », « Demande de disponibilités »…
   detail        String?
+  /// ce que dit le mail, en une phrase (écrit par l'IA)
+  summary       String?
+  /// l'IA a hésité (candidature ou type) : à confirmer par toi, et un refus ne change pas le statut tout seul
+  needsReview   Boolean                 @default(false)
   subject       String
   fromAddress   String
   receivedAt    DateTime

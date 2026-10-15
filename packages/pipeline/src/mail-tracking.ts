@@ -32,8 +32,14 @@ export type Inbox = {
 };
 
 export type MailVerdict = { kind: MailKind; detail: string | null };
-/** IA locale pour les mails que les règles ne savent pas trancher. null = pas une étape de candidature. */
-export type MailClassifier = (mail: { subject: string; text: string; company: string; title: string | null }) => Promise<MailVerdict | null>;
+/**
+ * L'IA lit chaque mail qui peut répondre à une candidature : laquelle (index dans `candidates`, null = aucune), quel
+ * genre de réponse, en une phrase, et si elle est sûre. Sans IA (ou en panne) : les règles ci-dessous.
+ */
+export type MailClassifier = (
+  mail: { subject: string; from: string; text: string },
+  candidates: Array<{ company: string; title: string | null; since: Date }>,
+) => Promise<{ index: number | null; verdict: MailVerdict | null; summary: string; certain: boolean }>;
 
 // ───────── Tri par règles ─────────
 
@@ -111,7 +117,7 @@ export function classifyMail(subject: string, text: string): MailVerdict | "AMBI
 
 /** Alertes emploi, newsletters, « candidature consultée » : beaucoup de « candidature » / « offre », aucune réponse. */
 const NOISE_FROM = /jobalert|job-alerts|jobs-listings|alerte?s?@|newsletter|digest|news@|marketing|info@welcometothejungle|noreply@glassdoor|jobs@indeed\.com|alert@indeed/;
-const NOISE_SUBJECT = /a ete consultee|a ete vue|was viewed|has been viewed|nouvelles offres|new jobs|offres? (qui|pour) (vous|toi)|jobs? (you may|for you)|alerte emploi|job alert|creation de (votre|ton) compte|activ(ez|e|er) (votre|ton) compte|verify your (email|account)|mot de passe|password/;
+const NOISE_SUBJECT = /a ete consultee|a ete vue|was viewed|has been viewed|nouvelles offres|dernieres offres|offres? recommandees?|selectionnees? pour (vous|toi)|ils recrutent|recrutent en ce moment|new jobs|offres? (qui|pour) (vous|toi)|jobs? (you may|for you)|alerte emploi|job alert|creation de (votre|ton) compte|activ(ez|e|er) (votre|ton) compte|verify your (email|account)|mot de passe|password/;
 
 export function isNoise(mail: Pick<InboxMail, "from" | "subject">, self: string[]): boolean {
   const from = mail.from.toLowerCase();
@@ -269,6 +275,26 @@ export function matchApplication(mail: InboxMail, apps: ApplicationRef[]): Appli
   return scored[0]!.a;
 }
 
+/**
+ * Candidatures auxquelles ce mail peut répondre, la plus probable d'abord (6 au plus), à départager par l'IA : celle de
+ * matchApplication, puis celles dont un mail est déjà venu du même expéditeur (outil de recrutement partagé).
+ */
+export function candidateApplications(mail: InboxMail, apps: ApplicationRef[]): ApplicationRef[] {
+  const best = matchApplication(mail, apps);
+  if (best?.kind === "spontaneous" && ((best.messageId && mail.replyTo.includes(best.messageId)) || best.sentTo?.toLowerCase() === mail.from.toLowerCase())) return [best];
+  const after = (a: ApplicationRef) => mail.date.getTime() >= a.since.getTime() - (a.kind === "job" ? JOB_MARGIN_MS : 3_600_000);
+  const from = mail.from.toLowerCase();
+  const others = apps.filter((a) => a !== best && after(a) && (mentionsCompany(mail, a.company) || a.senders?.some((x) => x.toLowerCase() === from)));
+  return [...(best ? [best] : []), ...others].slice(0, 6);
+}
+
+/**
+ * Même mail reçu deux fois pour la même candidature (copie, relance automatique identique) : même expéditeur, même
+ * sujet, même jour. Un outil de recrutement partagé envoie le même sujet pour d'autres entreprises : la candidature compte.
+ */
+const dupKey = (appId: string, from: string, subject: string, date: Date) =>
+  `${appId}|${from.toLowerCase()}|${subject.trim().toLowerCase()}|${date.toISOString().slice(0, 10)}`;
+
 // ───────── Orchestration ─────────
 
 /** `bounced` : candidatures spontanées revenues « adresse introuvable ». */
@@ -346,6 +372,14 @@ export async function trackApplicationMails(opts: {
   const known = new Set(
     (await prisma.applicationMail.findMany({ where: { messageId: { in: mails.map((m) => m.messageId) } }, select: { messageId: true } })).map((m) => m.messageId),
   );
+  const seen = new Set(
+    (
+      await prisma.applicationMail.findMany({
+        where: { receivedAt: { gte: since }, dismissed: false },
+        select: { jobId: true, spontaneousId: true, fromAddress: true, subject: true, receivedAt: true },
+      })
+    ).map((m) => dupKey(m.jobId ?? m.spontaneousId ?? "", m.fromAddress, m.subject, m.receivedAt)),
+  );
   /** Mail gardé sans lien (jamais affiché) : il ne sera ni relu ni redonné à l'IA. */
   const remember = (mail: InboxMail, kind: string, detail: string | null) =>
     prisma.applicationMail.create({
@@ -394,8 +428,44 @@ export async function trackApplicationMails(opts: {
       continue;
     }
     if (isNoise(mail, self)) continue;
-    const app = matchApplication(mail, apps);
-    if (!app) continue;
+    const candidates = candidateApplications(mail, apps);
+    if (!candidates.length) continue;
+
+    let app: ApplicationRef | null = null;
+    let verdict: MailVerdict | null = null;
+    let summary: string | null = null;
+    let review = false;
+    let answered = Boolean(opts.classify); // false = pas d'IA ou IA en panne : règles, et le mail sera relu
+    if (opts.classify) {
+      try {
+        const r = await opts.classify(
+          { subject: mail.subject, from: mail.from, text: mail.text.slice(0, 4000) },
+          candidates.map((a) => ({ company: a.company ?? "", title: a.kind === "job" ? a.title : null, since: a.since })),
+        );
+        // Aucune candidature : sauf réponse dans le fil d'une spontanée (départ, support, site carrière, vus plus bas).
+        const thread = candidates.length === 1 && candidates[0]!.kind === "spontaneous" ? candidates[0]! : null;
+        app = r.index !== null ? candidates[r.index]! : thread;
+        verdict = r.index !== null ? r.verdict : null;
+        summary = r.summary || null;
+        review = !r.certain;
+      } catch {
+        answered = false;
+      }
+    }
+    if (!answered) {
+      // Rattachement par l'entreprise seulement (pas par l'expéditeur : outil partagé), et règles.
+      // Un mail ambigu (accusé + mot « entretien ») est pris pour un accusé.
+      app = matchApplication(mail, apps);
+      if (!app) continue;
+      const byRules = classifyMail(mail.subject, mail.text);
+      verdict = byRules === "AMBIGUOUS" ? { kind: "ACK", detail: null } : byRules;
+    }
+    if (!app) {
+      // Lu par l'IA : ne répond à aucune candidature. Gardé pour ne pas le redonner à l'IA.
+      await remember(mail, "IGNORED", null);
+      known.add(mail.messageId);
+      continue;
+    }
     report.matched++;
 
     if (app.kind === "spontaneous" && app.sentTo) {
@@ -422,32 +492,25 @@ export async function trackApplicationMails(opts: {
       }
     }
 
-    let verdict = classifyMail(mail.subject, mail.text);
-    let answered = true; // false = l'IA n'a pas pu lire le mail : on le relira
-    // L'IA lit le mail entier quand les règles hésitent, et confirme chaque refus (il change le statut tout seul).
-    if ((verdict === "AMBIGUOUS" || verdict === null || verdict.kind === "REJECTION") && opts.classify) {
-      const byRules = verdict;
-      verdict = await opts
-        .classify({ subject: mail.subject, text: mail.text.slice(0, 4000), company: app.company ?? "", title: app.kind === "job" ? app.title : null })
-        // IA éteinte : on garde les règles (un accusé si elles hésitaient).
-        .catch(() => ((answered = false), byRules === "AMBIGUOUS" ? { kind: "ACK" as const, detail: null } : byRules));
+    if (seen.has(dupKey(app.id, mail.from, mail.subject, mail.date))) {
+      await remember(mail, "DUPLICATE", null);
+      known.add(mail.messageId);
+      continue;
     }
-    // Sans IA, un mail ambigu (accusé + mot « entretien ») est pris pour un accusé : l'erreur la moins gênante.
-    if (verdict === "AMBIGUOUS") verdict = { kind: "ACK", detail: null };
     // « Postulez sur notre site » : pour une spontanée, la candidature s'arrête là (à refaire sur leur site).
     // Pour une offre, ce n'est qu'un accusé qui cite leurs autres offres.
     const career = !verdict || verdict.kind === "ACK" ? careerSiteUrl(mail) : null;
     if (career) verdict = app.kind === "spontaneous" ? { kind: "CAREER_SITE", detail: career } : { kind: "ACK", detail: `Te renvoie vers son site carrière : ${career}` };
     if (!verdict) {
       // Lu et sans rapport avec une étape de candidature : gardé pour ne pas redemander à l'IA à chaque relecture.
-      if (answered) {
+      if (answered || !opts.classify) {
         await remember(mail, "IGNORED", null);
         known.add(mail.messageId);
       }
       continue;
     }
     if (career && app.kind === "spontaneous") {
-      const s = sent.find((x) => x.id === app.id)!;
+      const s = sent.find((x) => x.id === app!.id)!;
       const lead = await prisma.companyLead.findUnique({ where: { id: s.leadId }, select: { notes: true } });
       if (!lead?.notes?.includes(career)) {
         await prisma.companyLead.update({ where: { id: s.leadId }, data: { notes: [lead?.notes, `Réponse : postuler sur leur site carrière ${career}`].filter(Boolean).join("\n").slice(0, 2000) } });
@@ -460,15 +523,19 @@ export async function trackApplicationMails(opts: {
         ...(app.kind === "job" ? { jobId: app.id } : { spontaneousId: app.id }),
         kind: verdict.kind,
         detail: verdict.detail,
+        summary,
+        needsReview: review,
         subject: mail.subject.slice(0, 500),
         fromAddress: mail.from.slice(0, 320),
         receivedAt: mail.date,
       },
     });
     known.add(mail.messageId);
+    seen.add(dupKey(app.id, mail.from, mail.subject, mail.date));
     app.senders = [...(app.senders ?? []), mail.from];
     report.recorded++;
-    if (verdict.kind === "REJECTION" && app.kind === "job") {
+    // Un refus change le statut tout seul seulement si l'IA est sûre d'elle (sinon : « à vérifier »).
+    if (verdict.kind === "REJECTION" && app.kind === "job" && !review) {
       const job = await prisma.job.findUnique({ where: { id: app.id }, select: { status: true } });
       if (job?.status === "APPLIED") {
         await prisma.$transaction([

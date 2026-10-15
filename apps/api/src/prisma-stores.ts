@@ -110,7 +110,7 @@ function homeColumns(home: HomeLocation | null | undefined) {
 }
 
 const MAIL_SELECT = {
-  id: true, jobId: true, spontaneousId: true, kind: true, detail: true, subject: true, fromAddress: true, messageId: true, receivedAt: true, dismissed: true,
+  id: true, jobId: true, spontaneousId: true, kind: true, detail: true, summary: true, needsReview: true, subject: true, fromAddress: true, messageId: true, receivedAt: true, dismissed: true,
 } as const;
 const APP_SELECT = { inputHash: true, model: true, letter: true, edited: true, sentAt: true, sentTo: true, createdAt: true, updatedAt: true } as const;
 
@@ -290,6 +290,10 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
       list: () => prisma.applicationMail.findMany({ orderBy: { receivedAt: "asc" }, select: MAIL_SELECT }),
       async dismiss(id) {
         const r = await prisma.applicationMail.updateMany({ where: { id }, data: { dismissed: true } });
+        return r.count ? prisma.applicationMail.findUnique({ where: { id }, select: MAIL_SELECT }) : null;
+      },
+      async confirm(id) {
+        const r = await prisma.applicationMail.updateMany({ where: { id }, data: { needsReview: false } });
         return r.count ? prisma.applicationMail.findUnique({ where: { id }, select: MAIL_SELECT }) : null;
       },
     },

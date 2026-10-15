@@ -244,8 +244,8 @@ const mailTracker: MailTracker = {
         full,
         // Tes envois et les mails de Job Radar viennent de ces adresses : jamais des réponses.
         self: [e.SMTP_USER, e.NOTIFY_EMAIL_TO].map((a) => a?.trim()).filter((a): a is string => !!a),
-        // Mails ambigus : l'IA locale tranche (si elle est éteinte, les règles suffisent).
-        classify: (m) => readApplicationMailWithAi(generalAi, m),
+        // Chaque mail qui peut répondre à une candidature est lu par l'IA (en panne : les règles suffisent).
+        classify: (m, candidates) => readApplicationMailWithAi(generalAi, m, candidates),
         log: (m) => log(m),
       });
       tracking.lastCheckAt = new Date();

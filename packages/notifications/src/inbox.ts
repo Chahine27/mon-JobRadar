@@ -40,7 +40,7 @@ export function gmailQuery(terms: string[] = []): string {
   let q = GMAIL_WORDS.join(" OR ");
   for (const t of new Set(terms.map((t) => t.replace(/["()]/g, " ").replace(/\s+/g, " ").trim()).filter((t) => t.length >= 3))) {
     const part = /^[^\s@]+@[^\s@]+$/.test(t) ? `from:${t}` : `"${t}"`;
-    if (q.length + part.length > 1_500) break;
+    if (q.length + part.length > 1_450) break; // + le filtre des onglets ci-dessous
     q += ` OR ${part}`;
   }
   return q;
@@ -99,7 +99,8 @@ export function createImapInbox(cfg: InboxConfig) {
                     ? { or: [{ uid: `${cursor.lastUid + 1}:*` }, { since: opts.rescanSince }] }
                     : { uid: `${cursor.lastUid + 1}:*` }
                   : { since: opts.since }),
-                ...(gmail ? { gmraw: query } : {}),
+                // Onglets Promotions et Réseaux sociaux de Gmail : newsletters et alertes, jamais une réponse de recruteur.
+                ...(gmail ? { gmraw: `(${query}) -category:promotions -category:social` } : {}),
               },
               { uid: true },
             );

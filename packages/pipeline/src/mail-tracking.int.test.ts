@@ -59,10 +59,32 @@ describe("suivi des candidatures par les mails (base réelle)", () => {
     await prisma.jobEvent.create({ data: { jobId: job.id, type: "STATUS_CHANGED", toValue: "APPLIED", createdAt: new Date(Date.now() - 86_400_000) } });
     const inbox = inboxOf([mail({ messageId: "<abylsen@x>", text: "Abylsen : votre candidature ne correspond pas à notre recherche." })]);
     const asked: string[] = [];
-    await trackApplicationMails({ prisma, inbox, self: [], classify: async (m) => (asked.push(m.subject), { kind: "ACK", detail: null }) });
+    await trackApplicationMails({
+      prisma, inbox, self: [],
+      classify: async (m) => (asked.push(m.subject), { index: 0, verdict: { kind: "ACK", detail: null }, summary: "Candidature reçue.", certain: true }),
+    });
     expect(asked).toHaveLength(1);
-    expect((await prisma.applicationMail.findFirstOrThrow()).kind).toBe("ACK");
+    const saved = await prisma.applicationMail.findFirstOrThrow();
+    expect(saved).toMatchObject({ kind: "ACK", summary: "Candidature reçue.", needsReview: false });
     expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("APPLIED");
+  });
+
+  it("refus dont l'IA n'est pas sûre : gardé « à vérifier », le statut ne change pas ; mail en double ignoré", async () => {
+    const job = await prisma.job.create({
+      data: { fingerprint: "f9", contentHash: "h", title: "Développeur Java", company: "Abylsen", description: "Java", technologies: [], status: "APPLIED" },
+    });
+    await prisma.jobEvent.create({ data: { jobId: job.id, type: "STATUS_CHANGED", toValue: "APPLIED", createdAt: new Date(Date.now() - 86_400_000) } });
+    const text = "Abylsen : nous ne donnerons pas suite à votre candidature.";
+    const inbox = inboxOf([mail({ messageId: "<r1@x>", text }), mail({ messageId: "<r2@x>", text })]);
+    await trackApplicationMails({
+      prisma, inbox, self: [],
+      classify: async () => ({ index: 0, verdict: { kind: "REJECTION", detail: null }, summary: "Refus.", certain: false }),
+    });
+    const saved = await prisma.applicationMail.findMany({ where: { jobId: job.id } });
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ kind: "REJECTION", needsReview: true });
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("APPLIED");
+    expect(await prisma.applicationMail.count({ where: { kind: "DUPLICATE" } })).toBe(1);
   });
 
   it("adresse introuvable : candidature annulée, entreprise « À contacter » sans cette adresse, avec une note", async () => {

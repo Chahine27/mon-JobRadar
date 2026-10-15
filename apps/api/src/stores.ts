@@ -278,6 +278,10 @@ export type ApplicationMailRow = {
   spontaneousId: string | null;
   kind: string;
   detail: string | null;
+  /** ce que dit le mail, en une phrase (IA) */
+  summary: string | null;
+  /** l'IA a hésité : à confirmer */
+  needsReview: boolean;
   subject: string;
   fromAddress: string;
   messageId: string;
@@ -290,6 +294,8 @@ export interface ApplicationMailStore {
   list(): Promise<ApplicationMailRow[]>;
   /** « Ce mail ne concerne pas cette candidature » : il ne compte plus. */
   dismiss(id: string): Promise<ApplicationMailRow | null>;
+  /** « Oui, c'est bien ça » : le mail n'est plus à vérifier. */
+  confirm(id: string): Promise<ApplicationMailRow | null>;
 }
 
 /** CV complet (table CvMaster). */

@@ -162,6 +162,11 @@ export async function createMemoryStores() {
         if (row) row.dismissed = true;
         return row ?? null;
       },
+      confirm: async (id) => {
+        const row = mailRows.find((m) => m.id === id);
+        if (row) row.needsReview = false;
+        return row ?? null;
+      },
     },
     letterKits: {
       get: async (userId) => kitRows.get(userId) ?? null,

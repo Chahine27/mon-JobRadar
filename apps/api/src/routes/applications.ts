@@ -18,6 +18,8 @@ const toMail = (m: ApplicationMailRow) => ({
   id: m.id,
   kind: m.kind,
   detail: m.detail,
+  summary: m.summary,
+  needsReview: m.needsReview,
   subject: m.subject,
   from: m.fromAddress,
   // Recherche Gmail par Message-ID : ouvre exactement ce mail (boîte suivie = Gmail).
@@ -96,6 +98,18 @@ export async function applicationRoutes(app: FastifyInstance, opts: { stores: St
     const ok = await stores.applications.setSiteOutcome(params.data.id, body.data.outcome, new Date());
     if (!ok) return reply.code(404).send({ error: "APPLICATION_NOT_FOUND" });
     return { ok: true };
+  });
+
+  // « Oui, c'est bien ça » : le mail n'est plus à vérifier ; un refus confirmé passe l'offre en « Refusée ».
+  app.post("/api/applications/mails/:id/confirm", async (request, reply) => {
+    const params = IdParams.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
+    const mail = await stores.applicationMails.confirm(params.data.id);
+    if (!mail) return reply.code(404).send({ error: "MAIL_NOT_FOUND" });
+    if (mail.kind === "REJECTION" && mail.jobId && (await stores.jobs.get(mail.jobId))?.status === "APPLIED") {
+      await jobs.setStatus(request.userId!, mail.jobId, "REJECTED");
+    }
+    return toMail(mail);
   });
 
   // « Ce mail ne concerne pas cette candidature » : il ne compte plus. Un refus écarté remet l'offre en attente.
