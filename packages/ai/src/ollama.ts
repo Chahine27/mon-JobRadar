@@ -94,10 +94,12 @@ export class OllamaClient {
         body: JSON.stringify({
           model: this.model,
           stream: false,
-          think: false,
+          // gpt-oss ne sait pas couper sa réflexion : « low » la garde courte.
+          think: this.model.startsWith("gpt-oss") ? "low" : false,
           format: jsonSchema,
           options: { temperature: opts.temperature ?? 0.2, num_ctx: opts.contextTokens ?? this.contextTokens },
-          messages: [{ role: "system", content: system }, ...toTurns(user)],
+          // Le format est aussi écrit dans la consigne : certains modèles en ligne (gpt-oss) ignorent « format ».
+          messages: [{ role: "system", content: `${system}\n\nFormat de la réponse : un objet JSON qui respecte ce schéma.\n${JSON.stringify(jsonSchema)}` }, ...toTurns(user)],
         }),
       });
     } catch (err) {
