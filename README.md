@@ -24,8 +24,8 @@ Elle collecte des offres sur plusieurs sites, les note selon mon profil, me pré
 
 L'IA principale est **Claude**, en ligne : Haiku pour relire les offres et trier les mails, Sonnet pour les lettres.
 Elle est payée avec des crédits prépayés, sans recharge automatique, donc la dépense ne peut pas dépasser ce qui a été mis. Une analyse coûte environ 0,06 centime, une lettre 3 à 7 centimes. Le coût de chaque appel est écrit dans le journal.
-Si Claude ne répond pas ou si le crédit est épuisé, deux IA gratuites prennent le relais : **Groq** (`gpt-oss-120b`), puis **Mistral** (`ministral-14b`). [Ollama](https://ollama.com), sur le PC, sert de dernier secours.
-Sans clé dans le `.env`, tout tourne avec Ollama seul, gratuitement (modèle `gemma4:e4b`, ou `OLLAMA_LETTER_MODEL` pour les lettres).
+Si Claude ne répond pas ou si le crédit est épuisé, des IA gratuites en ligne prennent le relais : **Ollama Cloud** (`gpt-oss:120b`), **Groq** (`gpt-oss-120b`, pour les analyses seulement) puis **Mistral** (`ministral-14b`). Rien ne tourne plus sur le PC.
+Sans aucune clé dans le `.env`, tout tourne avec [Ollama](https://ollama.com) installé sur le PC, gratuitement (modèle `gemma4:e4b`, ou `OLLAMA_LETTER_MODEL` pour les lettres).
 
 L'IA sert à :
 
@@ -59,7 +59,7 @@ Le projet compte **662 tests automatiques**, tous réussis.
 - **Site** : Vue.js 3, Vite
 - **Serveur** : Node.js, Fastify, Zod
 - **Base de données** : PostgreSQL (version intégrée, sans Docker), Prisma
-- **IA** : Claude (Haiku, Sonnet), Groq et Mistral en secours, Ollama en local
+- **IA** : Claude (Haiku, Sonnet), Ollama Cloud, Groq et Mistral en secours ; Ollama local sans clé
 - **PDF** : Playwright (Edge ou Chrome sans fenêtre) pour les CV, pdfkit pour les lettres
 - **Tests** : Vitest
 - **Sources en option** : Python (JobSpy)

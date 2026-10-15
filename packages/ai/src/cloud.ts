@@ -178,8 +178,9 @@ export class FallbackAi implements AiClient {
 }
 
 /**
- * IA d'une tâche selon les clés du .env : Claude (si ANTHROPIC_API_KEY), puis Groq (GROQ_API_KEY),
- * Mistral (MISTRAL_API_KEY), et Ollama en dernier. Sans aucune clé : Ollama seul, comme avant.
+ * IA d'une tâche selon les clés du .env : Claude (ANTHROPIC_API_KEY), puis Ollama Cloud (OLLAMA_API_KEY), Groq
+ * (GROQ_API_KEY, analyses seulement) et Mistral (MISTRAL_API_KEY). Sans aucune clé : Ollama sur ce PC, comme avant ;
+ * avec une clé, il n'est plus utilisé (le serveur n'a pas de carte graphique).
  */
 export function aiChain(
   env: Record<string, string | undefined>,
@@ -188,6 +189,7 @@ export function aiChain(
 ): AiClient {
   const key = (name: string) => env[name]?.trim() || undefined;
   const letter = task === "letter";
+  const timeoutMs = letter ? 300_000 : 180_000;
   const clients: AiClient[] = [];
   const anthropic = key("ANTHROPIC_API_KEY");
   if (anthropic) {
@@ -196,13 +198,16 @@ export function aiChain(
         apiKey: anthropic,
         model: letter ? "claude-sonnet-5-5" : "claude-haiku-5-5",
         effort: letter ? "medium" : "low",
-        timeoutMs: letter ? 300_000 : 180_000,
+        timeoutMs,
         ...(log ? { log } : {}),
       }),
     );
   }
+  const ollamaCloud = key("OLLAMA_API_KEY");
+  if (ollamaCloud) clients.push(new OllamaClient({ baseUrl: "https://ollama.com", apiKey: ollamaCloud, model: "gpt-oss:120b", timeoutMs }));
   const groq = key("GROQ_API_KEY");
-  if (groq) {
+  // Pas pour la lettre : sa demande (~11 000 tokens) dépasse la limite gratuite de Groq (8 000 tokens par minute).
+  if (groq && !letter) {
     clients.push(
       new OpenAiCompatClient({ name: "Groq", baseUrl: "https://api.groq.com/openai/v1", apiKey: groq, model: "openai/gpt-oss-120b", extra: { reasoning_effort: "low" } }),
     );
@@ -211,11 +216,9 @@ export function aiChain(
   if (mistral) {
     clients.push(new OpenAiCompatClient({ name: "Mistral", baseUrl: "https://api.mistral.ai/v1", apiKey: mistral, model: "ministral-14b-latest" }));
   }
+  if (clients.length > 0) return clients.length === 1 ? clients[0]! : new FallbackAi(clients, log);
   const letterModel = key("OLLAMA_LETTER_MODEL");
-  const ollama =
-    letter && letterModel
-      ? new OllamaClient({ baseUrl: env.OLLAMA_URL, model: letterModel, timeoutMs: 300_000 })
-      : new OllamaClient({ baseUrl: env.OLLAMA_URL, model: env.OLLAMA_MODEL });
-  if (clients.length === 0) return ollama;
-  return new FallbackAi([...clients, ollama], log);
+  return letter && letterModel
+    ? new OllamaClient({ baseUrl: env.OLLAMA_URL, model: letterModel, timeoutMs: 300_000 })
+    : new OllamaClient({ baseUrl: env.OLLAMA_URL, model: env.OLLAMA_MODEL });
 }

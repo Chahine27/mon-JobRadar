@@ -25,6 +25,8 @@ export class AiUnavailableError extends Error {
 export type OllamaOptions = {
   baseUrl?: string;
   model?: string;
+  /** Ollama Cloud (https://ollama.com) : clé du compte ; sans clé, Ollama installé sur ce PC. */
+  apiKey?: string;
   fetch?: FetchLike;
   /** Mémoire de travail du modèle (tokens). 12288 = une annonce + un CV + la lettre exemple + les règles du candidat. */
   contextTokens?: number;
@@ -41,6 +43,7 @@ export const OLLAMA_DEFAULTS = {
 export class OllamaClient {
   readonly baseUrl: string;
   readonly model: string;
+  private readonly apiKey: string | undefined;
   private readonly fetch: FetchLike;
   private readonly contextTokens: number;
   private readonly timeoutMs: number;
@@ -48,6 +51,7 @@ export class OllamaClient {
   constructor(opts: OllamaOptions = {}) {
     this.baseUrl = (opts.baseUrl?.trim() || OLLAMA_DEFAULTS.baseUrl).replace(/\/+$/, "");
     this.model = opts.model?.trim() || OLLAMA_DEFAULTS.model;
+    this.apiKey = opts.apiKey?.trim() || undefined;
     this.fetch = opts.fetch ?? ((i, init) => globalThis.fetch(i, init));
     this.contextTokens = opts.contextTokens ?? OLLAMA_DEFAULTS.contextTokens;
     this.timeoutMs = opts.timeoutMs ?? OLLAMA_DEFAULTS.timeoutMs;
@@ -55,6 +59,8 @@ export class OllamaClient {
 
   /** Ollama lancé ? Modèle téléchargé ? (réponse rapide, pour l'affichage) */
   async status(): Promise<AiStatus> {
+    // En ligne : rien à télécharger, une clé refusée bascule de toute façon sur le secours.
+    if (this.apiKey) return { available: true, model: this.model, installed: true };
     let res: Response;
     try {
       res = await this.fetch(`${this.baseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
@@ -83,7 +89,7 @@ export class OllamaClient {
     try {
       res = await this.fetch(`${this.baseUrl}/api/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}) },
         signal: AbortSignal.timeout(this.timeoutMs),
         body: JSON.stringify({
           model: this.model,
@@ -97,15 +103,15 @@ export class OllamaClient {
     } catch (err) {
       const timeout = err instanceof Error && err.name === "TimeoutError";
       throw new AiUnavailableError(
-        timeout ? "L'IA a mis trop de temps à répondre." : "Ollama ne répond pas : lance l'appli Ollama sur ce PC.",
+        timeout ? "L'IA a mis trop de temps à répondre." : this.apiKey ? "Ollama Cloud ne répond pas." : "Ollama ne répond pas : lance l'appli Ollama sur ce PC.",
       );
     }
-    if (res.status === 404) {
+    if (res.status === 404 && !this.apiKey) {
       throw new AiUnavailableError(`Modèle « ${this.model} » introuvable : lance « ollama pull ${this.model} ».`);
     }
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      throw new AiUnavailableError(`Ollama répond en erreur (HTTP ${res.status}) ${detail.slice(0, 200)}`.trim());
+      throw new AiUnavailableError(`${this.apiKey ? "Ollama Cloud" : "Ollama"} répond en erreur (HTTP ${res.status}) ${detail.slice(0, 200)}`.trim());
     }
     const body = (await res.json()) as { message?: { content?: string } };
     return parseJsonReply(body.message?.content ?? "");

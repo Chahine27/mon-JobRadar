@@ -108,7 +108,7 @@ async function save() {
       <h2><span class="step">4</span>Tes règles pour la lettre <span class="muted small">(conseillé)</span></h2>
       <label>
         Tes règles (structure, phrases que tu utilises, faits à mettre en avant)
-        <textarea v-model="kit.rules" rows="12" maxlength="8000" placeholder="Ex. : 5 paragraphes. Paragraphe 2 : toujours LUSIS, le plus long…" />
+        <textarea v-model="kit.rules" rows="12" maxlength="15000" placeholder="Ex. : 5 paragraphes. Paragraphe 2 : toujours LUSIS, le plus long…" />
         <span class="hint">L'IA les suit en priorité, avant ses règles générales. Ce que tu écris ici compte comme vrai, au même titre que ton CV.</span>
       </label>
       <label>

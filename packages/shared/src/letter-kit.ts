@@ -14,7 +14,7 @@ export const LetterKitSchema = z.object({
   cvText: z.string().trim().max(15_000).default(""),
   letterExample: z.string().trim().max(10_000).default(""),
   /** Tes propres règles d'écriture (structure, phrases types, faits à mettre en avant) : priorité sur les règles générales. */
-  rules: z.string().trim().max(8_000).default(""),
+  rules: z.string().trim().max(15_000).default(""),
   /** Technos que tu maîtrises vraiment (séparées par des virgules) : les seules où « maîtrise » est accepté. */
   mastered: z.string().trim().max(400).default(""),
   /** Dernier paragraphe, toujours le même ({entreprise} est remplacé par le nom de l'entreprise). */

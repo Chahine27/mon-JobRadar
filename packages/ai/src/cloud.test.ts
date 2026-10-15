@@ -76,5 +76,24 @@ describe("aiChain", () => {
     expect(aiChain({ ANTHROPIC_API_KEY: "k" }, "general").model).toBe("claude-haiku-5-5");
     expect(aiChain({ ANTHROPIC_API_KEY: "k" }, "letter").model).toBe("claude-sonnet-5-5");
     expect(aiChain({ GROQ_API_KEY: "k" }, "general").model).toBe("openai/gpt-oss-120b");
+    expect(aiChain({ OLLAMA_API_KEY: "k" }, "letter").model).toBe("gpt-oss:120b");
+    // Groq ne prend pas la lettre (trop longue pour sa limite gratuite) : seul Ollama sur le PC reste.
+    expect(aiChain({ GROQ_API_KEY: "k" }, "letter").model).toBe("gemma4:e4b");
+  });
+
+  it("Ollama Cloud : clé envoyée, rien à télécharger", async () => {
+    let auth = "";
+    const cloud = new OllamaClient({
+      baseUrl: "https://ollama.com",
+      apiKey: "k",
+      model: "gpt-oss:120b",
+      fetch: async (_u, init) => {
+        auth = String((init?.headers as Record<string, string>).Authorization);
+        return new Response(JSON.stringify({ message: { content: '{"a":1}' } }));
+      },
+    });
+    expect(await cloud.status()).toEqual({ available: true, model: "gpt-oss:120b", installed: true });
+    expect(await cloud.chatJson("s", "u", {})).toEqual({ a: 1 });
+    expect(auth).toBe("Bearer k");
   });
 });
