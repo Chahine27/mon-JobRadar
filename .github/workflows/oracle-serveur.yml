@@ -34,6 +34,8 @@ jobs:
           # Contrôle sans rien afficher de secret : noms des réglages et début de la clé.
           sed -E 's/=.*/=…/' ~/.oci/config
           head -c 11 ~/.oci/oci_api_key.pem; echo
+          echo "Secret OCI_KEY : $(printf '%s' "$OCI_KEY" | wc -l) lignes, $(printf '%s' "$OCI_KEY" | wc -c) caractères"
+          echo "Clé gardée : $(wc -l < ~/.oci/oci_api_key.pem) lignes ; longueurs :"; awk '{print length($0)}' ~/.oci/oci_api_key.pem | sort -n | uniq -c
       # En cas d'erreur, sa dernière ligne devient une annotation (lisible sans ouvrir le journal).
       - run: python -u tools/oracle/create-instance.py --once 2> err.txt || { cat err.txt; echo "::error::$(tail -n 1 err.txt)"; exit 1; }
       - name: Prévenir et s'arrêter
