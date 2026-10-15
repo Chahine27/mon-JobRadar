@@ -115,6 +115,8 @@ let lastExpiryAt = 0;
 const generalAi = aiChain(e, "general", (m) => log(m));
 // Lettre de motivation : Claude Sonnet, mêmes secours (Ollama : OLLAMA_LETTER_MODEL s'il est réglé).
 const letterAi = aiChain(e, "letter", (m) => log(m));
+// Lecture des mails de candidature : IA gratuites seulement (Ollama Cloud, Groq, Mistral), Claude est gardé pour le reste.
+const mailAi = aiChain(e, "mail", (m) => log(m));
 const joobleKey = e.JOOBLE_API_KEY?.trim();
 const joobleQuota = prismaJoobleQuota(prisma, joobleKey);
 const lbb = new LaBonneBoiteClient({ clientId: e.FRANCE_TRAVAIL_CLIENT_ID?.trim(), clientSecret: e.FRANCE_TRAVAIL_CLIENT_SECRET?.trim() });
@@ -245,7 +247,7 @@ const mailTracker: MailTracker = {
         // Tes envois et les mails de Job Radar viennent de ces adresses : jamais des réponses.
         self: [e.SMTP_USER, e.NOTIFY_EMAIL_TO].map((a) => a?.trim()).filter((a): a is string => !!a),
         // Chaque mail qui peut répondre à une candidature est lu par l'IA (en panne : les règles suffisent).
-        classify: (m, candidates) => readApplicationMailWithAi(generalAi, m, candidates),
+        classify: (m, candidates) => readApplicationMailWithAi(mailAi, m, candidates),
         log: (m) => log(m),
       });
       tracking.lastCheckAt = new Date();

@@ -77,6 +77,8 @@ describe("aiChain", () => {
     expect(aiChain({ ANTHROPIC_API_KEY: "k" }, "letter").model).toBe("claude-sonnet-5-5");
     expect(aiChain({ GROQ_API_KEY: "k" }, "general").model).toBe("openai/gpt-oss-120b");
     expect(aiChain({ OLLAMA_API_KEY: "k" }, "letter").model).toBe("gpt-oss:120b");
+    // Mails : jamais Claude, même avec sa clé.
+    expect(aiChain({ ANTHROPIC_API_KEY: "k", OLLAMA_API_KEY: "k" }, "mail").model).toBe("gpt-oss:120b");
     // Groq ne prend pas la lettre (trop longue pour sa limite gratuite) : seul Ollama sur le PC reste.
     expect(aiChain({ GROQ_API_KEY: "k" }, "letter").model).toBe("gemma4:e4b");
   });
