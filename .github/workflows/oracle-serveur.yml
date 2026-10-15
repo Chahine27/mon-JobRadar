@@ -28,7 +28,8 @@ jobs:
           mkdir -p ~/.oci
           # Copiés depuis Windows : fins de ligne \r retirées (sinon le chemin de la clé ne correspond à rien).
           printf '%s\n' "$OCI_CONFIG" | tr -d '\r' > ~/.oci/config
-          printf '%s\n' "$OCI_KEY" | tr -d '\r' > ~/.oci/oci_api_key.pem
+          # Seulement la clé : Oracle ajoute une ligne « OCI_API_KEY » après END, refusée par la bibliothèque.
+          printf '%s\n' "$OCI_KEY" | tr -d '\r' | sed -n '/-----BEGIN/,/-----END/p' > ~/.oci/oci_api_key.pem
           chmod 600 ~/.oci/config ~/.oci/oci_api_key.pem
           # Contrôle sans rien afficher de secret : noms des réglages et début de la clé.
           sed -E 's/=.*/=…/' ~/.oci/config
