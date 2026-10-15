@@ -306,6 +306,10 @@ export type ApplicationMail = {
   id: string;
   kind: "ACK" | "INTERVIEW" | "OFFER" | "REJECTION" | "CAREER_SITE";
   detail: string | null;
+  /** ce que dit le mail, en une phrase (IA) */
+  summary: string | null;
+  /** l'IA a hésité : à confirmer */
+  needsReview: boolean;
   subject: string;
   from: string;
   /** ouvre le mail dans Gmail */
