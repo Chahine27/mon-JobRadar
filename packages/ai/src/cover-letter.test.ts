@@ -463,6 +463,12 @@ describe("dernier filet : phrases hors sujet retirées", () => {
     expect(out).toContain("Node.js et PostgreSQL");
     expect(out).not.toContain("Vitest");
   });
+  it("poste full stack : l'expérience serveur reste, même dans un autre langage que l'annonce", () => {
+    const cv = { cvText: "Vue.js, Java, Spring Boot, PostgreSQL" };
+    const d = { objet: "x", paragraphes: [`${long}Chez Banquo, j'ai développé un serveur Java Spring Boot.`, "Je serais ravi d'échanger."] };
+    expect(dropOffTopicSentences(d, cv, "Développeur JS Full-Stack. Vue.js.").paragraphes.join(" ")).toContain("Spring Boot");
+    expect(dropOffTopicSentences(d, cv, "Développeur Vue.js. Interfaces web.").paragraphes.join(" ")).not.toContain("Spring Boot");
+  });
   it("ne raccourcit pas une lettre déjà courte", () => {
     const d = { objet: "x", paragraphes: ["Les tests tournent avec Vitest.", "J'ai écrit des interfaces Vue.js."] };
     expect(dropOffTopicSentences(d, kit, "Développeur Vue.js.")).toBe(d);

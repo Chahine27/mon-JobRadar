@@ -1,12 +1,12 @@
 import type { LetterKit } from "@job-radar/shared";
-import { extractSkills, getSkill } from "@job-radar/skills";
+import { extractSkills, getSkill, type SkillFamily } from "@job-radar/skills";
 import { z } from "zod";
 import type { AnalysisJobInput } from "./job-analysis";
 import type { AiClient } from "./cloud";
 import type { ChatTurn } from "./ollama";
 
 /** Changer ce numéro quand la consigne change : les lettres existantes seront signalées « à refaire ». */
-export const LETTER_PROMPT_VERSION = "2026-10-15.2";
+export const LETTER_PROMPT_VERSION = "2026-10-15.3";
 
 /** Ce que l'IA écrit : l'objet et le corps. L'en-tête, « Madame, Monsieur » et la politesse sont ajoutés par le code. */
 export const LetterDraftSchema = z.object({
@@ -200,6 +200,9 @@ export function buildLetterPrompt(job: AnalysisJobInput, kit: LetterKit, opts: L
 ${strengths.map((x) => `- ${x.skill} ← CV : « ${x.proof} »`).join("\n")}
 `
     : "";
+  const fullStack = FULL_STACK.test(`${job.title}\n${job.description}`)
+    ? "POSTE FULL STACK : l'expérience serveur du CV (API, base de données) compte, même dans un autre langage que l'annonce ; cite-la brièvement à côté du frontend.\n"
+    : "";
   const missing = gaps.length ? `MANQUES (technologies de l'annonce absentes du CV : NE LES LISTE PAS dans la lettre ; au plus une, si elle est centrale)\n- ${gaps.join(", ")}\n` : "";
   const own = kit.rules?.trim()
     ? `RÈGLES DU CANDIDAT (écrites par lui : elles passent AVANT les règles générales ; les faits qu'elles contiennent sont vrais)
@@ -214,7 +217,7 @@ ${kit.rules.trim().slice(0, MAX_RULES)}
     : "";
   // Les mêmes listes que la relecture automatique (findLetterIssues) : l'IA les connaît avant d'écrire.
   const banned = `MOTS ET FORMULES INTERDITS (la lettre est relue automatiquement : chacun est refusé) : ${[...FORBIDDEN, ...ownBanned(kit)].map(([, name]) => name).join(", ")}\n`;
-  return `${opts.spontaneous ? SPONTANEOUS_RULES : ""}${own}${mastered}${closing}${banned}${table}${missing}
+  return `${opts.spontaneous ? SPONTANEOUS_RULES : ""}${own}${mastered}${closing}${banned}${table}${fullStack}${missing}
 CV DU CANDIDAT
 """
 ${kit.cvText.slice(0, MAX_CV)}
@@ -333,7 +336,7 @@ export function checkLetter(letter: string, kit: LetterKit, jobText: string, job
   // Technologies du CV citées dans la lettre mais absentes de l'annonce : la lettre récite le CV au lieu de répondre à l'offre.
   const inJob = new Set(extractSkills(jobText));
   // Candidature spontanée : pas d'annonce, donc rien n'est « hors sujet ».
-  const offTopicIds = opts.spontaneous ? [] : offTopicSkills(letter, inCv, inJob);
+  const offTopicIds = opts.spontaneous ? [] : offTopicSkills(letter, inCv, inJob, jobText);
   const offTopic = offTopicIds.map((id) => getSkill(id)?.label ?? id);
   if (familiesOf(offTopicIds) >= 2) {
     warnings.push(`La lettre cite ${offTopic.join(", ")}, absents de l'annonce : garde seulement ce qui répond à l'offre (sinon ça ressemble à une récitation du CV).`);
@@ -446,8 +449,13 @@ const KNOWS = /(approfondi|consolid|renforc|ma connaissance d|connaissances? (en
 /** Nombre de familles différentes (Java + Spring Boot = 1 famille : c'est UNE expérience backend). */
 const familiesOf = (ids: string[]) => new Set(ids.map((id) => getSkill(id)?.family ?? id)).size;
 
-function offTopicSkills(text: string, inCv: Set<string>, inJob: Set<string>): string[] {
+/** Poste full stack : le serveur et les données comptent, même dans un autre langage que celui de l'annonce. */
+const FULL_STACK = /\bfull[\s-]?stack\b/i;
+const FULL_STACK_FAMILIES: SkillFamily[] = ["javascript", "frontend-tools", "jvm", "dotnet", "php", "python", "ruby", "go", "rust", "api", "data"];
+
+function offTopicSkills(text: string, inCv: Set<string>, inJob: Set<string>, jobText: string): string[] {
   const families = new Set([...inJob].map((id) => getSkill(id)?.family).filter(Boolean));
+  if (FULL_STACK.test(jobText)) for (const f of FULL_STACK_FAMILIES) families.add(f);
   return [...new Set(extractSkills(text))].filter((id) => {
     if (!inCv.has(id) || inJob.has(id)) return false;
     const fam = getSkill(id)?.family;
@@ -557,7 +565,7 @@ export function findLetterIssues(body: string, kit: LetterKit, jobText: string, 
   for (const m of body.matchAll(/(?:apprendre|découvrir|me former (?:à|sur))\s+(?:le |la |l'|les )?([^.,;\n]{2,60})/gi)) {
     for (const id of extractSkills(m[1]!)) if (inCv.has(id)) issues.push(`${label(id)} est dans le CV : ne dis pas vouloir l'apprendre, dis qu'il l'a pratiqué.`);
   }
-  const offIds = opts.spontaneous ? [] : offTopicSkills(body, inCv, inJob);
+  const offIds = opts.spontaneous ? [] : offTopicSkills(body, inCv, inJob, jobText);
   const offTopic = offIds.map(label);
   if (familiesOf(offIds) >= 2) issues.push(`Retire ${offTopic.join(", ")} : sans rapport avec l'annonce, ça fait récitation du CV.`);
   // Débuts de phrase répétitifs (« J'ai … J'ai … J'ai … »).
@@ -666,7 +674,7 @@ export function dropOffTopicSentences(draft: LetterBody, kit: Pick<LetterKit, "c
   // un poste JavaScript (React est de la même famille), sinon le paragraphe des projets se vidait.
   const keep = (sentence: string) => {
     const ids = extractSkills(sentence);
-    const off = new Set(offTopicSkills(sentence, inCv, inJob));
+    const off = new Set(offTopicSkills(sentence, inCv, inJob, jobText));
     return ids.length === 0 || ids.some((id) => !off.has(id));
   };
   const paragraphes = draft.paragraphes.map((p) => p.split(/(?<=[.!?])\s+/).filter(keep).join(" ")).filter(Boolean);
