@@ -21,7 +21,10 @@ const MAIL_READING_JSON_SCHEMA = {
 };
 
 const SYSTEM = `Tu lis un mail reçu par un candidat et tu dis s'il répond à l'une de ses candidatures. Tu réponds UNIQUEMENT avec le JSON demandé.
-- candidature : le numéro de la candidature à laquelle ce mail répond (entreprise ET poste), ou 0 s'il ne répond à aucune. Un mail pour un AUTRE poste que ceux listés, ou d'une autre entreprise, c'est 0. Un outil de recrutement (Welcome to the Jungle, Teamtailor, Lever…) envoie pour beaucoup d'entreprises : fie-toi au nom de l'entreprise et au poste écrits dans le mail.
+- candidature : le numéro de la candidature à laquelle ce mail répond, ou 0 s'il ne répond à aucune.
+  - Compare d'abord l'entreprise, puis le poste écrit dans le mail (sujet ou texte) avec les postes listés. Un mail d'une autre entreprise, ou qui nomme un poste clairement différent de tous ceux listés (ex. « Consultant développeur Java » face à « Développeur JS Full-Stack »), c'est 0.
+  - Le mail ne nomme pas le poste et plusieurs candidatures chez cette entreprise conviennent : donne la plus probable (la plus récente) et certain = false. Ne réponds pas 0 dans ce cas.
+  - Un outil de recrutement (Welcome to the Jungle, Teamtailor, Lever…) envoie pour beaucoup d'entreprises : fie-toi au nom de l'entreprise et au poste écrits dans le mail, pas à l'expéditeur.
 - type :
   - accuse_reception : candidature bien reçue / en cours d'étude, sans décision ni rendez-vous.
   - entretien : on propose un entretien, un appel, une rencontre, ou on demande ses disponibilités pour se voir.

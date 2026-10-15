@@ -289,11 +289,10 @@ export function candidateApplications(mail: InboxMail, apps: ApplicationRef[]): 
 }
 
 /**
- * Même mail reçu deux fois pour la même candidature (copie, relance automatique identique) : même expéditeur, même
- * sujet, même jour. Un outil de recrutement partagé envoie le même sujet pour d'autres entreprises : la candidature compte.
+ * Même réponse reçue deux fois pour la même candidature (copie, relance automatique, sujet un peu différent) : même
+ * expéditeur, même genre de réponse, même jour. La candidature compte : un outil partagé écrit pour d'autres entreprises.
  */
-const dupKey = (appId: string, from: string, subject: string, date: Date) =>
-  `${appId}|${from.toLowerCase()}|${subject.trim().toLowerCase()}|${date.toISOString().slice(0, 10)}`;
+const dupKey = (appId: string, from: string, kind: string, date: Date) => `${appId}|${from.toLowerCase()}|${kind}|${date.toISOString().slice(0, 10)}`;
 
 // ───────── Orchestration ─────────
 
@@ -376,9 +375,9 @@ export async function trackApplicationMails(opts: {
     (
       await prisma.applicationMail.findMany({
         where: { receivedAt: { gte: since }, dismissed: false },
-        select: { jobId: true, spontaneousId: true, fromAddress: true, subject: true, receivedAt: true },
+        select: { jobId: true, spontaneousId: true, fromAddress: true, kind: true, receivedAt: true },
       })
-    ).map((m) => dupKey(m.jobId ?? m.spontaneousId ?? "", m.fromAddress, m.subject, m.receivedAt)),
+    ).map((m) => dupKey(m.jobId ?? m.spontaneousId ?? "", m.fromAddress, m.kind, m.receivedAt)),
   );
   /** Mail gardé sans lien (jamais affiché) : il ne sera ni relu ni redonné à l'IA. */
   const remember = (mail: InboxMail, kind: string, detail: string | null) =>
@@ -444,10 +443,13 @@ export async function trackApplicationMails(opts: {
         );
         // Aucune candidature : sauf réponse dans le fil d'une spontanée (départ, support, site carrière, vus plus bas).
         const thread = candidates.length === 1 && candidates[0]!.kind === "spontaneous" ? candidates[0]! : null;
-        app = r.index !== null ? candidates[r.index]! : thread;
-        verdict = r.index !== null ? r.verdict : null;
+        // Vraie réponse (refus, accusé…) sans candidature choisie : l'IA hésite entre plusieurs postes de la même
+        // entreprise. La plus probable d'après l'entreprise, à vérifier par toi.
+        const unsure = r.index === null && r.verdict ? matchApplication(mail, apps) : null;
+        app = r.index !== null ? candidates[r.index]! : (unsure ?? thread);
+        verdict = r.index !== null || unsure ? r.verdict : null;
         summary = r.summary || null;
-        review = !r.certain;
+        review = !r.certain || !!unsure;
       } catch {
         answered = false;
       }
@@ -492,11 +494,6 @@ export async function trackApplicationMails(opts: {
       }
     }
 
-    if (seen.has(dupKey(app.id, mail.from, mail.subject, mail.date))) {
-      await remember(mail, "DUPLICATE", null);
-      known.add(mail.messageId);
-      continue;
-    }
     // « Postulez sur notre site » : pour une spontanée, la candidature s'arrête là (à refaire sur leur site).
     // Pour une offre, ce n'est qu'un accusé qui cite leurs autres offres.
     const career = !verdict || verdict.kind === "ACK" ? careerSiteUrl(mail) : null;
@@ -507,6 +504,11 @@ export async function trackApplicationMails(opts: {
         await remember(mail, "IGNORED", null);
         known.add(mail.messageId);
       }
+      continue;
+    }
+    if (seen.has(dupKey(app.id, mail.from, verdict.kind, mail.date))) {
+      await remember(mail, "DUPLICATE", null);
+      known.add(mail.messageId);
       continue;
     }
     if (career && app.kind === "spontaneous") {
@@ -531,7 +533,7 @@ export async function trackApplicationMails(opts: {
       },
     });
     known.add(mail.messageId);
-    seen.add(dupKey(app.id, mail.from, mail.subject, mail.date));
+    seen.add(dupKey(app.id, mail.from, verdict.kind, mail.date));
     app.senders = [...(app.senders ?? []), mail.from];
     report.recorded++;
     // Un refus change le statut tout seul seulement si l'IA est sûre d'elle (sinon : « à vérifier »).
