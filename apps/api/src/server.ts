@@ -234,6 +234,8 @@ const inbox = createImapInbox({
   password: e.SMTP_PASSWORD?.replace(/\s/g, ""),
 });
 const tracking = { running: false, lastCheckAt: null as Date | null, lastError: null as string | null };
+/** Mails déjà lus et sans rapport avec tes candidatures : retenus en mémoire seulement (jamais en base). */
+const ignoredMails = new Set<string>();
 const mailTracker: MailTracker = {
   status: () => ({ configured: env.MAIL_TRACKING_ENABLED && inbox.isConfigured(), ...tracking }),
   async run({ full = false } = {}) {
@@ -244,6 +246,7 @@ const mailTracker: MailTracker = {
         prisma,
         inbox,
         full,
+        ignored: ignoredMails,
         // Tes envois et les mails de Job Radar viennent de ces adresses : jamais des réponses.
         self: [e.SMTP_USER, e.NOTIFY_EMAIL_TO].map((a) => a?.trim()).filter((a): a is string => !!a),
         // Chaque mail qui peut répondre à une candidature est lu par l'IA (en panne : les règles suffisent).
@@ -261,6 +264,29 @@ const mailTracker: MailTracker = {
   },
 };
 let mailTimer: ReturnType<typeof setInterval> | null = null;
+let stopMailWatch: (() => void) | null = null;
+/**
+ * Nouveau mail signalé par Gmail : lu 10 s après (le temps que Gmail l'indexe pour sa recherche, et qu'une rafale
+ * arrive en une fois). Lecture déjà en cours : une autre suit dès qu'elle finit.
+ */
+let mailSoon: ReturnType<typeof setTimeout> | null = null;
+let mailAgain = false;
+function onNewMail() {
+  if (mailSoon) return;
+  log("Nouveau mail signalé par Gmail : lecture dans 10 s");
+  mailSoon = setTimeout(async () => {
+    mailSoon = null;
+    if (tracking.running) {
+      mailAgain = true;
+      return;
+    }
+    await mailTracker.run();
+    if (mailAgain) {
+      mailAgain = false;
+      onNewMail();
+    }
+  }, 10_000);
+}
 
 const app = await buildApp({
   onJobService: (s) => (jobService = s),
@@ -327,6 +353,7 @@ const app = await buildApp({
 
 const shutdown = async () => {
   if (mailTimer) clearInterval(mailTimer);
+  stopMailWatch?.();
   await Promise.all([runner.stop(), scraperRunner.stop()]);
   await app.close();
   await prisma.$disconnect();
@@ -358,7 +385,10 @@ if (env.SCHEDULER_ENABLED) {
   app.log.info("Collecte automatique désactivée (SCHEDULER_ENABLED=false)");
 }
 if (mailTracker.status().configured) {
-  void mailTracker.run();
-  mailTimer = setInterval(() => void mailTracker.run(), 15 * 60_000);
-  app.log.info("Suivi des candidatures par mail actif (toutes les 15 min, boîte lue en lecture seule)");
+  void mailTracker.run().then(() => mailAgain && ((mailAgain = false), onNewMail()));
+  // Réception en direct : chaque nouveau mail est lu dans les secondes qui suivent. Filet de sécurité toutes les heures
+  // (signal perdu, mail rangé hors de la boîte de réception par un filtre, spam).
+  stopMailWatch = inbox.watch(onNewMail, (m) => log(m));
+  mailTimer = setInterval(() => void mailTracker.run(), 60 * 60_000);
+  app.log.info("Suivi des candidatures par mail actif (réception en direct + vérification toutes les heures, lecture seule)");
 }

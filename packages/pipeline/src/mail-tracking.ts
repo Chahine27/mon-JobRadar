@@ -315,6 +315,11 @@ export async function trackApplicationMails(opts: {
    * marquées depuis la dernière fois.
    */
   full?: boolean;
+  /**
+   * Mails déjà lus et sans rapport avec tes candidatures : retenus ici (en mémoire, le temps que l'appli tourne), jamais
+   * en base, pour ne pas les redonner à l'IA à chaque passage.
+   */
+  ignored?: Set<string>;
   now?: Date;
   log?: (m: string) => void;
 }): Promise<MailTrackingReport> {
@@ -364,7 +369,7 @@ export async function trackApplicationMails(opts: {
     cursors,
     terms,
     ...(rescanSince ? { rescanSince } : {}),
-    skip: (m) => done.has(m.messageId) || self.includes(m.from.toLowerCase()),
+    skip: (m) => done.has(m.messageId) || !!opts.ignored?.has(m.messageId) || self.includes(m.from.toLowerCase()),
   });
   report.read = mails.length;
 
@@ -379,7 +384,12 @@ export async function trackApplicationMails(opts: {
       })
     ).map((m) => dupKey(m.jobId ?? m.spontaneousId ?? "", m.fromAddress, m.kind, m.receivedAt)),
   );
-  /** Mail gardé sans lien (jamais affiché) : il ne sera ni relu ni redonné à l'IA. */
+  /** Mail sans rapport : pas en base, seulement retenu en mémoire pour ne pas le redonner à l'IA. */
+  const forget = (mail: InboxMail) => {
+    opts.ignored?.add(mail.messageId);
+    known.add(mail.messageId);
+  };
+  /** Mail gardé sans lien (jamais affiché), quand il a changé quelque chose (adresse rejetée, personne partie…). */
   const remember = (mail: InboxMail, kind: string, detail: string | null) =>
     prisma.applicationMail.create({
       data: { messageId: mail.messageId, kind, detail, subject: mail.subject.slice(0, 500), fromAddress: mail.from.slice(0, 320), receivedAt: mail.date, dismissed: true },
@@ -464,8 +474,7 @@ export async function trackApplicationMails(opts: {
     }
     if (!app) {
       // Lu par l'IA : ne répond à aucune candidature. Gardé pour ne pas le redonner à l'IA.
-      await remember(mail, "IGNORED", null);
-      known.add(mail.messageId);
+      forget(mail);
       continue;
     }
     report.matched++;
@@ -501,14 +510,12 @@ export async function trackApplicationMails(opts: {
     if (!verdict) {
       // Lu et sans rapport avec une étape de candidature : gardé pour ne pas redemander à l'IA à chaque relecture.
       if (answered || !opts.classify) {
-        await remember(mail, "IGNORED", null);
-        known.add(mail.messageId);
+        forget(mail);
       }
       continue;
     }
     if (seen.has(dupKey(app.id, mail.from, verdict.kind, mail.date))) {
-      await remember(mail, "DUPLICATE", null);
-      known.add(mail.messageId);
+      forget(mail);
       continue;
     }
     if (career && app.kind === "spontaneous") {

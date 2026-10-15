@@ -155,5 +155,44 @@ export function createImapInbox(cfg: InboxConfig) {
       }
       return { mails, cursors };
     },
+
+    /**
+     * Réception en direct : connexion gardée ouverte sur la boîte de réception (IDLE, en lecture seule) ; `onNew` est
+     * appelé dès qu'un mail arrive. Gmail coupe la connexion de temps en temps (~30 min, réseau) : reconnexion
+     * automatique, de plus en plus espacée si elle échoue. Renvoie de quoi arrêter.
+     */
+    watch(onNew: () => void, log: (m: string) => void = () => {}): () => void {
+      let stopped = false;
+      let client: ImapFlow | null = null;
+      let delay = 5_000;
+      const connect = async () => {
+        if (stopped || !configured) return;
+        const c = new ImapFlow({ host: cfg.host!, port: cfg.port ?? 993, secure: (cfg.port ?? 993) === 993, auth: { user: cfg.user!, pass: cfg.password! }, logger: false });
+        client = c;
+        let retrying = false;
+        const retry = () => {
+          if (stopped || retrying) return;
+          retrying = true;
+          setTimeout(() => void connect(), delay);
+          delay = Math.min(delay * 2, 5 * 60_000);
+        };
+        c.on("exists", (d: { count: number; prevCount: number }) => d.count > d.prevCount && onNew());
+        c.on("close", retry);
+        c.on("error", (err: Error) => log(`Réception en direct des mails : ${err.message}`)); // « close » suit
+        try {
+          await c.connect();
+          await c.mailboxOpen("INBOX", { readOnly: true }); // ImapFlow passe tout seul en IDLE quand rien ne se passe
+          delay = 5_000;
+        } catch (err) {
+          log(`Réception en direct des mails : ${err instanceof Error ? err.message : String(err)}`);
+          retry();
+        }
+      };
+      void connect();
+      return () => {
+        stopped = true;
+        void client?.logout().catch(() => {});
+      };
+    },
   };
 }
