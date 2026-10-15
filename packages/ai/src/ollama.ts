@@ -103,14 +103,17 @@ export class OllamaClient {
       throw new AiUnavailableError(`Ollama répond en erreur (HTTP ${res.status}) ${detail.slice(0, 200)}`.trim());
     }
     const body = (await res.json()) as { message?: { content?: string } };
-    const content = body.message?.content ?? "";
-    try {
-      return JSON.parse(content);
-    } catch {
-      // Certains modèles entourent le JSON de ```json … ``` malgré la consigne.
-      const m = content.match(/\{[\s\S]*\}/);
-      if (m) return JSON.parse(m[0]);
-      throw new Error("Réponse de l'IA illisible (pas du JSON).");
-    }
+    return parseJsonReply(body.message?.content ?? "");
+  }
+}
+
+/** JSON de la réponse ; certains modèles l'entourent de ```json … ``` malgré la consigne. */
+export function parseJsonReply(content: string): unknown {
+  try {
+    return JSON.parse(content);
+  } catch {
+    const m = content.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+    throw new Error("Réponse de l'IA illisible (pas du JSON).");
   }
 }

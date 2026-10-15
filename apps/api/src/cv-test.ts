@@ -2,7 +2,7 @@
  * « pnpm cv:test <idOffre> [une-colonne|deux-colonnes] » : affiche le choix du CV adapté (morceaux, notes,
  * écartés, contrôles) sans créer de PDF ni rien enregistrer.
  */
-import { OllamaClient } from "@job-radar/ai";
+import { aiChain } from "@job-radar/ai";
 import { cvSkillLabel } from "@job-radar/skills";
 import { createPrismaClient } from "@job-radar/db";
 import { EMPTY_OVERRIDES, TemplateIdSchema } from "@job-radar/shared";
@@ -23,7 +23,7 @@ try {
   const user = await prisma.user.findFirst({ select: { id: true } });
   const job = await stores.jobs.get(jobId);
   if (!user || !job) throw new Error(`Offre introuvable : ${jobId}`);
-  const cv = createCvService(stores, { aiModel: new OllamaClient({ baseUrl: process.env.OLLAMA_URL, model: process.env.OLLAMA_MODEL }).model });
+  const cv = createCvService(stores, { aiModel: aiChain(process.env, "general").model });
   const m = await cv.master(user.id);
   if ("error" in m) throw new Error(m.error === "NO_CV_MASTER" ? "Pas de CV complet en base (page /cv)." : "CV complet incohérent (page /cv).");
   const jobCv = await cv.jobForCv(user.id, job);

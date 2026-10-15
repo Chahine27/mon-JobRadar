@@ -20,10 +20,12 @@ Elle collecte des offres sur plusieurs sites, les note selon mon profil, me pré
 6. **Ajout d'une offre à la main** : je colle une annonce vue ailleurs, ou je l'envoie en un clic grâce à une extension Chrome/Edge.
 7. **Statistiques** : compétences les plus demandées, expérience exigée, efficacité de chaque source.
 
-## L'IA locale (Ollama)
+## L'IA
 
-Toute l'IA tourne **sur mon PC** avec [Ollama](https://ollama.com) : rien n'est envoyé à un service payant, et le projet ne coûte rien.
-Le modèle par défaut est `gemma4:e4b`. On peut en choisir un plus gros pour les lettres (réglage `OLLAMA_LETTER_MODEL`).
+L'IA principale est **Claude**, en ligne : Haiku pour relire les offres et trier les mails, Sonnet pour les lettres.
+Elle est payée avec des crédits prépayés, sans recharge automatique, donc la dépense ne peut pas dépasser ce qui a été mis. Une analyse coûte environ 0,06 centime, une lettre 3 à 7 centimes. Le coût de chaque appel est écrit dans le journal.
+Si Claude ne répond pas ou si le crédit est épuisé, deux IA gratuites prennent le relais : **Groq** (`gpt-oss-120b`), puis **Mistral** (`ministral-14b`). [Ollama](https://ollama.com), sur le PC, sert de dernier secours.
+Sans clé dans le `.env`, tout tourne avec Ollama seul, gratuitement (modèle `gemma4:e4b`, ou `OLLAMA_LETTER_MODEL` pour les lettres).
 
 L'IA sert à :
 
@@ -42,9 +44,9 @@ Le projet compte **662 tests automatiques**, tous réussis.
 
 ## Ce qui ne marche pas encore bien
 
-- **Les lettres de motivation.** Le modèle d'IA local est petit, et la qualité des lettres en souffre. Je ne veux pas payer un service d'IA pour un outil que je construis moi-même. Il a donc fallu ajouter beaucoup de règles de correction, et ces règles restent fragiles.
+- **Les lettres de motivation.** Elles étaient faibles avec le petit modèle local : il a fallu ajouter beaucoup de règles de correction, encore en place et fragiles. Claude Sonnet écrit maintenant les lettres, pour quelques centimes ; il reste à voir quelles règles deviennent inutiles.
 - **La génération de CV.** Elle fonctionne, mais elle n'est pas encore assez pratique à utiliser ni optimisée.
-- **Une seule personne.** L'application est prévue pour un seul utilisateur, et le PC doit rester allumé (base de données, IA, création des PDF).
+- **Une seule personne.** L'application est prévue pour un seul utilisateur, et le PC doit rester allumé (base de données, collectes, création des PDF).
 
 ## Ce que je compte améliorer
 
@@ -57,7 +59,7 @@ Le projet compte **662 tests automatiques**, tous réussis.
 - **Site** : Vue.js 3, Vite
 - **Serveur** : Node.js, Fastify, Zod
 - **Base de données** : PostgreSQL (version intégrée, sans Docker), Prisma
-- **IA** : Ollama (modèle local)
+- **IA** : Claude (Haiku, Sonnet), Groq et Mistral en secours, Ollama en local
 - **PDF** : Playwright (Edge ou Chrome sans fenêtre) pour les CV, pdfkit pour les lettres
 - **Tests** : Vitest
 - **Sources en option** : Python (JobSpy)
@@ -74,7 +76,7 @@ packages/
   job-normalizer/     met toutes les offres au même format
   pipeline/           collecte, enregistrement, doublons, suivi des mails
   scoring/            calcul de la note d'une offre
-  ai/                 appels à Ollama et consignes données à l'IA
+  ai/                 appels aux IA (Claude, Groq, Mistral, Ollama) et consignes données à l'IA
   cv-tailor/          choix du contenu du CV selon l'offre
   cv-render/          mise en page et PDF du CV
   routing/            temps de trajet et géolocalisation

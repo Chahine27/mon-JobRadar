@@ -1,11 +1,11 @@
 /**
- * Test de l'IA locale (Ollama) sur une offre d'exemple — n'écrit RIEN en base.
+ * Test de l'IA (Claude, secours, ou Ollama selon le .env) sur une offre d'exemple — n'écrit RIEN en base.
  *   pnpm ai:test
  */
-import { OllamaClient, analyzeJobWithAi } from "@job-radar/ai";
+import { aiChain, analyzeJobWithAi } from "@job-radar/ai";
 import "./env";
 
-const ollama = new OllamaClient({ baseUrl: process.env.OLLAMA_URL, model: process.env.OLLAMA_MODEL });
+const ollama = aiChain(process.env, "general", (m) => console.log(m));
 const status = await ollama.status();
 if (!status.available || !status.installed) {
   console.log(`IA : ${"message" in status ? status.message : "indisponible"}`);

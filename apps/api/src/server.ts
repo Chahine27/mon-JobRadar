@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { OllamaClient, analyzeJobWithAi, readApplicationMailWithAi, readJobWithAi, writeCoverLetter } from "@job-radar/ai";
+import { aiChain, analyzeJobWithAi, readApplicationMailWithAi, readJobWithAi, writeCoverLetter } from "@job-radar/ai";
 import { createPrismaClient } from "@job-radar/db";
 import {
   createEmailNotifier,
@@ -111,10 +111,10 @@ async function currentZone() {
 
 /** Vérification des offres expirées : au plus toutes les 6 heures. */
 let lastExpiryAt = 0;
-// IA locale (Ollama, gratuite, sur ce PC). Réglages facultatifs : OLLAMA_URL, OLLAMA_MODEL.
-const ollama = new OllamaClient({ baseUrl: e.OLLAMA_URL, model: e.OLLAMA_MODEL });
-// Lettre de motivation : un modèle plus gros (OLLAMA_LETTER_MODEL, ex. gemma4:12b) écrit mieux mais plus lentement ; sans réglage, le même modèle que le reste.
-const letterAi = e.OLLAMA_LETTER_MODEL?.trim() ? new OllamaClient({ baseUrl: e.OLLAMA_URL, model: e.OLLAMA_LETTER_MODEL, timeoutMs: 300_000 }) : ollama;
+// IA : Claude Haiku (ANTHROPIC_API_KEY) → Groq → Mistral (secours gratuits) → Ollama sur ce PC. Sans clé : Ollama seul.
+const generalAi = aiChain(e, "general", (m) => log(m));
+// Lettre de motivation : Claude Sonnet, mêmes secours (Ollama : OLLAMA_LETTER_MODEL s'il est réglé).
+const letterAi = aiChain(e, "letter", (m) => log(m));
 const joobleKey = e.JOOBLE_API_KEY?.trim();
 const joobleQuota = prismaJoobleQuota(prisma, joobleKey);
 const lbb = new LaBonneBoiteClient({ clientId: e.FRANCE_TRAVAIL_CLIENT_ID?.trim(), clientSecret: e.FRANCE_TRAVAIL_CLIENT_SECRET?.trim() });
@@ -245,7 +245,7 @@ const mailTracker: MailTracker = {
         // Tes envois et les mails de Job Radar viennent de ces adresses : jamais des réponses.
         self: [e.SMTP_USER, e.NOTIFY_EMAIL_TO].map((a) => a?.trim()).filter((a): a is string => !!a),
         // Mails ambigus : l'IA locale tranche (si elle est éteinte, les règles suffisent).
-        classify: (m) => readApplicationMailWithAi(ollama, m),
+        classify: (m) => readApplicationMailWithAi(generalAi, m),
         log: (m) => log(m),
       });
       tracking.lastCheckAt = new Date();
@@ -303,11 +303,11 @@ const app = await buildApp({
   // Compteur Jooble affiché sur la page Sources (500 appels à vie par clé gratuite).
   sourceQuotas: async () => ({ jooble: { used: (await joobleQuota.get()).used, limit: JOOBLE_DEFAULTS.lifetimeLimit } }),
   ai: {
-    model: ollama.model,
-    status: () => ollama.status(),
-    analyze: (job, profile) => analyzeJobWithAi(ollama, job, profile),
+    model: generalAi.model,
+    status: () => generalAi.status(),
+    analyze: (job, profile) => analyzeJobWithAi(generalAi, job, profile),
     writeLetter: (job, kit, opts) => writeCoverLetter(letterAi, job, kit, new Date(), opts),
-    readJob: (text, hints) => readJobWithAi(ollama, text, hints),
+    readJob: (text, hints) => readJobWithAi(generalAi, text, hints),
   },
   mailer,
   // CV adapté : Edge (ou Chrome) sans fenêtre pour mesurer la page et créer le PDF, lancé à la première demande.
