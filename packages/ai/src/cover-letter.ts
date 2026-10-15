@@ -6,7 +6,7 @@ import type { AiClient } from "./cloud";
 import type { ChatTurn } from "./ollama";
 
 /** Changer ce numéro quand la consigne change : les lettres existantes seront signalées « à refaire ». */
-export const LETTER_PROMPT_VERSION = "2026-10-15.1";
+export const LETTER_PROMPT_VERSION = "2026-10-15.2";
 
 /** Ce que l'IA écrit : l'objet et le corps. L'en-tête, « Madame, Monsieur » et la politesse sont ajoutés par le code. */
 export const LetterDraftSchema = z.object({
@@ -662,9 +662,12 @@ export function dropFlaggedSentences(draft: LetterBody, kit: Pick<LetterKit, "ba
 export function dropOffTopicSentences(draft: LetterBody, kit: Pick<LetterKit, "cvText">, jobText: string): LetterBody {
   const inCv = new Set(extractSkills(kit.cvText));
   const inJob = new Set(extractSkills(jobText));
+  // Retirée seulement si TOUTES ses technos sont hors sujet : « le front React, l'authentification Auth0 » reste pour
+  // un poste JavaScript (React est de la même famille), sinon le paragraphe des projets se vidait.
   const keep = (sentence: string) => {
     const ids = extractSkills(sentence);
-    return ids.length === 0 || ids.some((id) => inJob.has(id)) || offTopicSkills(sentence, inCv, inJob).length === 0;
+    const off = new Set(offTopicSkills(sentence, inCv, inJob));
+    return ids.length === 0 || ids.some((id) => !off.has(id));
   };
   const paragraphes = draft.paragraphes.map((p) => p.split(/(?<=[.!?])\s+/).filter(keep).join(" ")).filter(Boolean);
   const words = paragraphes.join(" ").split(/\s+/).length;

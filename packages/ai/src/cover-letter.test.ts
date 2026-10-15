@@ -455,6 +455,14 @@ describe("dernier filet : phrases hors sujet retirées", () => {
     expect(out.paragraphes.join(" ")).not.toContain("Vitest");
     expect(out.paragraphes.join(" ")).toContain("Vue.js");
   });
+  it("garde la phrase qui mêle une techno de l'annonce (ou de sa famille) à une techno hors sujet", () => {
+    const cv = { cvText: "React, Node.js, Auth0, PostgreSQL, Vitest" };
+    const d = { objet: "x", paragraphes: [`${long}Sur CodeNShare, j'ai développé le front React et l'authentification Auth0. Le projet utilisait Node.js et PostgreSQL. Les tests tournaient avec Vitest.`, "Je serais ravi d'échanger."] };
+    const out = dropOffTopicSentences(d, cv, "Développeur JavaScript Full-Stack.").paragraphes.join(" ");
+    expect(out).toContain("front React et l'authentification Auth0");
+    expect(out).toContain("Node.js et PostgreSQL");
+    expect(out).not.toContain("Vitest");
+  });
   it("ne raccourcit pas une lettre déjà courte", () => {
     const d = { objet: "x", paragraphes: ["Les tests tournent avec Vitest.", "J'ai écrit des interfaces Vue.js."] };
     expect(dropOffTopicSentences(d, kit, "Développeur Vue.js.")).toBe(d);
