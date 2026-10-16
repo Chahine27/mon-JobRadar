@@ -4,10 +4,6 @@ import type { Application, ApplicationMail, ApplicationStage, SpontaneousItem } 
 /** Une candidature, sur une offre ou spontanée. */
 export type AnyApplication = Application | SpontaneousItem;
 
-/** Au-delà, pas de nouvelles : un petit rappel pour relancer (offre). */
-export const FOLLOW_UP_DAYS = 10;
-/** Candidature spontanée sans aucune réponse : relance proposée après 7 jours (une seule). */
-export const SPONTANEOUS_FOLLOW_UP_DAYS = 7;
 
 /** Étapes affichées dans la frise (le refus est à part). */
 export const STEPS: Array<{ stage: Exclude<ApplicationStage, "REJECTED" | "CAREER_SITE">; label: string }> = [
@@ -61,9 +57,6 @@ export const stageLabel = (a: AnyApplication) =>
   awayUntil(a) ? `Absent → ${shortDay(awayUntil(a)!)}` : isFollowedUp(a) ? "Relancée" : isJob(a) && a.noAnswer ? "Sans réponse" : STAGE_LABEL[a.stage];
 export const stageClass = (a: AnyApplication) =>
   awayUntil(a) ? "s-AWAY" : isFollowedUp(a) ? "s-FOLLOWED" : isJob(a) && a.noAnswer ? "s-NOANSWER" : `s-${a.stage}`;
-/** Pas de nouvelle depuis longtemps (ni refus ni entretien) : relancer. */
-export const needsFollowUp = (a: AnyApplication) =>
-  isJob(a) ? (a.stage === "SENT" || a.stage === "ACK") && (daysSince(lastActivity(a)) ?? 0) >= FOLLOW_UP_DAYS : toFollowUp(a);
 /** Spontanée envoyée il y a 7 jours ou plus, sans aucune réponse, jamais relancée : onglet « À relancer ». */
 // Même règle que le serveur (followUpDue) : 7 jours sans réponse, et après le retour d'une absence.
 export const toFollowUp = (a: AnyApplication) => !isJob(a) && a.stage === "SENT" && !a.noOpeningAt && !a.appliedOnSiteAt && followUpDue(a, a.mails);

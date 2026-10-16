@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import { api, errorMessage } from "../api";
-import { type AnyApplication, STAGE_LABEL, STEPS, activeMails, careerUrl, daysSince, isJob, lastActivity, mailLabel, needsFollowUp, toFollowUp } from "../applications";
+import { type AnyApplication, STAGE_LABEL, STEPS, activeMails, careerUrl, daysSince, isJob, lastActivity, mailLabel, toFollowUp } from "../applications";
 import { mapsUrl, place, timeAgo } from "../format";
 import type { ApplicationMail, JobStatus, SpontaneousItem } from "../types";
 import Icon from "./Icon.vue";
@@ -112,7 +112,6 @@ async function sendFollowUp(a: SpontaneousItem) {
     </section>
     <p v-if="!isJob(app) && app.followedUpAt" class="small muted"><Icon name="send" :size="14" /> Relancée {{ timeAgo(app.followedUpAt) }} : la réponse sera reconnue dans le même fil.</p>
 
-    <p v-if="needsFollowUp(app) && isJob(app)" class="follow small"><Icon name="clock" :size="14" /> Pas de nouvelles depuis {{ daysSince(lastActivity(app)) }} jours : c'est le bon moment pour relancer.</p>
 
     <ul v-if="app.mails.length" class="mails">
       <li v-for="m in app.mails" :key="m.id" :class="[`k-${m.kind}`, { dismissed: m.dismissed, review: m.needsReview && !m.dismissed }]">
@@ -164,7 +163,6 @@ p { margin: 0; }
 .relance label { display: flex; flex-direction: column; gap: 0.25rem; }
 .relance textarea { resize: vertical; font: inherit; }
 .low { color: var(--low); }
-.follow { display: flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.7rem; border-radius: 8px; background: var(--mid-bg); }
 button.link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
 .mails { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .mails li { display: flex; align-items: flex-start; gap: 0.8rem; padding: 0.55rem 0.7rem; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--border); }

@@ -9,7 +9,6 @@ import {
   lastActivity,
   lastMail,
   mailLabel,
-  needsFollowUp,
   sentAt,
   stageClass,
   stageLabel,
@@ -126,7 +125,7 @@ const weekText = (k: Kpi) => (k.week ? `+${k.week} ${k.weekLabel}${k.week > 1 ? 
  * puis le reste (dernière nouvelle d'abord).
  */
 const priority = (a: AnyApplication) =>
-  toReview(a).length ? 0 : a.stage === "INTERVIEW" || a.stage === "OFFER" ? 1 : needsFollowUp(a) ? 2 : thisWeek(lastMail(a)?.receivedAt ?? null) ? 3 : a.stage === "CAREER_SITE" ? 4 : 5;
+  toReview(a).length ? 0 : a.stage === "INTERVIEW" || a.stage === "OFFER" ? 1 : toFollowUp(a) ? 2 : thisWeek(lastMail(a)?.receivedAt ?? null) ? 3 : a.stage === "CAREER_SITE" ? 4 : 5;
 const byLast = (x: AnyApplication, y: AnyApplication) => new Date(lastActivity(y) ?? 0).getTime() - new Date(lastActivity(x) ?? 0).getTime();
 
 const FILTERS: Array<{ id: Filter; label: string }> = [
@@ -162,7 +161,7 @@ const rows = computed(() => {
 function action(a: AnyApplication): { label: string; tone: "primary" | "" } {
   if (toReview(a).length) return { label: "Vérifier", tone: "primary" };
   if (a.stage === "INTERVIEW" || a.stage === "OFFER") return { label: "Répondre", tone: "primary" };
-  if (needsFollowUp(a)) return { label: "Relancer", tone: "" };
+  if (toFollowUp(a)) return { label: "Relancer", tone: "" };
   if (lastMail(a)) return { label: "Lire", tone: "" };
   return { label: "Voir", tone: "" };
 }
@@ -301,7 +300,7 @@ const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature sponta
                 <span class="status" :class="stageClass(a)"><span class="dot" />{{ stageLabel(a) }}</span>
                 <span v-if="toReview(a).length" class="status s-REVIEW"><Icon name="alert" :size="12" />À vérifier</span>
               </span>
-              <span class="small muted" role="cell">{{ lastActivity(a) ? timeAgo(lastActivity(a)!) : "—" }}<template v-if="needsFollowUp(a)"><br /><span class="mid">relancer</span></template></span>
+              <span class="small muted" role="cell">{{ lastActivity(a) ? timeAgo(lastActivity(a)!) : "—" }}<template v-if="toFollowUp(a)"><br /><span class="mid">relancer</span></template></span>
               <span class="acts" role="cell">
                 <button type="button" class="small" :class="action(a).tone" :aria-expanded="open === a.id" @click="toggle(a.id)">{{ action(a).label }}</button>
                 <button type="button" class="icon-btn" :aria-label="`Détail de la candidature chez ${companyOf(a)}`" :aria-expanded="open === a.id" @click="toggle(a.id)"><Icon :name="open === a.id ? 'chevronDown' : 'dots'" :size="16" /></button>
