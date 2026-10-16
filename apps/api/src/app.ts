@@ -21,6 +21,8 @@ import type { Stores } from "./stores";
 
 export type AppOptions = {
   stores: Stores;
+  /** Pause entre deux relances d'un envoi groupé (0 dans les tests). */
+  followUpPauseMs?: number;
   /** Origine du front autorisée à appeler l'API (ex. http://localhost:5173). */
   appUrl: string;
   /** Cookie `Secure` (HTTPS) — true en production. */
@@ -123,7 +125,7 @@ export async function buildApp(opts: AppOptions) {
     ...(opts.ensureTravel ? { ensureTravel: opts.ensureTravel } : {}),
   });
   await app.register(applicationRoutes, { stores: opts.stores, jobs: jobService, ...(opts.mailTracker ? { mailTracker: opts.mailTracker } : {}) });
-  await app.register(aiRoutes, { stores: opts.stores, jobs: jobService, ...(opts.ai ? { ai: opts.ai } : {}), ...(opts.mailer ? { mailer: opts.mailer } : {}), ...(opts.onLetterReady ? { onLetterReady: opts.onLetterReady } : {}), ...(opts.autoFeed ? { autoFeed: opts.autoFeed } : {}) });
+  await app.register(aiRoutes, { stores: opts.stores, jobs: jobService, ...(opts.ai ? { ai: opts.ai } : {}), ...(opts.mailer ? { mailer: opts.mailer } : {}), ...(opts.onLetterReady ? { onLetterReady: opts.onLetterReady } : {}), ...(opts.autoFeed ? { autoFeed: opts.autoFeed } : {}), ...(opts.followUpPauseMs !== undefined ? { followUpPauseMs: opts.followUpPauseMs } : {}) });
   await app.register(cvRoutes, {
     stores: opts.stores,
     seedPath: opts.cvSeedPath ?? path.resolve(import.meta.dirname, "../../../data/cv/cv-master.seed.yaml"),

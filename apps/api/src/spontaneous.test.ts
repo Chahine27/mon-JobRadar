@@ -89,6 +89,11 @@ describe("candidature spontanée", () => {
     expect(sentMails).toHaveLength(3);
     expect((await req("GET", "/api/applications")).json().spontaneous[0].followedUpAt).not.toBeNull();
 
+    // Relance groupée : plus rien à relancer (déjà relancée), aucun envoi de plus.
+    const batch = (await req("POST", "/api/applications/follow-up/batch", { limit: 10 })).json();
+    expect(batch).toMatchObject({ sent: 0, failed: [], remaining: 0 });
+    expect(sentMails).toHaveLength(3);
+
     // Renvoyé vers leur site : « J'ai postulé sur leur site », puis annuler.
     const item = () => req("GET", "/api/applications").then((r) => r.json().spontaneous[0]);
     const id = (await item()).id;
@@ -119,5 +124,33 @@ describe("candidature spontanée", () => {
     expect(after.items.map((i: { lead: { id: string } }) => i.lead.id)).toEqual([lead.id]);
     expect(after.items[0].application.letter).toContain("Candidature spontanée");
     expect(sentMails).toHaveLength(0);
+  });
+});
+
+describe("relance groupée des spontanées", () => {
+  it("relance les plus anciennes sans réponse (7 jours et plus), dans leur fil, puis plus rien", async () => {
+    const t = await setup();
+    const { req, sentMails, stores, leadRows } = t;
+    const dir = await mkdtemp(join(tmpdir(), "jr-cv-"));
+    const cv = join(dir, "CV_Alex_Martin.pdf");
+    await writeFile(cv, "%PDF-1.4 faux CV");
+    await req("PUT", "/api/letter-kit", { ...KIT, cvPdfPath: cv });
+    const leads = [...leadRows.values()].slice(0, 2);
+    const day = 86_400_000;
+    // Deux envoyées il y a 10 et 9 jours ; une troisième il y a 2 jours (trop récente).
+    for (const [i, l] of leads.entries()) {
+      await stores.applications.save(l.id, { inputHash: "", model: "manuel", letter: `Lettre pour ${l.name}` });
+      await stores.applications.markSent(l.id, `rh${i}@exemple.fr`, new Date(Date.now() - (10 - i) * day), `<premier-${i}@test>`);
+    }
+    const recent = [...leadRows.values()][2];
+    if (recent) {
+      await stores.applications.save(recent.id, { inputHash: "", model: "manuel", letter: "Lettre récente" });
+      await stores.applications.markSent(recent.id, "rh-recent@exemple.fr", new Date(Date.now() - 2 * day), "<recent@test>");
+    }
+    const r = (await req("POST", "/api/applications/follow-up/batch", { limit: 10 })).json();
+    expect(r).toMatchObject({ sent: 2, failed: [], remaining: 0 });
+    expect(sentMails.map((m) => [m.to, m.inReplyTo])).toEqual([["rh0@exemple.fr", "<premier-0@test>"], ["rh1@exemple.fr", "<premier-1@test>"]]);
+    expect(sentMails[0]!.subject.startsWith("Re: Candidature spontanée")).toBe(true);
+    expect((await req("POST", "/api/applications/follow-up/batch", { limit: 10 })).json()).toMatchObject({ sent: 0, remaining: 0 });
   });
 });

@@ -137,6 +137,8 @@ export const api = {
     request<{ to: string; subject: string; message: string; followedUpAt: string | null }>("GET", `/api/leads/${encodeURIComponent(leadId)}/application/follow-up`),
   sendFollowUp: (leadId: string, mail: { subject: string; message: string }) =>
     request<{ ok: true; followedUpAt: string }>("POST", `/api/leads/${encodeURIComponent(leadId)}/application/follow-up`, mail),
+  followUpBatch: (limit = 10) =>
+    request<{ sent: number; failed: Array<{ leadId: string; message?: string }>; remaining: number }>("POST", "/api/applications/follow-up/batch", { limit }),
   confirmApplicationMail: (id: string) => request<ApplicationMail>("POST", `/api/applications/mails/${encodeURIComponent(id)}/confirm`),
   listManualJobs: () => request<{ items: JobSummary[] }>("GET", "/api/jobs/manual"),
   addManualJob: (form: ManualJobForm) =>

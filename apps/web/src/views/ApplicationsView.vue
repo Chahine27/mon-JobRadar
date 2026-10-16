@@ -52,6 +52,28 @@ onActivated(load); // aussi au retour depuis une offre
 // Prénom pour le bonjour : celui de ta signature de lettre (« Chahine MEHADJI »).
 api.getLetterKit().then((r) => (firstName.value = r.kit.signature.trim().split(/\s+/)[0] ?? "")).catch(() => {});
 
+/** Relance groupée : les 10 plus anciennes, message par défaut, mêmes fichiers, chacune dans son fil. */
+const batching = ref(false);
+const batchResult = ref<string | null>(null);
+async function followUpBatch() {
+  const n = Math.min(10, spontaneous.value.filter(toFollowUp).length);
+  if (!n || !window.confirm(`Envoyer ${n} relance${n > 1 ? "s" : ""} maintenant ? Chacune répond à ton premier mail, avec la même lettre et ton CV actuel.`)) return;
+  batching.value = true;
+  batchResult.value = null;
+  try {
+    const r = await api.followUpBatch(n);
+    batchResult.value =
+      `${r.sent} relance${r.sent > 1 ? "s" : ""} envoyée${r.sent > 1 ? "s" : ""}` +
+      (r.failed.length ? `, ${r.failed.length} en échec (${r.failed[0]!.message ?? "erreur"})` : "") +
+      (r.remaining ? `. Encore ${r.remaining} à relancer : mieux vaut attendre demain (Gmail se méfie des rafales).` : ".");
+    await load();
+  } catch (e) {
+    batchResult.value = errorMessage(e, "Les relances ne sont pas parties.");
+  } finally {
+    batching.value = false;
+  }
+}
+
 async function check() {
   checking.value = true;
   try {
@@ -114,7 +136,10 @@ const rows = computed(() => {
             ? [...interviews.value, ...offers.value]
             : all.value;
   const shown = list.filter((a) => (view.value === "overview" ? matches(a, filter.value) : true));
-  const sorted = [...shown].sort((x, y) => (view.value === "overview" || view.value === "interviews" ? priority(x) - priority(y) : 0) || byLast(x, y));
+  // À relancer : les plus anciennes d'abord, comme le bouton « Relancer les 10 plus anciennes ».
+  const sorted = [...shown].sort((x, y) =>
+    view.value === "followup" ? -byLast(x, y) : (view.value === "overview" || view.value === "interviews" ? priority(x) - priority(y) : 0) || byLast(x, y),
+  );
   return view.value === "overview" ? sorted.slice(0, 8) : sorted;
 });
 
@@ -217,11 +242,17 @@ const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature sponta
               <p class="small muted">{{ view === "overview" ? "Les candidatures qui demandent ton attention" : `${rows.length} candidature${rows.length > 1 ? "s" : ""}` }}</p>
             </div>
           </div>
+          <div v-if="view === 'followup' && rows.length" class="row">
+            <button type="button" class="primary" :disabled="batching" @click="followUpBatch">
+              <Icon name="send" :size="16" />{{ batching ? "Envoi en cours…" : `Relancer les ${Math.min(10, rows.length)} plus anciennes` }}
+            </button>
+          </div>
           <div v-if="view === 'overview'" class="seg" role="tablist" aria-label="Étape">
             <button v-for="f in FILTERS" :key="f.id" type="button" role="tab" :aria-selected="filter === f.id" :class="{ active: filter === f.id }" @click="filter = f.id">{{ f.label }}</button>
           </div>
         </div>
 
+        <p v-if="view === 'followup' && batchResult" class="small batch-result">{{ batchResult }}</p>
         <div v-if="rows.length === 0" class="empty small muted">
           <template v-if="view === 'offers' || all.length === 0">Sur la page d'une offre, clique sur « Marquer comme postulé » : elle arrivera ici.</template>
           <template v-else-if="view === 'spontaneous'">Les candidatures spontanées envoyées depuis « Entreprises » arrivent ici.</template>
@@ -376,6 +407,7 @@ button.link { display: inline-flex; align-items: center; gap: 0.2rem; color: var
 .status.s-ACK, .status.s-CAREER_SITE { background: var(--good-bg); color: var(--good); }
 .status.s-INTERVIEW, .status.s-OFFER, .status.s-REVIEW { background: var(--mid-bg); color: var(--mid); }
 .status.s-REJECTED { background: var(--low-bg); color: var(--low); }
+.batch-result { margin: 0 0 0.6rem; padding: 0.5rem 0.75rem; border-radius: 8px; background: var(--accent-soft); }
 .status.s-NOANSWER { background: var(--low-bg); color: var(--muted); }
 .status.s-FOLLOWED { background: rgb(168 85 247 / 0.14); color: #a855f7; }
 .acts { display: inline-flex; align-items: center; gap: 0.25rem; }

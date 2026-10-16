@@ -443,6 +443,7 @@ export async function createTestApp(extra: Partial<AppOptions> = {}) {
   const letterNotices: string[] = [];
   const mailer: Mailer = { isConfigured: () => true, address: () => "alex.martin@example.com", send: async (m) => (sentMails.push(m), `<envoi-${sentMails.length}@test>`) };
   const app = await buildApp({
+    followUpPauseMs: 0,
     ...extra,
     mailer,
     stores: mem.stores,

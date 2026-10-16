@@ -73,6 +73,8 @@ export async function aiRoutes(
     onLetterReady?: (n: { title: string; body: string; path: string; tag: string }) => Promise<unknown>;
     /** Rempli ici : permet au serveur de lancer la vérification IA du flux (fin de collecte). */
     autoFeed?: AutoFeed;
+    /** Pause entre deux relances d'un envoi groupé (4 s ; 0 dans les tests). */
+    followUpPauseMs?: number;
   },
 ) {
   const { stores, ai } = opts;
@@ -582,29 +584,32 @@ export async function aiRoutes(
   });
 
   const FollowUpBody = z.object({ subject: z.string().trim().min(3).max(250), message: z.string().trim().min(10).max(5_000) });
-  app.post("/api/leads/:id/application/follow-up", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request, reply) => {
-    const params = IdParams.safeParse(request.params);
-    const body = FollowUpBody.safeParse(request.body);
-    if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
-    if (!body.success) return reply.code(400).send({ error: "INVALID_BODY", message: "Objet ou message manquant." });
-    const ctx = await applicationContext(request.userId!, params.data.id);
+  type FollowUpFail = { status: number; error: string; message: string };
+
+  /**
+   * Envoie la relance d'une spontanée : même adresse, en réponse au premier mail (même fil), même lettre, CV actuel.
+   * Sans objet ni message : ceux écrits par le code (followUpMail).
+   */
+  async function sendFollowUp(userId: string, leadId: string, mail?: { subject: string; message: string }): Promise<{ followedUpAt: Date } | FollowUpFail> {
+    const ctx = await applicationContext(userId, leadId);
     const sent = ctx?.application;
-    if (!ctx || !sent?.sentAt || !sent.sentTo) return reply.code(404).send({ error: "NOT_SENT", message: "Cette candidature n'a pas été envoyée par Job Radar." });
-    if (sent.followedUpAt) return reply.code(409).send({ error: "ALREADY_FOLLOWED_UP", message: `Déjà relancée le ${sent.followedUpAt.toLocaleDateString("fr-FR")}.` });
+    if (!ctx || !sent?.sentAt || !sent.sentTo) return { status: 404, error: "NOT_SENT", message: "Cette candidature n'a pas été envoyée par Job Radar." };
+    if (sent.followedUpAt) return { status: 409, error: "ALREADY_FOLLOWED_UP", message: `Déjà relancée le ${sent.followedUpAt.toLocaleDateString("fr-FR")}.` };
     if (!opts.mailer?.isConfigured()) {
-      return reply.code(503).send({ error: "MAIL_NOT_CONFIGURED", message: "Envoi d'email non configuré : remplis SMTP_HOST, SMTP_USER et SMTP_PASSWORD dans .env." });
+      return { status: 503, error: "MAIL_NOT_CONFIGURED", message: "Envoi d'email non configuré : remplis SMTP_HOST, SMTP_USER et SMTP_PASSWORD dans .env." };
     }
     const kit = ctx.kit ?? EMPTY_LETTER_KIT;
     const cvPath = cleanPath(kit.cvPdfPath ?? "");
     if (!cvPath || !/\.pdf$/i.test(cvPath) || !existsSync(cvPath)) {
-      return reply.code(400).send({ error: "CV_PDF_MISSING", message: "CV PDF introuvable : indique son chemin dans « CV & lettre »." });
+      return { status: 400, error: "CV_PDF_MISSING", message: "CV PDF introuvable : indique son chemin dans « CV & lettre »." };
     }
+    const { subject, message } = mail ?? followUpMail(kit, ctx.lead.name, ctx.title, sent.sentAt);
     try {
       await opts.mailer.send({
         fromName: kit.signature,
         to: sent.sentTo,
-        subject: body.data.subject,
-        text: body.data.message,
+        subject,
+        text: message,
         inReplyTo: sent.messageId,
         attachments: [
           { filename: safeName(kit.pdfName || DEFAULT_PDF_NAME), content: await renderLetterPdf(sent.letter, `Lettre de motivation - ${ctx.lead.name}`) },
@@ -612,13 +617,52 @@ export async function aiRoutes(
         ],
       });
     } catch (err) {
-      request.log.error({ err, leadId: params.data.id }, "relance de candidature spontanée impossible");
-      return reply.code(502).send({ error: "MAIL_FAILED", message: `L'email n'est pas parti : ${err instanceof Error ? err.message : String(err)}` });
+      app.log.error({ err, leadId }, "relance de candidature spontanée impossible");
+      return { status: 502, error: "MAIL_FAILED", message: `L'email n'est pas parti : ${err instanceof Error ? err.message : String(err)}` };
     }
     const now = new Date();
-    await stores.applications.markFollowedUp(params.data.id, now);
-    request.log.info({ leadId: params.data.id }, "candidature spontanée relancée");
-    return { ok: true, followedUpAt: now };
+    await stores.applications.markFollowedUp(leadId, now);
+    app.log.info({ leadId }, "candidature spontanée relancée");
+    return { followedUpAt: now };
+  }
+
+  app.post("/api/leads/:id/application/follow-up", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const params = IdParams.safeParse(request.params);
+    const body = FollowUpBody.safeParse(request.body);
+    if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
+    if (!body.success) return reply.code(400).send({ error: "INVALID_BODY", message: "Objet ou message manquant." });
+    const r = await sendFollowUp(request.userId!, params.data.id, body.data);
+    if ("error" in r) return reply.code(r.status).send({ error: r.error, message: r.message });
+    return { ok: true, followedUpAt: r.followedUpAt };
+  });
+
+  /** Spontanées à relancer : envoyées il y a 7 jours ou plus, sans aucune réponse, jamais relancées ; les plus anciennes d'abord. */
+  const FOLLOW_UP_AFTER_MS = 7 * 86_400_000;
+  async function followUpQueue(now = new Date()) {
+    const [sent, mails] = await Promise.all([stores.applications.listSent(), stores.applicationMails.list()]);
+    const answered = new Set(mails.filter((m) => m.spontaneousId && !m.dismissed).map((m) => m.spontaneousId));
+    return sent
+      .filter((s) => s.sentTo && !s.followedUpAt && !s.noOpeningAt && !s.appliedOnSiteAt && !answered.has(s.id) && now.getTime() - s.sentAt.getTime() >= FOLLOW_UP_AFTER_MS)
+      .sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime());
+  }
+
+  /**
+   * Relance groupée (bouton « Relancer les 10 plus anciennes ») : message écrit par le code, une à la fois, avec une
+   * pause entre deux envois (Gmail se méfie des rafales). S'arrête à la première erreur de configuration.
+   */
+  const BatchFollowUpBody = z.object({ limit: z.number().int().min(1).max(20).default(10) });
+  app.post("/api/applications/follow-up/batch", { config: { rateLimit: { max: 3, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const body = BatchFollowUpBody.safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: "INVALID_BODY" });
+    const queue = (await followUpQueue()).slice(0, body.data.limit);
+    const results: Array<{ leadId: string; ok: boolean; message?: string }> = [];
+    for (const [i, s] of queue.entries()) {
+      if (i > 0 && opts.followUpPauseMs !== 0) await new Promise((r) => setTimeout(r, opts.followUpPauseMs ?? 4_000));
+      const r = await sendFollowUp(request.userId!, s.leadId);
+      results.push("error" in r ? { leadId: s.leadId, ok: false, message: r.message } : { leadId: s.leadId, ok: true });
+      if ("error" in r && ["MAIL_NOT_CONFIGURED", "CV_PDF_MISSING"].includes(r.error)) break;
+    }
+    return { sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok), remaining: (await followUpQueue()).length };
   });
 
   // ───── Préparation en lot : l'IA écrit les lettres des entreprises « À contacter » qui ont un email ; l'envoi reste un clic ─────
