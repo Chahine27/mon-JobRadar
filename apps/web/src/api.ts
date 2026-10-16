@@ -133,6 +133,10 @@ export const api = {
   setSiteOutcome: (id: string, outcome: "applied" | "none" | null) =>
     request<{ ok: true }>("POST", `/api/applications/spontaneous/${encodeURIComponent(id)}/site-outcome`, { outcome }),
   dismissApplicationMail: (id: string) => request<ApplicationMail>("POST", `/api/applications/mails/${encodeURIComponent(id)}/dismiss`),
+  getFollowUp: (leadId: string) =>
+    request<{ to: string; subject: string; message: string; followedUpAt: string | null }>("GET", `/api/leads/${encodeURIComponent(leadId)}/application/follow-up`),
+  sendFollowUp: (leadId: string, mail: { subject: string; message: string }) =>
+    request<{ ok: true; followedUpAt: string }>("POST", `/api/leads/${encodeURIComponent(leadId)}/application/follow-up`, mail),
   confirmApplicationMail: (id: string) => request<ApplicationMail>("POST", `/api/applications/mails/${encodeURIComponent(id)}/confirm`),
   listManualJobs: () => request<{ items: JobSummary[] }>("GET", "/api/jobs/manual"),
   addManualJob: (form: ManualJobForm) =>

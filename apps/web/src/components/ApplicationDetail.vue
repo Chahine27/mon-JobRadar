@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { api } from "../api";
-import { type AnyApplication, STAGE_LABEL, STEPS, activeMails, careerUrl, daysSince, isJob, lastActivity, mailLabel, needsFollowUp } from "../applications";
+import { ref, watch } from "vue";
+import { api, errorMessage } from "../api";
+import { type AnyApplication, STAGE_LABEL, STEPS, activeMails, careerUrl, daysSince, isJob, lastActivity, mailLabel, needsFollowUp, toFollowUp } from "../applications";
 import { mapsUrl, place, timeAgo } from "../format";
 import type { ApplicationMail, JobStatus, SpontaneousItem } from "../types";
 import Icon from "./Icon.vue";
@@ -28,6 +28,38 @@ const setStatus = (status: JobStatus) => act(props.app.id, () => api.setJobStatu
 const siteOutcome = (a: SpontaneousItem, outcome: "applied" | "none" | null) => act(a.id, () => api.setSiteOutcome(a.id, outcome));
 const dismiss = (m: ApplicationMail) => act(m.id, () => api.dismissApplicationMail(m.id));
 const confirm = (m: ApplicationMail) => act(m.id, () => api.confirmApplicationMail(m.id));
+
+/** Relance (spontanée sans réponse depuis 7 jours) : texte écrit par le code, modifiable, envoyé seulement au clic. */
+const draft = ref<{ to: string; subject: string; message: string } | null>(null);
+const followError = ref<string | null>(null);
+watch(
+  () => props.app,
+  async (a) => {
+    draft.value = null;
+    followError.value = null;
+    if (!isJob(a) && toFollowUp(a)) {
+      try {
+        draft.value = await api.getFollowUp(a.leadId);
+      } catch (e) {
+        followError.value = errorMessage(e, "Impossible de préparer la relance.");
+      }
+    }
+  },
+  { immediate: true },
+);
+async function sendFollowUp(a: SpontaneousItem) {
+  if (!draft.value) return;
+  followError.value = null;
+  busy.value = "follow";
+  try {
+    await api.sendFollowUp(a.leadId, { subject: draft.value.subject, message: draft.value.message });
+    emit("changed");
+  } catch (e) {
+    followError.value = errorMessage(e, "La relance n'est pas partie.");
+  } finally {
+    busy.value = null;
+  }
+}
 </script>
 
 <template>
@@ -61,7 +93,25 @@ const confirm = (m: ApplicationMail) => act(m.id, () => api.confirmApplicationMa
       Rien à postuler sur leur site (noté {{ timeAgo(app.noOpeningAt) }}) : candidature close ·
       <button type="button" class="link" :disabled="busy === app.id" @click="siteOutcome(app, null)">annuler</button>
     </p>
-    <p v-if="needsFollowUp(app)" class="follow small"><Icon name="clock" :size="14" /> Pas de nouvelles depuis {{ daysSince(lastActivity(app)) }} jours : c'est le bon moment pour relancer.</p>
+    <section v-if="!isJob(app) && toFollowUp(app)" class="relance">
+      <div class="small">
+        <strong>Relancer {{ app.company }}</strong>
+        <span class="muted"> · pas de réponse depuis {{ daysSince(app.sentAt) }} jours. Envoi à {{ app.sentTo }}, en réponse à ton premier mail, avec ta lettre et ton CV actuel.</span>
+      </div>
+      <template v-if="draft">
+        <label class="small">Objet<input v-model="draft.subject" type="text" maxlength="250" /></label>
+        <label class="small">Message<textarea v-model="draft.message" rows="8" maxlength="5000" /></label>
+        <div class="row">
+          <button type="button" class="small primary" :disabled="busy === 'follow' || draft.message.trim().length < 10" @click="sendFollowUp(app)"><Icon name="send" :size="14" />Envoyer la relance</button>
+          <span class="small muted">Rien ne part avant ce clic.</span>
+        </div>
+      </template>
+      <p v-else-if="!followError" class="small muted">Préparation de la relance…</p>
+      <p v-if="followError" class="small low">{{ followError }}</p>
+    </section>
+    <p v-if="!isJob(app) && app.followedUpAt" class="small muted"><Icon name="send" :size="14" /> Relancée {{ timeAgo(app.followedUpAt) }} : la réponse sera reconnue dans le même fil.</p>
+
+    <p v-if="needsFollowUp(app) && isJob(app)" class="follow small"><Icon name="clock" :size="14" /> Pas de nouvelles depuis {{ daysSince(lastActivity(app)) }} jours : c'est le bon moment pour relancer.</p>
 
     <ul v-if="app.mails.length" class="mails">
       <li v-for="m in app.mails" :key="m.id" :class="[`k-${m.kind}`, { dismissed: m.dismissed, review: m.needsReview && !m.dismissed }]">
@@ -109,6 +159,10 @@ p { margin: 0; }
 .steps li.done .dot { background: var(--accent); border-color: var(--accent); }
 .steps li.current { color: var(--text); font-weight: 650; }
 .career { display: inline-flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; align-self: flex-start; padding: 0.35rem 0.7rem; border-radius: 10px; background: var(--mid-bg); overflow-wrap: anywhere; }
+.relance { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem 0.85rem; border-radius: 10px; background: var(--surface); border: 1px solid var(--mid); }
+.relance label { display: flex; flex-direction: column; gap: 0.25rem; }
+.relance textarea { resize: vertical; font: inherit; }
+.low { color: var(--low); }
 .follow { display: flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.7rem; border-radius: 8px; background: var(--mid-bg); }
 button.link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
 .mails { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }

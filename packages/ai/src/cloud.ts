@@ -181,18 +181,19 @@ export class FallbackAi implements AiClient {
  * IA d'une tâche selon les clés du .env : Claude (ANTHROPIC_API_KEY), puis Ollama Cloud (OLLAMA_API_KEY), Groq
  * (GROQ_API_KEY, analyses seulement) et Mistral (MISTRAL_API_KEY). Sans aucune clé : Ollama sur ce PC, comme avant ;
  * avec une clé, il n'est plus utilisé (le serveur n'a pas de carte graphique).
- * « mail » (lecture des réponses de recruteurs, nombreuses et simples) : jamais Claude, seulement les IA gratuites.
+ * « mail » (lecture des réponses de recruteurs, nombreuses et simples) et « free-letter » (lettres de candidature
+ * spontanée, bien plus nombreuses que celles des offres) : jamais Claude, seulement les IA gratuites.
  */
 export function aiChain(
   env: Record<string, string | undefined>,
-  task: "general" | "letter" | "mail",
+  task: "general" | "letter" | "mail" | "free-letter",
   log?: Log,
 ): AiClient {
   const key = (name: string) => env[name]?.trim() || undefined;
-  const letter = task === "letter";
+  const letter = task === "letter" || task === "free-letter";
   const timeoutMs = letter ? 300_000 : 180_000;
   const clients: AiClient[] = [];
-  const anthropic = task === "mail" ? undefined : key("ANTHROPIC_API_KEY");
+  const anthropic = task === "mail" || task === "free-letter" ? undefined : key("ANTHROPIC_API_KEY");
   if (anthropic) {
     clients.push(
       new ClaudeClient({

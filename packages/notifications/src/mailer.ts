@@ -8,6 +8,8 @@ export type OutgoingMail = {
   subject: string;
   text: string;
   attachments: MailAttachment[];
+  /** Message-ID du mail auquel on répond : la relance arrive dans la même conversation. */
+  inReplyTo?: string | null;
 };
 
 export type Mailer = {
@@ -18,7 +20,15 @@ export type Mailer = {
   send(mail: OutgoingMail): Promise<string | null | void>;
 };
 
-type Transport = (msg: { from: string; to: string; subject: string; text: string; attachments: MailAttachment[] }) => Promise<unknown>;
+type Transport = (msg: {
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+  attachments: MailAttachment[];
+  inReplyTo?: string;
+  references?: string;
+}) => Promise<unknown>;
 
 /**
  * Envoi d'emails en ton nom (candidatures spontanées), par le même compte SMTP que les notifications (Gmail).
@@ -54,6 +64,7 @@ export function createMailer(
         subject: mail.subject,
         text: mail.text,
         attachments: mail.attachments,
+        ...(mail.inReplyTo ? { inReplyTo: mail.inReplyTo, references: mail.inReplyTo } : {}),
       });
       return (info as { messageId?: string } | undefined)?.messageId ?? null;
     },

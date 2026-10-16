@@ -112,7 +112,9 @@ function homeColumns(home: HomeLocation | null | undefined) {
 const MAIL_SELECT = {
   id: true, jobId: true, spontaneousId: true, kind: true, detail: true, summary: true, needsReview: true, subject: true, fromAddress: true, messageId: true, receivedAt: true, dismissed: true,
 } as const;
-const APP_SELECT = { inputHash: true, model: true, letter: true, edited: true, sentAt: true, sentTo: true, createdAt: true, updatedAt: true } as const;
+const APP_SELECT = {
+  inputHash: true, model: true, letter: true, edited: true, sentAt: true, sentTo: true, messageId: true, followedUpAt: true, createdAt: true, updatedAt: true,
+} as const;
 
 export function createPrismaStores(prisma: PrismaClient): Stores {
   const toTailored = (r: Prisma.TailoredCvGetPayload<object>) => {
@@ -276,7 +278,7 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
       async listSent() {
         const rows = await prisma.spontaneousApplication.findMany({
           where: { sentAt: { not: null } },
-          select: { id: true, leadId: true, sentAt: true, sentTo: true, appliedOnSiteAt: true, noOpeningAt: true },
+          select: { id: true, leadId: true, sentAt: true, sentTo: true, appliedOnSiteAt: true, noOpeningAt: true, followedUpAt: true },
           orderBy: { sentAt: "desc" },
         });
         return rows.map((r) => ({ ...r, sentAt: r.sentAt! }));
@@ -284,6 +286,9 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
       async setSiteOutcome(id, outcome, at) {
         const data = { appliedOnSiteAt: outcome === "applied" ? at : null, noOpeningAt: outcome === "none" ? at : null };
         return (await prisma.spontaneousApplication.updateMany({ where: { id, sentAt: { not: null } }, data })).count > 0;
+      },
+      async markFollowedUp(leadId, at) {
+        await prisma.spontaneousApplication.update({ where: { leadId }, data: { followedUpAt: at } });
       },
     },
     applicationMails: {

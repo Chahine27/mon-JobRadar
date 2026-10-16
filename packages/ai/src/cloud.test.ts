@@ -79,6 +79,9 @@ describe("aiChain", () => {
     expect(aiChain({ OLLAMA_API_KEY: "k" }, "letter").model).toBe("gpt-oss:120b");
     // Mails : jamais Claude, même avec sa clé.
     expect(aiChain({ ANTHROPIC_API_KEY: "k", OLLAMA_API_KEY: "k" }, "mail").model).toBe("gpt-oss:120b");
+    // Lettres spontanées : jamais Claude, et pas Groq (lettre trop longue pour sa limite gratuite).
+    expect(aiChain({ ANTHROPIC_API_KEY: "k", OLLAMA_API_KEY: "k" }, "free-letter").model).toBe("gpt-oss:120b");
+    expect(aiChain({ ANTHROPIC_API_KEY: "k", GROQ_API_KEY: "k" }, "free-letter").model).toBe("gemma4:e4b");
     // Groq ne prend pas la lettre (trop longue pour sa limite gratuite) : seul Ollama sur le PC reste.
     expect(aiChain({ GROQ_API_KEY: "k" }, "letter").model).toBe("gemma4:e4b");
   });

@@ -418,6 +418,8 @@ model SpontaneousApplication {
   sentTo    String?
   /// Message-ID du mail envoyé : une réponse dans ce fil se reconnaît sans deviner
   messageId String?
+  /// relance envoyée (dans le même fil) : une seule est proposée
+  followedUpAt DateTime?
   /// L'entreprise a renvoyé vers son site carrière, et tu y as postulé : le suivi des réponses continue
   appliedOnSiteAt DateTime?
   /// Renvoyé vers leur site, mais rien à y postuler (pas de poste, pas de candidature spontanée) : candidature close

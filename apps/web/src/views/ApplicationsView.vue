@@ -12,6 +12,7 @@ import {
   mailLabel,
   needsFollowUp,
   sentAt,
+  toFollowUp,
   toReview,
 } from "../applications";
 import ApplicationDetail from "../components/ApplicationDetail.vue";
@@ -28,7 +29,7 @@ const error = ref<string | null>(null);
 const checking = ref(false);
 const open = ref<string | null>(null);
 
-type View = "overview" | "offers" | "spontaneous" | "interviews" | "mails";
+type View = "overview" | "offers" | "spontaneous" | "followup" | "interviews" | "mails";
 const view = ref<View>("overview");
 type Filter = "all" | "sent" | "answered" | "interview" | "rejected";
 const filter = ref<Filter>("all");
@@ -102,7 +103,15 @@ const matches = (a: AnyApplication, f: Filter) =>
 /** Vue d'ensemble : les 8 plus urgentes du filtre ; onglets : toute la liste. */
 const rows = computed(() => {
   const list =
-    view.value === "offers" ? jobs.value : view.value === "spontaneous" ? spontaneous.value : view.value === "interviews" ? [...interviews.value, ...offers.value] : all.value;
+    view.value === "offers"
+      ? jobs.value
+      : view.value === "spontaneous"
+        ? spontaneous.value
+        : view.value === "followup"
+          ? spontaneous.value.filter(toFollowUp)
+          : view.value === "interviews"
+            ? [...interviews.value, ...offers.value]
+            : all.value;
   const shown = list.filter((a) => (view.value === "overview" ? matches(a, filter.value) : true));
   const sorted = [...shown].sort((x, y) => (view.value === "overview" || view.value === "interviews" ? priority(x) - priority(y) : 0) || byLast(x, y));
   return view.value === "overview" ? sorted.slice(0, 8) : sorted;
@@ -145,6 +154,7 @@ const TABS: Array<{ id: View; label: string; icon: IconName; count?: () => numbe
   { id: "offers", label: "Sur une offre", icon: "briefcase", count: () => jobs.value.length },
   { id: "spontaneous", label: "Spontanées", icon: "send", count: () => spontaneous.value.length },
   { id: "interviews", label: "Entretiens", icon: "calendar", count: () => interviews.value.length + offers.value.length },
+  { id: "followup", label: "À relancer", icon: "clock", count: () => spontaneous.value.filter(toFollowUp).length },
   { id: "mails", label: "E-mails", icon: "mail", count: () => reviewCount.value },
 ];
 const initial = (a: AnyApplication) => companyOf(a).trim().charAt(0).toUpperCase() || "?";
@@ -174,7 +184,7 @@ const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature sponta
 
   <nav class="tabs" aria-label="Rubriques des candidatures">
     <button v-for="t in TABS" :key="t.id" type="button" :class="{ active: view === t.id }" :aria-current="view === t.id ? 'page' : undefined" @click="(view = t.id), (open = null)">
-      <Icon :name="t.icon" :size="16" />{{ t.label }}<span v-if="t.count" class="count" :class="{ warn: t.id === 'mails' && reviewCount }">{{ t.count() }}</span>
+      <Icon :name="t.icon" :size="16" />{{ t.label }}<span v-if="t.count" class="count" :class="{ warn: (t.id === 'mails' && reviewCount) || (t.id === 'followup' && t.count!()) }">{{ t.count() }}</span>
     </button>
   </nav>
 

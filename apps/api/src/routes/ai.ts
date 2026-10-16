@@ -21,7 +21,7 @@ import { z } from "zod";
 import { analysisHash, isAbridged, toJobInput, toProfileInput } from "../ai-context";
 import { requireAuth } from "../auth";
 import { DEFAULT_PDF_NAME, renderLetterPdf, safeName, saveLetterPdf } from "../letter-pdf";
-import { DEFAULT_SPONTANEOUS_TITLE, defaultMail } from "../spontaneous-mail";
+import { DEFAULT_SPONTANEOUS_TITLE, defaultMail, followUpMail } from "../spontaneous-mail";
 import type { JobService } from "../jobs/service";
 import type { JobRow, LeadRow, StoredAnalysis, StoredApplication, StoredLetter, Stores } from "../stores";
 
@@ -568,6 +568,57 @@ export async function aiRoutes(
     request.log.info({ leadId: params.data.id }, "candidature spontanée envoyée");
     const fresh = await applicationContext(request.userId!, params.data.id, ctx.title);
     return { ...applicationReply(fresh!), sentAt: now };
+  });
+
+  // ───── Relance d'une spontanée sans réponse : même adresse, même fil, même lettre et ton CV actuel ─────
+
+  /** Aperçu de la relance (modifiable avant l'envoi). */
+  app.get("/api/leads/:id/application/follow-up", async (request, reply) => {
+    const params = IdParams.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
+    const ctx = await applicationContext(request.userId!, params.data.id);
+    if (!ctx?.application?.sentAt || !ctx.application.sentTo) return reply.code(404).send({ error: "NOT_SENT", message: "Cette candidature n'a pas été envoyée par Job Radar." });
+    return { to: ctx.application.sentTo, ...followUpMail(ctx.kit ?? EMPTY_LETTER_KIT, ctx.lead.name, ctx.title, ctx.application.sentAt), followedUpAt: ctx.application.followedUpAt };
+  });
+
+  const FollowUpBody = z.object({ subject: z.string().trim().min(3).max(250), message: z.string().trim().min(10).max(5_000) });
+  app.post("/api/leads/:id/application/follow-up", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const params = IdParams.safeParse(request.params);
+    const body = FollowUpBody.safeParse(request.body);
+    if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
+    if (!body.success) return reply.code(400).send({ error: "INVALID_BODY", message: "Objet ou message manquant." });
+    const ctx = await applicationContext(request.userId!, params.data.id);
+    const sent = ctx?.application;
+    if (!ctx || !sent?.sentAt || !sent.sentTo) return reply.code(404).send({ error: "NOT_SENT", message: "Cette candidature n'a pas été envoyée par Job Radar." });
+    if (sent.followedUpAt) return reply.code(409).send({ error: "ALREADY_FOLLOWED_UP", message: `Déjà relancée le ${sent.followedUpAt.toLocaleDateString("fr-FR")}.` });
+    if (!opts.mailer?.isConfigured()) {
+      return reply.code(503).send({ error: "MAIL_NOT_CONFIGURED", message: "Envoi d'email non configuré : remplis SMTP_HOST, SMTP_USER et SMTP_PASSWORD dans .env." });
+    }
+    const kit = ctx.kit ?? EMPTY_LETTER_KIT;
+    const cvPath = cleanPath(kit.cvPdfPath ?? "");
+    if (!cvPath || !/\.pdf$/i.test(cvPath) || !existsSync(cvPath)) {
+      return reply.code(400).send({ error: "CV_PDF_MISSING", message: "CV PDF introuvable : indique son chemin dans « CV & lettre »." });
+    }
+    try {
+      await opts.mailer.send({
+        fromName: kit.signature,
+        to: sent.sentTo,
+        subject: body.data.subject,
+        text: body.data.message,
+        inReplyTo: sent.messageId,
+        attachments: [
+          { filename: safeName(kit.pdfName || DEFAULT_PDF_NAME), content: await renderLetterPdf(sent.letter, `Lettre de motivation - ${ctx.lead.name}`) },
+          { filename: basename(cvPath.replace(/\\/g, "/")), content: await readFile(cvPath) },
+        ],
+      });
+    } catch (err) {
+      request.log.error({ err, leadId: params.data.id }, "relance de candidature spontanée impossible");
+      return reply.code(502).send({ error: "MAIL_FAILED", message: `L'email n'est pas parti : ${err instanceof Error ? err.message : String(err)}` });
+    }
+    const now = new Date();
+    await stores.applications.markFollowedUp(params.data.id, now);
+    request.log.info({ leadId: params.data.id }, "candidature spontanée relancée");
+    return { ok: true, followedUpAt: now };
   });
 
   // ───── Préparation en lot : l'IA écrit les lettres des entreprises « À contacter » qui ont un email ; l'envoi reste un clic ─────

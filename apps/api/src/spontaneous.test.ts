@@ -77,6 +77,18 @@ describe("candidature spontanée", () => {
     expect((await req("POST", `/api/leads/${lead.id}/application/send`, { ...mail, force: true })).statusCode).toBe(200);
     expect(sentMails).toHaveLength(2);
 
+    // Relance : même adresse, réponse dans le fil du dernier envoi, même lettre et CV ; une seule.
+    const draft = (await req("GET", `/api/leads/${lead.id}/application/follow-up`)).json();
+    expect(draft).toMatchObject({ to: "rh@alpha.fr", subject: "Re: Candidature spontanée – Développeur full stack – Alex MARTIN", followedUpAt: null });
+    expect(draft.message).toContain("Je reviens vers vous au sujet de ma candidature spontanée envoyée le");
+    const follow = await req("POST", `/api/leads/${lead.id}/application/follow-up`, { subject: draft.subject, message: draft.message });
+    expect(follow.statusCode).toBe(200);
+    expect(sentMails.at(-1)).toMatchObject({ to: "rh@alpha.fr", subject: draft.subject, inReplyTo: "<envoi-2@test>" });
+    expect(sentMails.at(-1)!.attachments.map((a) => a.filename)).toEqual(["Lettre_de_motivation.pdf", "CV_Alex_Martin.pdf"]);
+    expect((await req("POST", `/api/leads/${lead.id}/application/follow-up`, { subject: draft.subject, message: draft.message })).statusCode).toBe(409);
+    expect(sentMails).toHaveLength(3);
+    expect((await req("GET", "/api/applications")).json().spontaneous[0].followedUpAt).not.toBeNull();
+
     // Renvoyé vers leur site : « J'ai postulé sur leur site », puis annuler.
     const item = () => req("GET", "/api/applications").then((r) => r.json().spontaneous[0]);
     const id = (await item()).id;

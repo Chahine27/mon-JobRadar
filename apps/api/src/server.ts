@@ -117,6 +117,8 @@ const generalAi = aiChain(e, "general", (m) => log(m));
 const letterAi = aiChain(e, "letter", (m) => log(m));
 // Lecture des mails de candidature : IA gratuites seulement (Ollama Cloud, Groq, Mistral), Claude est gardé pour le reste.
 const mailAi = aiChain(e, "mail", (m) => log(m));
+// Lettres de candidature spontanée (bien plus nombreuses) : IA gratuites seulement ; Claude Sonnet garde celles des offres.
+const spontaneousLetterAi = aiChain(e, "free-letter", (m) => log(m));
 const joobleKey = e.JOOBLE_API_KEY?.trim();
 const joobleQuota = prismaJoobleQuota(prisma, joobleKey);
 const lbb = new LaBonneBoiteClient({ clientId: e.FRANCE_TRAVAIL_CLIENT_ID?.trim(), clientSecret: e.FRANCE_TRAVAIL_CLIENT_SECRET?.trim() });
@@ -334,7 +336,7 @@ const app = await buildApp({
     model: generalAi.model,
     status: () => generalAi.status(),
     analyze: (job, profile) => analyzeJobWithAi(generalAi, job, profile),
-    writeLetter: (job, kit, opts) => writeCoverLetter(letterAi, job, kit, new Date(), opts),
+    writeLetter: (job, kit, opts) => writeCoverLetter(opts?.spontaneous ? spontaneousLetterAi : letterAi, job, kit, new Date(), opts),
     readJob: (text, hints) => readJobWithAi(generalAi, text, hints),
   },
   mailer,

@@ -73,6 +73,7 @@ export async function applicationRoutes(app: FastifyInstance, opts: { stores: St
             stage: s.noOpeningAt ? "REJECTED" : applicationStage(own, false, !!s.appliedOnSiteAt),
             appliedOnSiteAt: s.appliedOnSiteAt,
             noOpeningAt: s.noOpeningAt,
+            followedUpAt: s.followedUpAt,
             mails: own.map(toMail),
           },
         ];

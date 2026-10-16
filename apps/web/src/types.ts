@@ -340,6 +340,8 @@ export type SpontaneousItem = {
   appliedOnSiteAt: string | null;
   /** « Rien à postuler sur leur site » : candidature close. */
   noOpeningAt: string | null;
+  /** relance envoyée (dans le même fil) */
+  followedUpAt: string | null;
   stage: ApplicationStage;
   mails: ApplicationMail[];
 };

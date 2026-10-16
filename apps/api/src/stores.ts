@@ -250,6 +250,9 @@ export type StoredApplication = {
   edited: boolean;
   sentAt: Date | null;
   sentTo: string | null;
+  /** Message-ID du mail envoyé (la relance répond dans ce fil) */
+  messageId: string | null;
+  followedUpAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -267,10 +270,21 @@ export interface ApplicationStore {
    * false si la candidature n'existe pas.
    */
   setSiteOutcome(id: string, outcome: SiteOutcome | null, at: Date): Promise<boolean>;
+  /** Relance envoyée. */
+  markFollowedUp(leadId: string, at: Date): Promise<void>;
 }
 
 export type SiteOutcome = "applied" | "none";
-export type SentApplication = { id: string; leadId: string; sentAt: Date; sentTo: string | null; appliedOnSiteAt: Date | null; noOpeningAt: Date | null };
+export type SentApplication = {
+  id: string;
+  leadId: string;
+  sentAt: Date;
+  sentTo: string | null;
+  appliedOnSiteAt: Date | null;
+  noOpeningAt: Date | null;
+  /** relance envoyée */
+  followedUpAt: Date | null;
+};
 
 export type ApplicationMailRow = {
   id: string;

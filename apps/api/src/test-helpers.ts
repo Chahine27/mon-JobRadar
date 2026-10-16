@@ -130,7 +130,7 @@ export async function createMemoryStores() {
       save: async (leadId, a) => {
         const now = new Date();
         const prev = appRows.get(leadId);
-        const row = { ...a, edited: false, sentAt: prev?.sentAt ?? null, sentTo: prev?.sentTo ?? null, createdAt: now, updatedAt: now };
+        const row = { ...a, edited: false, sentAt: prev?.sentAt ?? null, sentTo: prev?.sentTo ?? null, messageId: prev?.messageId ?? null, followedUpAt: prev?.followedUpAt ?? null, createdAt: now, updatedAt: now };
         appRows.set(leadId, row);
         return row;
       },
@@ -141,18 +141,25 @@ export async function createMemoryStores() {
         appRows.set(leadId, next);
         return next;
       },
-      markSent: async (leadId, to, at) => {
+      markSent: async (leadId, to, at, messageId) => {
         const row = appRows.get(leadId);
-        if (row) appRows.set(leadId, { ...row, sentAt: at, sentTo: to });
+        if (row) appRows.set(leadId, { ...row, sentAt: at, sentTo: to, messageId: messageId ?? null });
       },
       listSent: async () =>
         [...appRows]
           .filter(([, a]) => a.sentAt)
-          .map(([leadId, a]) => ({ id: `sp-${leadId}`, leadId, sentAt: a.sentAt!, sentTo: a.sentTo, ...(onSite.get(`sp-${leadId}`) ?? { appliedOnSiteAt: null, noOpeningAt: null }) })),
+          .map(([leadId, a]) => ({
+            id: `sp-${leadId}`, leadId, sentAt: a.sentAt!, sentTo: a.sentTo, followedUpAt: a.followedUpAt ?? null,
+            ...(onSite.get(`sp-${leadId}`) ?? { appliedOnSiteAt: null, noOpeningAt: null }),
+          })),
       setSiteOutcome: async (id, outcome, at) => {
         if (!appRows.get(id.replace(/^sp-/, ""))?.sentAt) return false;
         onSite.set(id, { appliedOnSiteAt: outcome === "applied" ? at : null, noOpeningAt: outcome === "none" ? at : null });
         return true;
+      },
+      markFollowedUp: async (leadId, at) => {
+        const row = appRows.get(leadId);
+        if (row) appRows.set(leadId, { ...row, followedUpAt: at });
       },
     },
     applicationMails: {
@@ -434,7 +441,7 @@ export async function createTestApp(extra: Partial<AppOptions> = {}) {
   const sentMails: OutgoingMail[] = [];
   /** Pages des notifications « lettre terminée » envoyées. */
   const letterNotices: string[] = [];
-  const mailer: Mailer = { isConfigured: () => true, address: () => "alex.martin@example.com", send: async (m) => void sentMails.push(m) };
+  const mailer: Mailer = { isConfigured: () => true, address: () => "alex.martin@example.com", send: async (m) => (sentMails.push(m), `<envoi-${sentMails.length}@test>`) };
   const app = await buildApp({
     ...extra,
     mailer,
