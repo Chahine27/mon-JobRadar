@@ -41,8 +41,15 @@ export const activeMails = (a: AnyApplication) => a.mails.filter((m) => !m.dismi
 export const lastMail = (a: AnyApplication) => activeMails(a).at(-1) ?? null;
 export const toReview = (a: AnyApplication) => activeMails(a).filter((m) => m.needsReview);
 export const daysSince = (d: string | null) => (d ? Math.floor((Date.now() - new Date(d).getTime()) / 86_400_000) : null);
-/** Dernière nouvelle : le dernier mail reçu, sinon l'envoi. */
-export const lastActivity = (a: AnyApplication) => lastMail(a)?.receivedAt ?? sentAt(a);
+/** Dernière nouvelle : le plus récent entre l'envoi, la relance et le dernier mail reçu. */
+export const lastActivity = (a: AnyApplication) =>
+  [sentAt(a), isJob(a) ? null : a.followedUpAt, lastMail(a)?.receivedAt ?? null]
+    .filter((d): d is string => !!d)
+    .reduce<string | null>((x, d) => (!x || new Date(d) > new Date(x) ? d : x), null);
+/** Spontanée relancée et toujours sans réponse : statut à part (« Relancée »). */
+export const isFollowedUp = (a: AnyApplication) => !isJob(a) && a.stage === "SENT" && !!a.followedUpAt;
+export const stageLabel = (a: AnyApplication) => (isFollowedUp(a) ? "Relancée" : STAGE_LABEL[a.stage]);
+export const stageClass = (a: AnyApplication) => (isFollowedUp(a) ? "s-FOLLOWED" : `s-${a.stage}`);
 /** Pas de nouvelle depuis longtemps (ni refus ni entretien) : relancer. */
 export const needsFollowUp = (a: AnyApplication) =>
   isJob(a) ? (a.stage === "SENT" || a.stage === "ACK") && (daysSince(lastActivity(a)) ?? 0) >= FOLLOW_UP_DAYS : toFollowUp(a);

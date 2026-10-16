@@ -3,7 +3,6 @@ import { computed, onActivated, ref } from "vue";
 import { api, errorMessage } from "../api";
 import {
   type AnyApplication,
-  STAGE_LABEL,
   activeMails,
   companyOf,
   isJob,
@@ -12,6 +11,8 @@ import {
   mailLabel,
   needsFollowUp,
   sentAt,
+  stageClass,
+  stageLabel,
   toFollowUp,
   toReview,
 } from "../applications";
@@ -238,7 +239,7 @@ const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature sponta
               </span>
               <span class="cell-text" role="cell">{{ titleOf(a) }}<span v-if="lastMail(a)?.summary" class="small muted clamp">{{ lastMail(a)!.summary }}</span></span>
               <span role="cell">
-                <span class="status" :class="`s-${a.stage}`"><span class="dot" />{{ STAGE_LABEL[a.stage] }}</span>
+                <span class="status" :class="stageClass(a)"><span class="dot" />{{ stageLabel(a) }}</span>
                 <span v-if="toReview(a).length" class="status s-REVIEW"><Icon name="alert" :size="12" />À vérifier</span>
               </span>
               <span class="small muted" role="cell">{{ lastActivity(a) ? timeAgo(lastActivity(a)!) : "—" }}<template v-if="needsFollowUp(a)"><br /><span class="mid">relancer</span></template></span>
@@ -375,6 +376,7 @@ button.link { display: inline-flex; align-items: center; gap: 0.2rem; color: var
 .status.s-ACK, .status.s-CAREER_SITE { background: var(--good-bg); color: var(--good); }
 .status.s-INTERVIEW, .status.s-OFFER, .status.s-REVIEW { background: var(--mid-bg); color: var(--mid); }
 .status.s-REJECTED { background: var(--low-bg); color: var(--low); }
+.status.s-FOLLOWED { background: rgb(168 85 247 / 0.14); color: #a855f7; }
 .acts { display: inline-flex; align-items: center; gap: 0.25rem; }
 .empty { padding: 1.5rem 0.5rem; text-align: center; }
 
