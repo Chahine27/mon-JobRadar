@@ -105,20 +105,22 @@ const thisWeek = (d: string | null) => !!d && Date.now() - new Date(d).getTime()
 const mailsOf = (kinds: ApplicationMail["kind"][]) => all.value.flatMap((a) => activeMails(a).filter((m) => kinds.includes(m.kind)));
 
 const active = computed(() => all.value.filter((a) => a.stage !== "REJECTED"));
-// Un message d'absence n'est pas une réponse.
-const answered = computed(() => all.value.filter((a) => activeMails(a).some((m) => m.kind !== "AWAY")));
+// Accusé de réception reçu, pas encore de décision.
+const waiting = computed(() => all.value.filter((a) => a.stage === "ACK"));
 const interviews = computed(() => all.value.filter((a) => a.stage === "INTERVIEW"));
 const offers = computed(() => all.value.filter((a) => a.stage === "OFFER"));
 const rejected = computed(() => all.value.filter((a) => a.stage === "REJECTED"));
+const rejectedByMail = computed(() => rejected.value.filter((a) => activeMails(a).some((m) => m.kind === "REJECTION")));
 
-type Kpi = { label: string; value: number; week: number; weekLabel: string; icon: IconName; tone: string; to: Filter };
+type Kpi = { label: string; value: number; week: number; weekLabel: string; icon: IconName; tone: string; to: Filter; hint?: string };
 const kpis = computed<Kpi[]>(() => [
   { label: "Candidatures actives", value: active.value.length, week: all.value.filter((a) => thisWeek(sentAt(a))).length, weekLabel: "envoyée", icon: "file", tone: "accent", to: "all" },
-  { label: "Réponses reçues", value: answered.value.length, week: all.value.flatMap(activeMails).filter((m) => thisWeek(m.receivedAt)).length, weekLabel: "mail", icon: "mail", tone: "accent", to: "answered" },
+  { label: "En attente de décision", value: waiting.value.length, week: mailsOf(["ACK"]).filter((m) => thisWeek(m.receivedAt)).length, weekLabel: "accusé", icon: "mail", tone: "accent", to: "answered" },
   { label: "Entretiens", value: interviews.value.length, week: mailsOf(["INTERVIEW"]).filter((m) => thisWeek(m.receivedAt)).length, weekLabel: "proposé", icon: "calendar", tone: "good", to: "interview" },
-  { label: "Refus", value: rejected.value.length, week: mailsOf(["REJECTION"]).filter((m) => thisWeek(m.receivedAt)).length, weekLabel: "reçu", icon: "x", tone: "low", to: "rejected" },
+  { label: "Refus reçus", value: rejectedByMail.value.length, week: mailsOf(["REJECTION"]).filter((m) => thisWeek(m.receivedAt)).length, weekLabel: "reçu", icon: "x", tone: "low", to: "rejected" },
+  { label: "Sans réponse", value: rejected.value.length - rejectedByMail.value.length, week: 0, weekLabel: "", icon: "clock", tone: "mid", to: "rejected", hint: "Offres sans nouvelles depuis 14 jours" },
 ]);
-const weekText = (k: Kpi) => (k.week ? `+${k.week} ${k.weekLabel}${k.week > 1 ? "s" : ""} cette semaine` : "Rien de neuf cette semaine");
+const weekText = (k: Kpi) => (k.hint ? k.hint : k.week ? `+${k.week} ${k.weekLabel}${k.week > 1 ? "s" : ""} cette semaine` : "Rien de neuf cette semaine");
 
 /**
  * Ordre de priorité : un mail à vérifier, un entretien ou une proposition, une relance à faire, une réponse récente,
@@ -175,19 +177,22 @@ const activity = computed<Activity[]>(() =>
     .sort((x, y) => new Date(y.mail.receivedAt).getTime() - new Date(x.mail.receivedAt).getTime()),
 );
 const KIND_ICON: Record<ApplicationMail["kind"], IconName> = { ACK: "mail", INTERVIEW: "calendar", OFFER: "star", REJECTION: "x", CAREER_SITE: "globe", AWAY: "clock" };
+/**
+ * Activité récente : les mails identiques (même entreprise, même type, même jour, même site d'envoi, comme trois refus
+ * d'un même ATS) n'en font qu'un, avec leur nombre.
+ */
+const recent = computed(() => {
+  const groups = new Map<string, Activity & { count: number }>();
+  for (const x of activity.value) {
+    const key = [companyOf(x.app), x.mail.kind, x.mail.receivedAt.slice(0, 10), x.mail.from.split("@").pop()?.replace(/>$/, "")].join("|");
+    const g = groups.get(key);
+    if (g) g.count++;
+    else groups.set(key, { ...x, count: 1 });
+  }
+  return [...groups.values()];
+});
 const reviewCount = computed(() => activity.value.filter((x) => x.mail.needsReview).length);
 
-/** Avancement : part de tes candidatures arrivées à chaque étape. */
-const progress = computed(() => {
-  const total = all.value.length || 1;
-  return [
-    { label: "Envoyées", value: all.value.length, pct: 100, icon: "send" as IconName, tone: "accent" },
-    { label: "Réponses reçues", value: answered.value.length, pct: (answered.value.length / total) * 100, icon: "mail" as IconName, tone: "accent" },
-    { label: "Entretiens", value: interviews.value.length + offers.value.length, pct: ((interviews.value.length + offers.value.length) / total) * 100, icon: "calendar" as IconName, tone: "good" },
-    { label: "Propositions", value: offers.value.length, pct: (offers.value.length / total) * 100, icon: "star" as IconName, tone: "mid" },
-    { label: "Refusées", value: rejected.value.length, pct: (rejected.value.length / total) * 100, icon: "x" as IconName, tone: "low" },
-  ];
-});
 
 const TABS: Array<{ id: View; label: string; icon: IconName; count?: () => number }> = [
   { id: "overview", label: "Vue d'ensemble", icon: "home" },
@@ -326,14 +331,14 @@ const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature sponta
         <p v-if="activity.length === 0" class="empty small muted">Aucune réponse reconnue pour l'instant.</p>
         <ol class="feed">
           <li
-            v-for="x in view === 'mails' ? [...activity].sort((p, q) => Number(q.mail.needsReview) - Number(p.mail.needsReview)) : activity.slice(0, 6)"
+            v-for="x in view === 'mails' ? [...activity].sort((p, q) => Number(q.mail.needsReview) - Number(p.mail.needsReview)).map((x) => ({ ...x, count: 1 })) : recent.slice(0, 6)"
             :key="x.mail.id"
             :class="`k-${x.mail.kind}`"
           >
             <span class="feed-icon" aria-hidden="true"><Icon :name="KIND_ICON[x.mail.kind]" :size="15" /></span>
             <div class="feed-body">
               <div class="spread">
-                <strong class="small">{{ mailLabel(x.mail) }} · {{ companyOf(x.app) }}<span v-if="x.mail.needsReview" class="tag">à vérifier</span></strong>
+                <strong class="small">{{ mailLabel(x.mail) }} · {{ companyOf(x.app) }}<span v-if="x.count > 1" class="muted"> ×{{ x.count }}</span><span v-if="x.mail.needsReview" class="tag">à vérifier</span></strong>
                 <span class="small muted">{{ timeAgo(x.mail.receivedAt) }}</span>
               </div>
               <span class="small muted clamp">{{ x.mail.summary ?? `« ${x.mail.subject} »` }}</span>
@@ -348,29 +353,6 @@ const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature sponta
       </section>
     </div>
 
-    <!-- Avancement -->
-    <section v-if="view === 'overview'" class="card panel">
-      <div class="panel-head">
-        <div class="panel-title">
-          <Icon name="chart" :size="20" />
-          <div>
-            <h2>Avancement des candidatures</h2>
-            <p class="small muted">Vue globale de ton parcours</p>
-          </div>
-        </div>
-      </div>
-      <div class="progress">
-        <div v-for="p in progress" :key="p.label" class="step">
-          <span class="kpi-icon" :class="p.tone"><Icon :name="p.icon" :size="18" /></span>
-          <div class="step-body">
-            <span class="small">{{ p.label }}</span>
-            <strong>{{ p.value }}</strong>
-            <div class="bar" :class="p.tone"><span :style="{ width: `${Math.round(p.pct)}%` }" /></div>
-            <span class="small muted">{{ Math.round(p.pct) }} %</span>
-          </div>
-        </div>
-      </div>
-    </section>
   </template>
 </template>
 
@@ -456,10 +438,6 @@ button.link { display: inline-flex; align-items: center; gap: 0.2rem; color: var
 .feed-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
 .tag { margin-left: 0.45rem; padding: 0.05rem 0.45rem; border-radius: 99px; background: var(--mid-bg); color: var(--mid); font-size: 0.72rem; font-weight: 650; }
 
-.progress { display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 1rem; }
-.step { display: flex; gap: 0.75rem; align-items: flex-start; }
-.step-body { flex: 1; display: flex; flex-direction: column; gap: 0.2rem; }
-.step-body strong { font-size: 1.4rem; }
 .bar { height: 0.4rem; border-radius: 99px; background: var(--ring-track); overflow: hidden; }
 .bar span { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
 .bar.good span { background: var(--good); }
