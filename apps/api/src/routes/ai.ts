@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
-import { DEFAULT_PROFILE, EMPTY_LETTER_KIT, LetterKitSchema, letterKitReady, type LetterKit } from "@job-radar/shared";
+import { DEFAULT_PROFILE, EMPTY_LETTER_KIT, LetterKitSchema, letterKitReady, type LetterKit, followUpDue } from "@job-radar/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import { analysisHash, isAbridged, toJobInput, toProfileInput } from "../ai-context";
@@ -594,7 +594,14 @@ export async function aiRoutes(
     const ctx = await applicationContext(userId, leadId);
     const sent = ctx?.application;
     if (!ctx || !sent?.sentAt || !sent.sentTo) return { status: 404, error: "NOT_SENT", message: "Cette candidature n'a pas été envoyée par Job Radar." };
-    if (sent.followedUpAt) return { status: 409, error: "ALREADY_FOLLOWED_UP", message: `Déjà relancée le ${sent.followedUpAt.toLocaleDateString("fr-FR")}.` };
+    if (sent.followedUpAt) {
+      // Une seule relance, sauf si elle est tombée pendant une absence (message d'absence reçu après elle).
+      const spId = (await stores.applications.listSent()).find((s) => s.leadId === leadId)?.id;
+      const awayAfter = (await stores.applicationMails.list()).some(
+        (m) => m.spontaneousId === spId && m.kind === "AWAY" && !m.dismissed && m.receivedAt.getTime() >= sent.followedUpAt!.getTime(),
+      );
+      if (!awayAfter) return { status: 409, error: "ALREADY_FOLLOWED_UP", message: `Déjà relancée le ${sent.followedUpAt.toLocaleDateString("fr-FR")}.` };
+    }
     if (!opts.mailer?.isConfigured()) {
       return { status: 503, error: "MAIL_NOT_CONFIGURED", message: "Envoi d'email non configuré : remplis SMTP_HOST, SMTP_USER et SMTP_PASSWORD dans .env." };
     }
@@ -636,13 +643,11 @@ export async function aiRoutes(
     return { ok: true, followedUpAt: r.followedUpAt };
   });
 
-  /** Spontanées à relancer : envoyées il y a 7 jours ou plus, sans aucune réponse, jamais relancées ; les plus anciennes d'abord. */
-  const FOLLOW_UP_AFTER_MS = 7 * 86_400_000;
+  /** Spontanées à relancer (followUpDue : 7 jours sans réponse, après le retour d'une absence) ; les plus anciennes d'abord. */
   async function followUpQueue(now = new Date()) {
     const [sent, mails] = await Promise.all([stores.applications.listSent(), stores.applicationMails.list()]);
-    const answered = new Set(mails.filter((m) => m.spontaneousId && !m.dismissed).map((m) => m.spontaneousId));
     return sent
-      .filter((s) => s.sentTo && !s.followedUpAt && !s.noOpeningAt && !s.appliedOnSiteAt && !answered.has(s.id) && now.getTime() - s.sentAt.getTime() >= FOLLOW_UP_AFTER_MS)
+      .filter((s) => !s.noOpeningAt && !s.appliedOnSiteAt && followUpDue(s, mails.filter((m) => m.spontaneousId === s.id), now))
       .sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime());
   }
 

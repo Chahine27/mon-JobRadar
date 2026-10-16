@@ -106,7 +106,8 @@ const thisWeek = (d: string | null) => !!d && Date.now() - new Date(d).getTime()
 const mailsOf = (kinds: ApplicationMail["kind"][]) => all.value.flatMap((a) => activeMails(a).filter((m) => kinds.includes(m.kind)));
 
 const active = computed(() => all.value.filter((a) => a.stage !== "REJECTED"));
-const answered = computed(() => all.value.filter((a) => activeMails(a).length > 0));
+// Un message d'absence n'est pas une réponse.
+const answered = computed(() => all.value.filter((a) => activeMails(a).some((m) => m.kind !== "AWAY")));
 const interviews = computed(() => all.value.filter((a) => a.stage === "INTERVIEW"));
 const offers = computed(() => all.value.filter((a) => a.stage === "OFFER"));
 const rejected = computed(() => all.value.filter((a) => a.stage === "REJECTED"));
@@ -174,7 +175,7 @@ const activity = computed<Activity[]>(() =>
     .flatMap((app) => activeMails(app).map((mail) => ({ mail, app })))
     .sort((x, y) => new Date(y.mail.receivedAt).getTime() - new Date(x.mail.receivedAt).getTime()),
 );
-const KIND_ICON: Record<ApplicationMail["kind"], IconName> = { ACK: "mail", INTERVIEW: "calendar", OFFER: "star", REJECTION: "x", CAREER_SITE: "globe" };
+const KIND_ICON: Record<ApplicationMail["kind"], IconName> = { ACK: "mail", INTERVIEW: "calendar", OFFER: "star", REJECTION: "x", CAREER_SITE: "globe", AWAY: "clock" };
 const reviewCount = computed(() => activity.value.filter((x) => x.mail.needsReview).length);
 
 /** Avancement : part de tes candidatures arrivées à chaque étape. */
@@ -441,6 +442,7 @@ button.link { display: inline-flex; align-items: center; gap: 0.2rem; color: var
 .batch-steps li.b-sent { color: var(--good); }
 .batch-steps li.b-failed { color: var(--low); }
 .batch-error { margin: 0 0 0.6rem; color: var(--low); }
+.status.s-AWAY { background: var(--mid-bg); color: var(--mid); }
 .status.s-NOANSWER { background: var(--low-bg); color: var(--muted); }
 .status.s-FOLLOWED { background: rgb(168 85 247 / 0.14); color: #a855f7; }
 .acts { display: inline-flex; align-items: center; gap: 0.25rem; }

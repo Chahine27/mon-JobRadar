@@ -304,7 +304,8 @@ export type ApplicationStage = "SENT" | "ACK" | "INTERVIEW" | "OFFER" | "REJECTE
 /** Mail reçu reconnu comme une étape de candidature. */
 export type ApplicationMail = {
   id: string;
-  kind: "ACK" | "INTERVIEW" | "OFFER" | "REJECTION" | "CAREER_SITE";
+  /** AWAY : message d'absence (pas une réponse) ; `detail` = jour où relancer (AAAA-MM-JJ) */
+  kind: "ACK" | "INTERVIEW" | "OFFER" | "REJECTION" | "CAREER_SITE" | "AWAY";
   detail: string | null;
   /** ce que dit le mail, en une phrase (IA) */
   summary: string | null;

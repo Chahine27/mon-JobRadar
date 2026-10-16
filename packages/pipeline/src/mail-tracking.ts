@@ -192,6 +192,38 @@ export function careerSiteUrl(mail: Pick<InboxMail, "text">): string | null {
   return reply.match(/https?:\/\/[^\s<>")\]]+/)?.[0]?.replace(/[.,;]+$/, "") ?? null;
 }
 
+// ───────── Message d'absence ─────────
+
+const AWAY =
+  /\bje (?:suis|serai) (?:actuellement |aujourd'hui )?(?:absente?|en (?:conges?|vacances|deplacement|formation|arret)|hors du bureau|indisponible)|\b(?:absente?|en conges?) (?:du|jusqu|ce|cette|le|aujourd|a partir)|out of (?:the )?office|i am (?:currently )?(?:away|out of)|i will be (?:away|out)|i'?m (?:currently )?(?:away|out of)/;
+const MONTHS = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout", "septembre", "octobre", "novembre", "decembre"];
+const DATE = new RegExp(`(\\d{1,2})(?:er)? (${MONTHS.join("|")})(?: (\\d{4}))?`);
+const DAY_MS = 86_400_000;
+
+/**
+ * Message d'absence (« je suis absent ce vendredi 16 octobre », « de retour le 20 octobre ») : pas une réponse. Renvoie
+ * le jour où relancer (lendemain de la fin d'absence, ou date de retour ; 7 jours sans date) et une autre adresse
+ * donnée, ou null si ce n'est pas un message d'absence.
+ */
+export function outOfOffice(mail: Pick<InboxMail, "from" | "text" | "date">, self: string[] = []): { back: Date; contact: string | null } | null {
+  const text = plain(mail.text.slice(0, 2000)).replace(/\s+/g, " ");
+  if (!AWAY.test(text)) return null;
+  let back = new Date(mail.date.getTime() + 7 * DAY_MS);
+  const m = text.match(DATE);
+  if (m) {
+    const year = m[3] ? Number(m[3]) : mail.date.getFullYear();
+    let d = new Date(year, MONTHS.indexOf(m[2]!), Number(m[1]));
+    if (!m[3] && d.getTime() < mail.date.getTime() - 60 * DAY_MS) d = new Date(year + 1, d.getMonth(), d.getDate());
+    // « de retour le 20 » : ce jour-là ; « jusqu'au 20 », « absent ce vendredi 16 » : le lendemain.
+    const returning = new RegExp(`(?:retour|back)[^.]{0,30}${m[0]}`).test(text);
+    back = returning ? d : new Date(d.getTime() + DAY_MS);
+  }
+  const emails = [...new Set(text.match(EMAIL) ?? [])].filter((a) => a !== mail.from.toLowerCase() && !self.includes(a));
+  return { back, contact: emails[0] ?? null };
+}
+
+const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
 // ───────── Association à une candidature ─────────
 
 /** `senders` : adresses dont on a déjà reconnu un mail pour cette candidature (même outil de recrutement). */
@@ -439,6 +471,28 @@ export async function trackApplicationMails(opts: {
     if (isNoise(mail, self)) continue;
     const candidates = candidateApplications(mail, apps);
     if (!candidates.length) continue;
+    // Message d'absence : pas une réponse, pas besoin de l'IA. La relance attendra le retour.
+    const away = outOfOffice(mail, self);
+    const awayApp = away ? (candidates.length === 1 ? candidates[0]! : matchApplication(mail, apps)) : null;
+    if (away && awayApp) {
+      const when = away.back.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+      await prisma.applicationMail.create({
+        data: {
+          messageId: mail.messageId,
+          ...(awayApp.kind === "job" ? { jobId: awayApp.id } : { spontaneousId: awayApp.id }),
+          kind: "AWAY",
+          detail: isoDay(away.back),
+          summary: `Absent : relance possible à partir du ${when}.${away.contact ? ` Autre contact donné : ${away.contact}.` : ""}`,
+          subject: mail.subject.slice(0, 500),
+          fromAddress: mail.from.slice(0, 320),
+          receivedAt: mail.date,
+        },
+      });
+      known.add(mail.messageId);
+      report.matched++;
+      report.recorded++;
+      continue;
+    }
 
     let app: ApplicationRef | null = null;
     let verdict: MailVerdict | null = null;

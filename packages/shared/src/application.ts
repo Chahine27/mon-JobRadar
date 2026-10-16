@@ -1,5 +1,6 @@
 /** Ce qu'un mail reçu dit d'une candidature. */
-export const MAIL_KINDS = ["ACK", "INTERVIEW", "OFFER", "REJECTION", "CAREER_SITE"] as const;
+/** AWAY : message d'absence (« je suis absent jusqu'au… ») ; ce n'est pas une réponse, la relance attend le retour. */
+export const MAIL_KINDS = ["ACK", "INTERVIEW", "OFFER", "REJECTION", "CAREER_SITE", "AWAY"] as const;
 export type MailKind = (typeof MAIL_KINDS)[number];
 
 /** Étape d'une candidature, de l'envoi à la réponse finale. */
@@ -7,7 +8,7 @@ export const APPLICATION_STAGES = ["SENT", "ACK", "INTERVIEW", "OFFER", "REJECTE
 export type ApplicationStage = (typeof APPLICATION_STAGES)[number];
 
 /** Avancement : une étape ne recule jamais (un accusé arrivé après l'entretien ne fait pas revenir en arrière). */
-const RANK: Record<Exclude<MailKind, "REJECTION" | "CAREER_SITE">, number> = { ACK: 1, INTERVIEW: 2, OFFER: 3 };
+const RANK: Record<Exclude<MailKind, "REJECTION" | "CAREER_SITE" | "AWAY">, number> = { ACK: 1, INTERVIEW: 2, OFFER: 3 };
 
 /**
  * Étape d'une candidature d'après ses mails (ceux que tu n'as pas écartés).
@@ -53,4 +54,24 @@ export function noAnswer(
   if (stage !== "SENT" && stage !== "ACK") return false;
   const times = [appliedAt, ...mails.filter((m) => !m.dismissed).map((m) => m.receivedAt)].filter((d): d is Date | string => d != null).map((d) => new Date(d).getTime());
   return times.length > 0 && now.getTime() - Math.max(...times) >= NO_ANSWER_DAYS * 86_400_000;
+}
+
+/**
+ * Spontanée à relancer ? Envoyée il y a 7 jours ou plus, sans réponse (un message d'absence n'en est pas une), et pas
+ * encore relancée, sauf si la relance est tombée pendant une absence. Après une absence, on attend la date de retour
+ * (`detail` du message d'absence, au format AAAA-MM-JJ).
+ */
+export function followUpDue(
+  a: { sentAt: Date | string; sentTo: string | null; followedUpAt: Date | string | null },
+  mails: Array<{ kind: string; detail: string | null; receivedAt: Date | string; dismissed?: boolean }>,
+  now: Date = new Date(),
+): boolean {
+  if (!a.sentTo) return false;
+  const kept = mails.filter((m) => !m.dismissed);
+  if (kept.some((m) => m.kind !== "AWAY")) return false;
+  const time = (d: Date | string) => new Date(d).getTime();
+  const away = kept.filter((m) => m.kind === "AWAY").sort((x, y) => time(y.receivedAt) - time(x.receivedAt))[0];
+  if (a.followedUpAt && !(away && time(away.receivedAt) >= time(a.followedUpAt))) return false;
+  const back = away?.detail && /^\d{4}-\d{2}-\d{2}$/.test(away.detail) ? time(away.detail) : away ? time(away.receivedAt) + 7 * 86_400_000 : 0;
+  return now.getTime() >= Math.max(time(a.sentAt) + 7 * 86_400_000, back);
 }

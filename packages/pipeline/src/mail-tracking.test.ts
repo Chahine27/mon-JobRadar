@@ -6,6 +6,7 @@ import {
   bouncedAddress,
   careerSiteUrl,
   classifyMail,
+  outOfOffice,
   isHelpdeskReply,
   isNoise,
   matchApplication,
@@ -232,5 +233,22 @@ describe("cas réel : accusé SmartRecruiters d'Eurofins", () => {
 
   it("offre marquée « postulé » après l'arrivée du mail : rattaché quand même", () => {
     expect(matchApplication(mail, [{ ...job, since: new Date("2026-10-06T19:00:00") }])?.id).toBe("j");
+  });
+});
+
+describe("message d'absence", () => {
+  const at = new Date(2026, 9, 16, 14, 13);
+  const away = (text: string) => outOfOffice({ from: "alain.repiquet@seenovate.com", text, date: at }, ["moi@gmail.com"]);
+  it("absent un jour précis : relance le lendemain, autre contact repris", () => {
+    const r = away("Bonjour\n\nJe suis absent ce vendredi 16 octobre avec un accès limité à ma messagerie.\nEn cas d'urgence, n'hésitez pas envoyer un message à contact@seenovate.com\n\nBien cordialement.");
+    expect(r).toEqual({ back: new Date(2026, 9, 17), contact: "contact@seenovate.com" });
+  });
+  it("« de retour le » : ce jour-là ; sans date : 7 jours", () => {
+    expect(away("Je suis en congés, de retour le lundi 26 octobre.")?.back).toEqual(new Date(2026, 9, 26));
+    expect(away("I am currently out of the office.")?.back).toEqual(new Date(at.getTime() + 7 * 86_400_000));
+  });
+  it("accusé de réception ou refus : pas une absence", () => {
+    expect(away("Nous avons bien reçu votre candidature et reviendrons vers vous.")).toBeNull();
+    expect(away("Malheureusement, nous ne donnerons pas suite.")).toBeNull();
   });
 });

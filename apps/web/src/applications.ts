@@ -1,3 +1,4 @@
+import { followUpDue } from "@job-radar/shared";
 import type { Application, ApplicationMail, ApplicationStage, SpontaneousItem } from "./types";
 
 /** Une candidature, sur une offre ou spontanée. */
@@ -31,6 +32,7 @@ const MAIL_LABEL: Record<ApplicationMail["kind"], string> = {
   OFFER: "Proposition",
   REJECTION: "Refus",
   CAREER_SITE: "Candidature sur leur site",
+  AWAY: "Absent (réponse automatique)",
 };
 export const mailLabel = (m: ApplicationMail) => (m.kind === "INTERVIEW" && m.detail ? m.detail : MAIL_LABEL[m.kind]);
 
@@ -46,14 +48,23 @@ export const lastActivity = (a: AnyApplication) =>
   [sentAt(a), isJob(a) ? null : a.followedUpAt, lastMail(a)?.receivedAt ?? null]
     .filter((d): d is string => !!d)
     .reduce<string | null>((x, d) => (!x || new Date(d) > new Date(x) ? d : x), null);
+/** Absent (message d'absence) et pas encore rentré : jour du retour, sinon null. */
+export const awayUntil = (a: AnyApplication): string | null => {
+  if (a.stage !== "SENT") return null;
+  const m = activeMails(a).findLast((x) => x.kind === "AWAY");
+  return m?.detail && new Date(m.detail).getTime() > Date.now() ? m.detail : null;
+};
 /** Spontanée relancée et toujours sans réponse : statut à part (« Relancée »). */
 export const isFollowedUp = (a: AnyApplication) => !isJob(a) && a.stage === "SENT" && !!a.followedUpAt;
-export const stageLabel = (a: AnyApplication) => (isFollowedUp(a) ? "Relancée" : isJob(a) && a.noAnswer ? "Sans réponse" : STAGE_LABEL[a.stage]);
-export const stageClass = (a: AnyApplication) => (isFollowedUp(a) ? "s-FOLLOWED" : isJob(a) && a.noAnswer ? "s-NOANSWER" : `s-${a.stage}`);
+const shortDay = (d: string) => new Date(d).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+export const stageLabel = (a: AnyApplication) =>
+  awayUntil(a) ? `Absent → ${shortDay(awayUntil(a)!)}` : isFollowedUp(a) ? "Relancée" : isJob(a) && a.noAnswer ? "Sans réponse" : STAGE_LABEL[a.stage];
+export const stageClass = (a: AnyApplication) =>
+  awayUntil(a) ? "s-AWAY" : isFollowedUp(a) ? "s-FOLLOWED" : isJob(a) && a.noAnswer ? "s-NOANSWER" : `s-${a.stage}`;
 /** Pas de nouvelle depuis longtemps (ni refus ni entretien) : relancer. */
 export const needsFollowUp = (a: AnyApplication) =>
   isJob(a) ? (a.stage === "SENT" || a.stage === "ACK") && (daysSince(lastActivity(a)) ?? 0) >= FOLLOW_UP_DAYS : toFollowUp(a);
 /** Spontanée envoyée il y a 7 jours ou plus, sans aucune réponse, jamais relancée : onglet « À relancer ». */
-export const toFollowUp = (a: AnyApplication) =>
-  !isJob(a) && a.stage === "SENT" && !a.followedUpAt && !!a.sentTo && activeMails(a).length === 0 && (daysSince(a.sentAt) ?? 0) >= SPONTANEOUS_FOLLOW_UP_DAYS;
+// Même règle que le serveur (followUpDue) : 7 jours sans réponse, et après le retour d'une absence.
+export const toFollowUp = (a: AnyApplication) => !isJob(a) && a.stage === "SENT" && !a.noOpeningAt && !a.appliedOnSiteAt && followUpDue(a, a.mails);
 export const careerUrl = (a: AnyApplication) => activeMails(a).findLast((m) => m.kind === "CAREER_SITE")?.detail ?? null;
