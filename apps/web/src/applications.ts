@@ -48,8 +48,8 @@ export const lastActivity = (a: AnyApplication) =>
     .reduce<string | null>((x, d) => (!x || new Date(d) > new Date(x) ? d : x), null);
 /** Spontanée relancée et toujours sans réponse : statut à part (« Relancée »). */
 export const isFollowedUp = (a: AnyApplication) => !isJob(a) && a.stage === "SENT" && !!a.followedUpAt;
-export const stageLabel = (a: AnyApplication) => (isFollowedUp(a) ? "Relancée" : STAGE_LABEL[a.stage]);
-export const stageClass = (a: AnyApplication) => (isFollowedUp(a) ? "s-FOLLOWED" : `s-${a.stage}`);
+export const stageLabel = (a: AnyApplication) => (isFollowedUp(a) ? "Relancée" : isJob(a) && a.noAnswer ? "Sans réponse" : STAGE_LABEL[a.stage]);
+export const stageClass = (a: AnyApplication) => (isFollowedUp(a) ? "s-FOLLOWED" : isJob(a) && a.noAnswer ? "s-NOANSWER" : `s-${a.stage}`);
 /** Pas de nouvelle depuis longtemps (ni refus ni entretien) : relancer. */
 export const needsFollowUp = (a: AnyApplication) =>
   isJob(a) ? (a.stage === "SENT" || a.stage === "ACK") && (daysSince(lastActivity(a)) ?? 0) >= FOLLOW_UP_DAYS : toFollowUp(a);

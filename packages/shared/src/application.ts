@@ -36,3 +36,21 @@ export function applicationStage(
   if (!appliedOnSite && lastCareer > -Infinity && !(best && best.kind !== "ACK" && best.at > lastCareer)) return "CAREER_SITE";
   return best?.kind ?? "SENT";
 }
+
+/** Candidature sur une offre restée sans nouvelles : considérée comme refusée au-delà de ce délai. */
+export const NO_ANSWER_DAYS = 14;
+
+/**
+ * Offre sans entretien ni proposition, et sans aucune nouvelle (ni mail, ni candidature) depuis 14 jours : refus de fait,
+ * affiché « Refusée (sans réponse) ». Une réponse qui arrive ensuite rend son vrai statut à la candidature.
+ */
+export function noAnswer(
+  stage: ApplicationStage,
+  appliedAt: Date | string | null,
+  mails: Array<{ receivedAt: Date | string; dismissed?: boolean }>,
+  now: Date = new Date(),
+): boolean {
+  if (stage !== "SENT" && stage !== "ACK") return false;
+  const times = [appliedAt, ...mails.filter((m) => !m.dismissed).map((m) => m.receivedAt)].filter((d): d is Date | string => d != null).map((d) => new Date(d).getTime());
+  return times.length > 0 && now.getTime() - Math.max(...times) >= NO_ANSWER_DAYS * 86_400_000;
+}

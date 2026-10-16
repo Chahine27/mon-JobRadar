@@ -376,6 +376,7 @@ button.link { display: inline-flex; align-items: center; gap: 0.2rem; color: var
 .status.s-ACK, .status.s-CAREER_SITE { background: var(--good-bg); color: var(--good); }
 .status.s-INTERVIEW, .status.s-OFFER, .status.s-REVIEW { background: var(--mid-bg); color: var(--mid); }
 .status.s-REJECTED { background: var(--low-bg); color: var(--low); }
+.status.s-NOANSWER { background: var(--low-bg); color: var(--muted); }
 .status.s-FOLLOWED { background: rgb(168 85 247 / 0.14); color: #a855f7; }
 .acts { display: inline-flex; align-items: center; gap: 0.25rem; }
 .empty { padding: 1.5rem 0.5rem; text-align: center; }

@@ -322,6 +322,8 @@ export type ApplicationMail = {
 export type Application = JobSummary & {
   appliedAt: string | null;
   stage: ApplicationStage;
+  /** aucune nouvelle depuis 14 jours : considérée refusée */
+  noAnswer?: boolean;
   mails: ApplicationMail[];
   /** CV adaptés exportés (ceux envoyés si l'offre a été marquée « Postulé » après l'export). */
   cvs?: Array<{ template: TemplateId; exportedAt: string | null; sentAt: string | null }>;

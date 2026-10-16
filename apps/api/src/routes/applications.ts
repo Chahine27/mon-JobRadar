@@ -1,4 +1,4 @@
-import { applicationStage } from "@job-radar/shared";
+import { applicationStage, noAnswer } from "@job-radar/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireAuth } from "../auth";
@@ -49,9 +49,13 @@ export async function applicationRoutes(app: FastifyInstance, opts: { stores: St
         // CV envoyé : ceux exportés au moment de « Postulé » (sinon les exportés, s'il n'y a pas eu de marque).
         const own_cvs = cvs.filter((c) => c.jobId === j.id);
         const sentCvs = own_cvs.some((c) => c.sentAt) ? own_cvs.filter((c) => c.sentAt) : own_cvs;
+        const stage = applicationStage(own, j.status === "REJECTED");
+        // Aucune nouvelle depuis 14 jours : refus de fait (le statut de l'offre ne change pas, une réponse le corrige).
+        const silent = noAnswer(stage, j.appliedAt, own);
         return {
           ...j,
-          stage: applicationStage(own, j.status === "REJECTED"),
+          stage: silent ? "REJECTED" : stage,
+          noAnswer: silent,
           mails: own.map(toMail),
           cvs: sentCvs.map((c) => ({ template: c.template, exportedAt: c.exportedAt, sentAt: c.sentAt })),
         };

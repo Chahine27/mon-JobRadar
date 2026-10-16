@@ -93,6 +93,7 @@ async function sendFollowUp(a: SpontaneousItem) {
       Rien à postuler sur leur site (noté {{ timeAgo(app.noOpeningAt) }}) : candidature close ·
       <button type="button" class="link" :disabled="busy === app.id" @click="siteOutcome(app, null)">annuler</button>
     </p>
+    <p v-if="isJob(app) && app.noAnswer" class="small muted"><Icon name="clock" :size="14" /> Aucune nouvelle depuis {{ daysSince(lastActivity(app)) }} jours : considérée comme refusée. Si une réponse arrive, elle reprendra son vrai statut.</p>
     <section v-if="!isJob(app) && toFollowUp(app)" class="relance">
       <div class="small">
         <strong>Relancer {{ app.company }}</strong>
