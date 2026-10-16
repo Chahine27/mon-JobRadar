@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onActivated, ref } from "vue";
-import { api, errorMessage } from "../api";
+import { type FollowUpBatch, api, errorMessage } from "../api";
 import {
   type AnyApplication,
   activeMails,
@@ -52,27 +52,41 @@ onActivated(load); // aussi au retour depuis une offre
 // Prénom pour le bonjour : celui de ta signature de lettre (« Chahine MEHADJI »).
 api.getLetterKit().then((r) => (firstName.value = r.kit.signature.trim().split(/\s+/)[0] ?? "")).catch(() => {});
 
-/** Relance groupée : les 10 plus anciennes, message par défaut, mêmes fichiers, chacune dans son fil. */
-const batching = ref(false);
-const batchResult = ref<string | null>(null);
+/**
+ * Relance groupée : les 10 plus anciennes, message par défaut, mêmes fichiers, chacune dans son fil. Le serveur les
+ * envoie une par une (pause entre deux) ; la page suit l'avancement chaque seconde.
+ */
+const batch = ref<FollowUpBatch | null>(null);
+const batchError = ref<string | null>(null);
+const batching = computed(() => !!batch.value?.running);
 async function followUpBatch() {
   const n = Math.min(10, spontaneous.value.filter(toFollowUp).length);
   if (!n || !window.confirm(`Envoyer ${n} relance${n > 1 ? "s" : ""} maintenant ? Chacune répond à ton premier mail, avec la même lettre et ton CV actuel.`)) return;
-  batching.value = true;
-  batchResult.value = null;
+  batchError.value = null;
   try {
-    const r = await api.followUpBatch(n);
-    batchResult.value =
-      `${r.sent} relance${r.sent > 1 ? "s" : ""} envoyée${r.sent > 1 ? "s" : ""}` +
-      (r.failed.length ? `, ${r.failed.length} en échec (${r.failed[0]!.message ?? "erreur"})` : "") +
-      (r.remaining ? `. Encore ${r.remaining} à relancer : mieux vaut attendre demain (Gmail se méfie des rafales).` : ".");
-    await load();
+    batch.value = await api.followUpBatch(n);
+    await followBatch();
   } catch (e) {
-    batchResult.value = errorMessage(e, "Les relances ne sont pas parties.");
-  } finally {
-    batching.value = false;
+    batchError.value = errorMessage(e, "Les relances ne sont pas parties.");
   }
 }
+/** Suit l'envoi jusqu'au bout (aussi en revenant sur la page pendant qu'il tourne). */
+async function followBatch() {
+  while (batch.value?.running) {
+    await new Promise((r) => setTimeout(r, 1000));
+    batch.value = await api.followUpBatchStatus();
+  }
+  await load();
+}
+onActivated(async () => {
+  const b = await api.followUpBatchStatus().catch(() => null);
+  if (b?.running) {
+    batch.value = b;
+    await followBatch();
+  }
+});
+const sentCount = computed(() => batch.value?.steps.filter((s) => s.status === "sent").length ?? 0);
+const STEP_ICON = { waiting: "clock", sending: "send", sent: "check", failed: "x" } as const;
 
 async function check() {
   checking.value = true;
@@ -252,7 +266,20 @@ const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature sponta
           </div>
         </div>
 
-        <p v-if="view === 'followup' && batchResult" class="small batch-result">{{ batchResult }}</p>
+        <div v-if="view === 'followup' && batch && batch.total" class="batch">
+          <div class="spread small">
+            <strong>{{ batch.running ? "Relances en cours…" : `${sentCount} relance${sentCount > 1 ? "s" : ""} envoyée${sentCount > 1 ? "s" : ""}` }}</strong>
+            <span class="muted">{{ batch.done }} / {{ batch.total }}</span>
+          </div>
+          <div class="bar" role="progressbar" :aria-valuenow="batch.done" aria-valuemin="0" :aria-valuemax="batch.total"><span :style="{ width: `${Math.round((batch.done / batch.total) * 100)}%` }" /></div>
+          <ol class="batch-steps small">
+            <li v-for="s in batch.steps" :key="s.leadId" :class="`b-${s.status}`">
+              <Icon :name="STEP_ICON[s.status]" :size="14" />{{ s.name }}<span v-if="s.message" class="muted"> : {{ s.message }}</span>
+            </li>
+          </ol>
+          <p v-if="!batch.running && batch.remaining" class="small muted">Encore {{ batch.remaining }} à relancer : mieux vaut attendre demain (Gmail se méfie des rafales).</p>
+        </div>
+        <p v-if="view === 'followup' && batchError" class="small batch-error">{{ batchError }}</p>
         <div v-if="rows.length === 0" class="empty small muted">
           <template v-if="view === 'offers' || all.length === 0">Sur la page d'une offre, clique sur « Marquer comme postulé » : elle arrivera ici.</template>
           <template v-else-if="view === 'spontaneous'">Les candidatures spontanées envoyées depuis « Entreprises » arrivent ici.</template>
@@ -407,7 +434,13 @@ button.link { display: inline-flex; align-items: center; gap: 0.2rem; color: var
 .status.s-ACK, .status.s-CAREER_SITE { background: var(--good-bg); color: var(--good); }
 .status.s-INTERVIEW, .status.s-OFFER, .status.s-REVIEW { background: var(--mid-bg); color: var(--mid); }
 .status.s-REJECTED { background: var(--low-bg); color: var(--low); }
-.batch-result { margin: 0 0 0.6rem; padding: 0.5rem 0.75rem; border-radius: 8px; background: var(--accent-soft); }
+.batch { display: flex; flex-direction: column; gap: 0.5rem; margin: 0 0 0.8rem; padding: 0.75rem 0.9rem; border-radius: 10px; background: var(--accent-soft); }
+.batch-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.3rem 1rem; }
+.batch-steps li { display: flex; align-items: center; gap: 0.4rem; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.batch-steps li.b-sending { color: var(--accent); font-weight: 650; }
+.batch-steps li.b-sent { color: var(--good); }
+.batch-steps li.b-failed { color: var(--low); }
+.batch-error { margin: 0 0 0.6rem; color: var(--low); }
 .status.s-NOANSWER { background: var(--low-bg); color: var(--muted); }
 .status.s-FOLLOWED { background: rgb(168 85 247 / 0.14); color: #a855f7; }
 .acts { display: inline-flex; align-items: center; gap: 0.25rem; }

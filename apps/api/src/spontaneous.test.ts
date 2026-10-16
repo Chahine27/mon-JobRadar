@@ -91,7 +91,7 @@ describe("candidature spontanée", () => {
 
     // Relance groupée : plus rien à relancer (déjà relancée), aucun envoi de plus.
     const batch = (await req("POST", "/api/applications/follow-up/batch", { limit: 10 })).json();
-    expect(batch).toMatchObject({ sent: 0, failed: [], remaining: 0 });
+    expect(batch).toMatchObject({ running: false, total: 0 });
     expect(sentMails).toHaveLength(3);
 
     // Renvoyé vers leur site : « J'ai postulé sur leur site », puis annuler.
@@ -147,10 +147,19 @@ describe("relance groupée des spontanées", () => {
       await stores.applications.save(recent.id, { inputHash: "", model: "manuel", letter: "Lettre récente" });
       await stores.applications.markSent(recent.id, "rh-recent@exemple.fr", new Date(Date.now() - 2 * day), "<recent@test>");
     }
-    const r = (await req("POST", "/api/applications/follow-up/batch", { limit: 10 })).json();
-    expect(r).toMatchObject({ sent: 2, failed: [], remaining: 0 });
+    const run = async () => {
+      let r = (await req("POST", "/api/applications/follow-up/batch", { limit: 10 })).json();
+      for (let i = 0; r.running && i < 200; i++) {
+        await new Promise((ok) => setTimeout(ok, 20));
+        r = (await req("GET", "/api/applications/follow-up/batch")).json();
+      }
+      return r;
+    };
+    const r = await run();
+    expect(r).toMatchObject({ total: 2, done: 2, remaining: 0 });
+    expect(r.steps.map((s: { status: string }) => s.status)).toEqual(["sent", "sent"]);
     expect(sentMails.map((m) => [m.to, m.inReplyTo])).toEqual([["rh0@exemple.fr", "<premier-0@test>"], ["rh1@exemple.fr", "<premier-1@test>"]]);
     expect(sentMails[0]!.subject.startsWith("Re: Candidature spontanée")).toBe(true);
-    expect((await req("POST", "/api/applications/follow-up/batch", { limit: 10 })).json()).toMatchObject({ sent: 0, remaining: 0 });
+    expect(await run()).toMatchObject({ total: 0, done: 0 });
   });
 });

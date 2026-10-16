@@ -51,6 +51,15 @@ export type JobQuery = {
   offset?: number;
 };
 
+/** Relance groupée en cours : une étape par entreprise. */
+export type FollowUpBatch = {
+  running: boolean;
+  total: number;
+  done: number;
+  remaining: number;
+  steps: Array<{ leadId: string; name: string; status: "waiting" | "sending" | "sent" | "failed"; message: string | null }>;
+};
+
 export const api = {
   login: (email: string, password: string) =>
     request<{ user: { email: string } }>("POST", "/api/auth/login", { email, password }),
@@ -137,8 +146,8 @@ export const api = {
     request<{ to: string; subject: string; message: string; followedUpAt: string | null }>("GET", `/api/leads/${encodeURIComponent(leadId)}/application/follow-up`),
   sendFollowUp: (leadId: string, mail: { subject: string; message: string }) =>
     request<{ ok: true; followedUpAt: string }>("POST", `/api/leads/${encodeURIComponent(leadId)}/application/follow-up`, mail),
-  followUpBatch: (limit = 10) =>
-    request<{ sent: number; failed: Array<{ leadId: string; message?: string }>; remaining: number }>("POST", "/api/applications/follow-up/batch", { limit }),
+  followUpBatch: (limit = 10) => request<FollowUpBatch>("POST", "/api/applications/follow-up/batch", { limit }),
+  followUpBatchStatus: () => request<FollowUpBatch>("GET", "/api/applications/follow-up/batch"),
   confirmApplicationMail: (id: string) => request<ApplicationMail>("POST", `/api/applications/mails/${encodeURIComponent(id)}/confirm`),
   listManualJobs: () => request<{ items: JobSummary[] }>("GET", "/api/jobs/manual"),
   addManualJob: (form: ManualJobForm) =>

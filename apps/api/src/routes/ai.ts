@@ -647,22 +647,45 @@ export async function aiRoutes(
   }
 
   /**
-   * Relance groupée (bouton « Relancer les 10 plus anciennes ») : message écrit par le code, une à la fois, avec une
-   * pause entre deux envois (Gmail se méfie des rafales). S'arrête à la première erreur de configuration.
+   * Relance groupée (bouton « Relancer les 10 plus anciennes ») : en arrière-plan, une à la fois, avec une pause entre
+   * deux envois (Gmail se méfie des rafales) ; la page suit l'avancement (GET). S'arrête sur une erreur de configuration.
    */
+  type FollowStep = { leadId: string; name: string; status: "waiting" | "sending" | "sent" | "failed"; message: string | null };
+  const followBatch = { running: false, total: 0, done: 0, remaining: 0, steps: [] as FollowStep[] };
   const BatchFollowUpBody = z.object({ limit: z.number().int().min(1).max(20).default(10) });
-  app.post("/api/applications/follow-up/batch", { config: { rateLimit: { max: 3, timeWindow: "1 minute" } } }, async (request, reply) => {
+
+  app.get("/api/applications/follow-up/batch", async () => followBatch);
+
+  app.post("/api/applications/follow-up/batch", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (request, reply) => {
     const body = BatchFollowUpBody.safeParse(request.body ?? {});
     if (!body.success) return reply.code(400).send({ error: "INVALID_BODY" });
+    if (followBatch.running) return followBatch;
+    const userId = request.userId!;
     const queue = (await followUpQueue()).slice(0, body.data.limit);
-    const results: Array<{ leadId: string; ok: boolean; message?: string }> = [];
-    for (const [i, s] of queue.entries()) {
-      if (i > 0 && opts.followUpPauseMs !== 0) await new Promise((r) => setTimeout(r, opts.followUpPauseMs ?? 4_000));
-      const r = await sendFollowUp(request.userId!, s.leadId);
-      results.push("error" in r ? { leadId: s.leadId, ok: false, message: r.message } : { leadId: s.leadId, ok: true });
-      if ("error" in r && ["MAIL_NOT_CONFIGURED", "CV_PDF_MISSING"].includes(r.error)) break;
-    }
-    return { sent: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok), remaining: (await followUpQueue()).length };
+    const leads = new Map((await stores.leads.list()).map((l) => [l.id, l.name]));
+    Object.assign(followBatch, {
+      running: queue.length > 0,
+      total: queue.length,
+      done: 0,
+      steps: queue.map((s): FollowStep => ({ leadId: s.leadId, name: leads.get(s.leadId) ?? "?", status: "waiting", message: null })),
+    });
+    void (async () => {
+      try {
+        for (const [i, step] of followBatch.steps.entries()) {
+          if (i > 0 && opts.followUpPauseMs !== 0) await new Promise((r) => setTimeout(r, opts.followUpPauseMs ?? 4_000));
+          step.status = "sending";
+          const r = await sendFollowUp(userId, step.leadId);
+          step.status = "error" in r ? "failed" : "sent";
+          step.message = "error" in r ? r.message : null;
+          followBatch.done++;
+          if ("error" in r && ["MAIL_NOT_CONFIGURED", "CV_PDF_MISSING"].includes(r.error)) break;
+        }
+      } finally {
+        followBatch.remaining = (await followUpQueue().catch(() => [])).length;
+        followBatch.running = false;
+      }
+    })();
+    return followBatch;
   });
 
   // ───── Préparation en lot : l'IA écrit les lettres des entreprises « À contacter » qui ont un email ; l'envoi reste un clic ─────
