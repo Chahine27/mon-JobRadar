@@ -185,9 +185,19 @@ const CAREER =
   /(retrouver|consulter|voir|postuler|candidater|deposer|disponibles?).{0,80}(offres|sur (le|notre) site|carrieres?|jobs|recrutement|careers?)|(apply|applications?).{0,40}(website|careers? (page|site)|portal)/;
 
 /** Réponse qui renvoie vers le site carrière (« retrouvez nos offres sur … ») : le lien, ou null. */
+/**
+ * Seulement la réponse : le message d'origine cité en dessous (ta candidature, ta relance) est retiré. Sinon « je serais
+ * heureux d'en discuter », écrit par toi, se lit comme une invitation à un entretien.
+ */
+export function replyOnly(text: string): string {
+  const cut = text.search(
+    /\n[ \t]*_{5,}\s*\n|-{3,}\s*(?:message d'origine|original message|message transf[ée]r[ée]|forwarded message)|\n[ \t]*(?:de|from)\s*:.{0,200}\n[ \t]*(?:envoy[ée]|sent|date)\s*:|\nle .{5,120} a [ée]crit\s*:|\non .{5,120} wrote:|\n>/i,
+  );
+  return (cut > 0 ? text.slice(0, cut) : text).trim();
+}
+
 export function careerSiteUrl(mail: Pick<InboxMail, "text">): string | null {
-  // Seulement la réponse, pas le message d'origine cité en dessous.
-  const reply = mail.text.split(/-{3,}\s*(?:message d'origine|original message)|\nle .{5,80} a [ée]crit\s*:|\non .{5,80} wrote:/i)[0]!.slice(0, 3000);
+  const reply = replyOnly(mail.text).slice(0, 3000);
   if (!CAREER.test(plain(reply))) return null;
   return reply.match(/https?:\/\/[^\s<>")\]]+/)?.[0]?.replace(/[.,;]+$/, "") ?? null;
 }
@@ -457,7 +467,7 @@ export async function trackApplicationMails(opts: {
     log(`Candidature spontanée à refaire (${s.lead.name}) : ${p.detail}`);
   }
 
-  for (const mail of mails.sort((a, b) => a.date.getTime() - b.date.getTime())) {
+  for (let mail of mails.sort((a, b) => a.date.getTime() - b.date.getTime())) {
     if (known.has(mail.messageId)) continue;
     // Rejet du serveur (adresse introuvable, ou n'accepte pas les mails extérieurs).
     const pending = sent.filter((x) => x.sentTo && x.sentAt && mail.date.getTime() >= x.sentAt.getTime() - 3_600_000);
@@ -469,11 +479,15 @@ export async function trackApplicationMails(opts: {
       continue;
     }
     if (isNoise(mail, self)) continue;
+    // Le mail entier sert à retrouver la candidature (le message cité dessous la nomme souvent) ;
+    // tout ce qui suit lit la réponse seule, sans ce message d'origine.
     const candidates = candidateApplications(mail, apps);
     if (!candidates.length) continue;
+    const full = mail;
+    mail = { ...mail, text: replyOnly(mail.text) };
     // Message d'absence : pas une réponse, pas besoin de l'IA. La relance attendra le retour.
     const away = outOfOffice(mail, self);
-    const awayApp = away ? (candidates.length === 1 ? candidates[0]! : matchApplication(mail, apps)) : null;
+    const awayApp = away ? (candidates.length === 1 ? candidates[0]! : matchApplication(full, apps)) : null;
     if (away && awayApp) {
       const when = away.back.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
       await prisma.applicationMail.create({
@@ -509,7 +523,7 @@ export async function trackApplicationMails(opts: {
         const thread = candidates.length === 1 && candidates[0]!.kind === "spontaneous" ? candidates[0]! : null;
         // Vraie réponse (refus, accusé…) sans candidature choisie : l'IA hésite entre plusieurs postes de la même
         // entreprise. La plus probable d'après l'entreprise, à vérifier par toi.
-        const unsure = r.index === null && r.verdict ? matchApplication(mail, apps) : null;
+        const unsure = r.index === null && r.verdict ? matchApplication(full, apps) : null;
         app = r.index !== null ? candidates[r.index]! : (unsure ?? thread);
         verdict = r.index !== null || unsure ? r.verdict : null;
         summary = r.summary || null;
@@ -521,7 +535,7 @@ export async function trackApplicationMails(opts: {
     if (!answered) {
       // Rattachement par l'entreprise seulement (pas par l'expéditeur : outil partagé), et règles.
       // Un mail ambigu (accusé + mot « entretien ») est pris pour un accusé.
-      app = matchApplication(mail, apps);
+      app = matchApplication(full, apps);
       if (!app) continue;
       const byRules = classifyMail(mail.subject, mail.text);
       verdict = byRules === "AMBIGUOUS" ? { kind: "ACK", detail: null } : byRules;

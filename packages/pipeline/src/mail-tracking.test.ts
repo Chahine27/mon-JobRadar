@@ -7,6 +7,7 @@ import {
   careerSiteUrl,
   classifyMail,
   outOfOffice,
+  replyOnly,
   isHelpdeskReply,
   isNoise,
   matchApplication,
@@ -250,5 +251,19 @@ describe("message d'absence", () => {
   it("accusé de réception ou refus : pas une absence", () => {
     expect(away("Nous avons bien reçu votre candidature et reviendrons vers vous.")).toBeNull();
     expect(away("Malheureusement, nous ne donnerons pas suite.")).toBeNull();
+  });
+});
+
+describe("réponse seule (message d'origine cité retiré)", () => {
+  it("Outlook, Gmail et « > » : seule la réponse reste", () => {
+    const outlook = "Malheureusement, tous nos postes sont pourvus.\n\nBien cordialement\n\n\n________________________________\nDe : Chahine MEHADJI <c@gmail.com>\nEnvoyé : vendredi 16 octobre 2026 16:18\n\nje serais heureux d'en discuter avec vous";
+    expect(replyOnly(outlook)).toBe("Malheureusement, tous nos postes sont pourvus.\n\nBien cordialement");
+    expect(replyOnly("Merci, bien reçu.\n\nLe ven. 16 oct. 2026 à 16:18, Chahine <c@gmail.com> a écrit :\n> votre disponibilité ?")).toBe("Merci, bien reçu.");
+    expect(replyOnly("Bonjour,\nPas de poste.\n> Je serais heureux d'échanger")).toBe("Bonjour,\nPas de poste.");
+    expect(replyOnly("Texte sans citation.")).toBe("Texte sans citation.");
+  });
+  it("le refus de MIW n'est plus lu comme une invitation (règles)", () => {
+    const text = "Bonjour,\n\nMalheureusement, nous ne sommes pas en mesure de donner une suite favorable à votre candidature, tous nos postes étant pourvus.\n\n________________________________\nDe : Chahine MEHADJI\nEnvoyé : vendredi 16 octobre 2026 16:18\n\nJe serais heureux d'en discuter avec vous quand cela vous convient, vos disponibilités.";
+    expect(classifyMail("RE: Candidature spontanée", replyOnly(text))).toEqual({ kind: "REJECTION", detail: null });
   });
 });
