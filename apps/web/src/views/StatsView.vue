@@ -342,9 +342,20 @@ td :deep(.source-logo) {
   }
 }
 @media (max-width: 700px) {
-  .figures,
   .board {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* Chiffres clés en 2 × 2. */
+  .figures {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.7rem 0.9rem;
+  }
+  .figures strong {
+    font-size: 1.25rem;
+  }
+  .figures .small {
+    font-size: 0.75rem;
+    line-height: 1.3;
   }
 }
 </style>

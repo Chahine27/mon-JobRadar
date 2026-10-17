@@ -700,7 +700,6 @@ const manualUrl = (j: JobSummary) => j.sources.find((s) => s.source === "manual"
 .form input, .form select, .form textarea { width: 100%; }
 .form textarea { resize: vertical; min-height: 12rem; line-height: 1.5; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem; }
-@media (max-width: 600px) { .two { grid-template-columns: 1fr; } }
 .req { color: var(--low); }
 .opt { color: var(--muted); font-weight: 400; font-size: 0.78rem; margin-left: 0.25rem; }
 .auto-toggle { font-size: 0.85rem; }
@@ -747,4 +746,13 @@ const manualUrl = (j: JobSummary) => j.sources.find((s) => s.source === "manual"
 .items .title:hover { color: var(--accent); text-decoration: none; }
 .del { color: var(--muted); }
 .del:hover:not(:disabled) { color: var(--low); background: var(--low-bg); border-color: transparent; }
+/* Téléphone (en fin de fichier pour passer après les règles de base). */
+@media (max-width: 600px) {
+  .two { gap: 0.6rem; }
+  .paste textarea { min-height: 9rem; }
+  .items li { gap: 0.55rem; padding: 0.5rem 0; }
+  .items :deep(.ring) { --size: 38px; }
+  .items :deep(.ring)::before { inset: 4px; }
+  .items .body { gap: 0.1rem; }
+}
 </style>

@@ -22,6 +22,14 @@ const freeDepts = computed(() => {
   const taken = new Set([...(profile.value?.locations.map((l) => l.department) ?? []), ...(profile.value?.extraDepartments ?? [])]);
   return DEPT_OPTIONS.filter((d) => !taken.has(d.code));
 });
+/** Téléphone : sections repliées sur leur titre ; un appui sur le titre l'ouvre ou la replie. */
+function toggleSection(e: MouseEvent) {
+  if (!window.matchMedia("(max-width: 600px)").matches) return;
+  const h2 = (e.target as HTMLElement).closest("h2");
+  const section = h2?.closest("section.card");
+  if (h2 && section?.querySelector("h2") === h2) section.classList.toggle("unfolded");
+}
+
 function addDept() {
   if (!profile.value || !deptToAdd.value) return;
   profile.value.extraDepartments = [...(profile.value.extraDepartments ?? []), deptToAdd.value].sort();
@@ -141,7 +149,7 @@ async function save() {
 
 <template>
   <div v-if="!profile" class="stack"><div class="skeleton" /><div class="skeleton" /></div>
-  <form v-else class="stack" @submit.prevent="save">
+  <form v-else class="stack fold" @submit.prevent="save" @click="toggleSection">
     <div class="sticky-head">
       <PageHeader title="Profil" subtitle="Ces réglages décident du score de chaque offre.">
         <template #actions>
@@ -365,7 +373,7 @@ async function save() {
       </ul>
     </section>
   </form>
-  <div v-if="profile" style="margin-top: 1rem">
+  <div v-if="profile" class="fold" style="margin-top: 1rem" @click="toggleSection">
     <NotificationSettingsCard />
   </div>
 </template>

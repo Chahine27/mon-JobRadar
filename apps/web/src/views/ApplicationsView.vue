@@ -455,7 +455,7 @@ button.link { display: inline-flex; align-items: center; gap: 0.2rem; color: var
   .kpi { padding: 0.5rem 0.55rem; }
   .kpi-icon, .kpi > .icon { display: none; }
   .kpi-body strong { font-size: 1.3rem; }
-  .kpi-body .small { font-size: 0.7rem; line-height: 1.25; }
+  .kpi-body .small { font-size: 0.75rem; line-height: 1.25; }
   .kpi-body .small:last-child { display: none; }
   .panel { padding: 0.75rem 0.85rem; margin-bottom: 0.6rem; }
 }
@@ -466,5 +466,10 @@ button.link { display: inline-flex; align-items: center; gap: 0.2rem; color: var
   .tr > :nth-child(2) { grid-column: 1 / -1; order: 3; }
   .tr > :nth-child(3) { order: 4; }
   .tr > :nth-child(4) { order: 5; text-align: right; }
+}
+@media (max-width: 600px) {
+  .tr { gap: 0.35rem 0.6rem; padding: 0.55rem 0.2rem; }
+  .tr > :nth-child(4) { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 0 0.4rem; }
+  .avatar { width: 1.8rem; height: 1.8rem; font-size: 0.85rem; }
 }
 </style>

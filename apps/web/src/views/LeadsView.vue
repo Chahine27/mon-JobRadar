@@ -388,5 +388,19 @@ const searchUrl = (l: Lead) =>
 .finder-head p { margin: 0.25rem 0 0; max-width: 46rem; }
 .finder textarea { width: 100%; font-family: ui-monospace, monospace; font-size: 0.82rem; }
 .more { display: flex; justify-content: center; padding: 0.5rem 0 1rem; }
-@media (max-width: 600px) { .lead { gap: 0.8rem; } .edit, .apply { grid-template-columns: 1fr; } .top { flex-direction: column; } }
+/* Téléphone : contenu sur toute la largeur, petit anneau à droite du nom. */
+@media (max-width: 600px) {
+  .lead { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.4rem 0.6rem; }
+  .body { display: contents; }
+  .body > * { grid-column: 1 / -1; }
+  .body > .top { grid-column: 1; grid-row: 1; flex-direction: column; gap: 0.25rem; }
+  .lead > :deep(.ring) { grid-column: 2; grid-row: 1; --size: 44px; }
+  .lead > :deep(.ring)::before { inset: 4px; }
+  .lead > :deep(.ring) small { display: none; }
+  .meta { gap: 0.15rem 0.8rem; }
+  .links { gap: 0.3rem 0.9rem; }
+  .edit { grid-template-columns: 8.5rem minmax(0, 1fr); gap: 0.4rem; }
+  .apply { grid-template-columns: 1fr; gap: 0.4rem; }
+  .toolbar { gap: 0.5rem 0.8rem; padding: 0.6rem; }
+}
 </style>

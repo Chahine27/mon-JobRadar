@@ -210,5 +210,17 @@ const addCompany = () =>
 .companies li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; padding: 0.55rem 0; border-top: 1px solid var(--border); }
 .companies li:first-child { border-top: none; }
 .companies li .chip { margin-left: auto; }
-@media (max-width: 600px) { .sources { grid-template-columns: 1fr; } .add { grid-template-columns: 1fr; } }
+@media (max-width: 600px) {
+  .sources { grid-template-columns: 1fr; gap: 0.6rem; }
+  .add { grid-template-columns: 1fr; }
+  /* En-tête : logo, nom et état sur une ligne ; l'aide en dessous, sur toute la largeur. */
+  .src-head { align-items: center; gap: 0.3rem 0.6rem; }
+  .src-head > div { display: contents; }
+  .src-head .muted.small { grid-column: 1 / -1; grid-row: 2; }
+  .src-head > .chip { grid-column: 3; grid-row: 1; }
+  .settings input[type="number"] { width: 4.5rem !important; }
+  .src-head :deep(.source-logo), .src-icon { width: 28px !important; height: 28px !important; }
+  .settings { gap: 0.4rem 0.8rem; padding: 0.5rem 0.65rem; }
+  .careers { padding-top: 0.6rem; }
+}
 </style>

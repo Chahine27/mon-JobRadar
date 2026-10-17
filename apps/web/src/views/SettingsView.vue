@@ -158,5 +158,12 @@ const shortError = (e: string) => (e.length > 220 ? `${e.slice(0, 220)}…` : e)
 .cap { display: flex; gap: 0.8rem; align-items: end; flex-wrap: wrap; }
 .err { color: var(--low); overflow-wrap: anywhere; }
 .src-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); }
-@media (max-width: 600px) { .rows li { grid-template-columns: auto 1fr; } }
+/* Téléphone : logo | nom + état | bouton, sur deux lignes au plus. */
+@media (max-width: 600px) {
+  .rows li { grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.25rem 0.6rem; padding: 0.55rem 0; }
+  .rows li > :first-child { grid-row: 1 / span 2; }
+  .rows .info { padding: 0; background: none; }
+  .rows .chip { grid-column: 2; grid-row: 2; justify-self: start; }
+  .rows button { grid-column: 3; grid-row: 1 / span 2; }
+}
 </style>

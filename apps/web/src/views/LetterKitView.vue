@@ -179,4 +179,6 @@ textarea { font-weight: 400; color: var(--text); line-height: 1.5; }
 .hint { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; font-weight: 400; font-size: 0.8rem; color: var(--muted); }
 .hint .num { margin-left: auto; }
 .hint .num.bad { color: var(--low); }
+/* Téléphone : grands textes repliés à 10 lignes (ils défilent dedans). */
+@media (max-width: 600px) { textarea { max-height: 15rem; font-size: 15px; } }
 </style>

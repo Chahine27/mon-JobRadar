@@ -588,7 +588,6 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
   .job :deep(.ring)::before { inset: 4px; }
   .title { font-size: 0.95rem; line-height: 1.3; }
   .company { font-size: 0.8rem; gap: 0.1rem 0.8rem; }
-  .job .chip { font-size: 0.72rem; padding: 0.08rem 0.45rem; }
   .job .row { gap: 0.3rem; }
   .skills .chip.missing { display: none; }
   .origin :deep(.source-logo) { width: 20px !important; height: 20px !important; }

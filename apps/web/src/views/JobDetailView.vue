@@ -516,5 +516,22 @@ const ruleLabel = (r: ScoreRule) =>
 .complete textarea { width: 100%; }
 button.link { background: none; border: 0; padding: 0; min-height: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
 @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } .side { position: static; } }
-@media (max-width: 600px) { .hero { flex-direction: column-reverse; align-items: flex-start; } .hero-side { flex-direction: row; } }
+/* Téléphone : score à droite du titre, actions en grille de 2. */
+@media (max-width: 600px) {
+  .back { margin-bottom: 0.5rem; }
+  .hero { display: block; position: relative; padding: 0.85rem; }
+  .hero > .stack > :first-child, .hero h1 { padding-right: 4.6rem; }
+  .hero h1 { font-size: 1.2rem; }
+  .hero-side { position: absolute; top: 0.85rem; right: 0.85rem; flex-direction: row; align-items: flex-start; gap: 0; }
+  .hero-side :deep(.ring) { --size: 60px; }
+  .hero-side :deep(.ring)::before { inset: 5px; }
+  /* « Modifier les infos » réduit à son crayon, collé à l'anneau. */
+  .hero-side button { position: absolute; top: 3.4rem; right: -0.35rem; font-size: 0; gap: 0; padding: 0.3rem; min-height: 0; }
+  .company { font-size: 0.88rem; gap: 0.2rem 0.9rem; }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; padding: 0.6rem; }
+  .actions .btn.primary { grid-column: 1 / -1; }
+  .actions .sep { display: none; }
+  .actions button { font-size: 0.84rem; padding: 0.35rem 0.5rem; line-height: 1.2; }
+  .description { font-size: 0.92rem; line-height: 1.55; }
+}
 </style>

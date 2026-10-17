@@ -208,7 +208,7 @@ code { background: var(--surface-2); padding: 0.05rem 0.35rem; border-radius: 5p
   button.small, .btn.small { min-height: 34px; }
   .nav-link { min-height: 44px; }
   .chip button { min-height: 0; }
-  .icon-btn { width: 44px; height: 44px; }
+  .icon-btn { width: 36px; height: 36px; min-height: 36px; }
   select, textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { font-size: 16px; }
 }
 
@@ -218,7 +218,8 @@ code { background: var(--surface-2); padding: 0.05rem 0.35rem; border-radius: 5p
   h2 { font-size: 0.95rem; margin-bottom: 0.5rem; }
   .page { padding-top: 0.75rem; }
   .page-head { gap: 0.5rem; margin-bottom: 0.75rem; align-items: center; }
-  .page-head .subtitle { font-size: 0.8rem; }
+  /* Texte d'aide sous le titre : 3 lignes au plus. */
+  .page-head .subtitle { font-size: 0.8rem; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
   .page-head .actions { align-items: flex-start; }
   .page-head .actions button, .page-head .actions .btn { min-height: 34px; padding: 0.3rem 0.75rem; font-size: 0.85rem; }
   .card { padding: 0.75rem 0.85rem; border-radius: 12px; }
@@ -227,6 +228,20 @@ code { background: var(--surface-2); padding: 0.05rem 0.35rem; border-radius: 5p
   .tabs { flex-wrap: nowrap; }
   .tabs button { padding: 0.2rem 0.65rem; min-height: 30px; }
   .empty { padding: 1.5rem 1rem; }
+  .row { gap: 0.35rem; }
+  .spread { gap: 0.5rem; }
+  .chip { font-size: 0.75rem; padding: 0.1rem 0.5rem; }
+  .alert, .info, .success { padding: 0.55rem 0.7rem; font-size: 0.85rem; }
+  ul.clean { gap: 0.35rem; }
+}
+
+/* Pages de réglages (classe .fold) : sur téléphone, sections repliées sur leur titre. */
+@media (max-width: 600px) {
+  .fold section.card:not(.unfolded) > :not(:first-child), .fold section.card:not(.unfolded) .hint { display: none; }
+  .fold section.card:not(.unfolded) { padding-block: 0.6rem; }
+  .fold section.card h2 { cursor: pointer; margin: 0; flex: 1; }
+  .fold section.card h2::after { content: "+"; margin-left: auto; color: var(--muted); font-size: 1.25rem; font-weight: 400; line-height: 1; }
+  .fold section.card.unfolded h2::after { content: "−"; }
 }
 
 /* ───────────── En-tête de page ───────────── */
