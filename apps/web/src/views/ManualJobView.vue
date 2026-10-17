@@ -149,6 +149,7 @@ type Hints = Partial<Record<"title" | "company" | "location" | "contractType" | 
 /** Ce que la page de l'offre disait clairement (titre, entreprise…) : prioritaire sur la lecture du texte. */
 const pageHints = ref<Hints>({});
 const importedFrom = ref<string | null>(null);
+const importVia = ref<"extension" | "lien">("extension");
 
 function sanitizeHints(h: unknown): Hints {
   if (!h || typeof h !== "object") return {};
@@ -287,17 +288,46 @@ async function autoPipeline(hints: { title?: string | null; company?: string | n
   }
 }
 
+type ImportPayload = { url?: unknown; text?: unknown; source?: unknown; hints?: unknown };
+
 /** Lit l'offre déposée dans la page par l'extension (élément #jobradar-import), une seule fois. */
 async function consumeImport() {
   const el = document.getElementById("jobradar-import");
   if (!el) return;
   el.remove();
-  let p: { url?: unknown; text?: unknown; source?: unknown; hints?: unknown };
+  let p: ImportPayload;
   try {
     p = JSON.parse(el.textContent ?? "");
   } catch {
     return;
   }
+  importVia.value = "extension";
+  await importPayload(p);
+}
+
+/** Lien collé : le serveur lit la page de l'offre, puis même suite que l'extension. */
+const linkUrl = ref("");
+const readingLink = ref(false);
+const linkError = ref<string | null>(null);
+async function readLink() {
+  const url = linkUrl.value.trim();
+  if (!url || readingLink.value) return;
+  readingLink.value = true;
+  linkError.value = null;
+  try {
+    const p = await api.readJobUrl(url);
+    importVia.value = "lien";
+    linkUrl.value = "";
+    await importPayload(p);
+  } catch (e) {
+    linkError.value = errorMessage(e, "Lecture du lien impossible.");
+  } finally {
+    readingLink.value = false;
+  }
+}
+
+/** Offre lue sur sa page (extension ou lien) : ouvre celle déjà en base, sinon remplit le formulaire et la fait lire par l'IA. */
+async function importPayload(p: ImportPayload) {
   const text = typeof p.text === "string" ? p.text.slice(0, 30_000) : "";
   if (!text.trim()) return;
   const url = typeof p.url === "string" && /^https?:\/\//i.test(p.url) ? p.url.slice(0, 2000) : "";
@@ -485,11 +515,11 @@ const manualUrl = (j: JobSummary) => j.sources.find((s) => s.source === "manual"
 <template>
   <PageHeader
     title="Ajouter une offre"
-    subtitle="Une annonce vue sur LinkedIn, Indeed ou ailleurs ? Colle-la ici : elle reçoit un score comme les autres et elle est gardée dans « Sauvegardées »."
+    subtitle="Une annonce vue sur LinkedIn, Indeed ou ailleurs ? Colle son lien (ou son texte) : elle reçoit un score comme les autres et elle est gardée dans « Sauvegardées »."
   >
     <template #actions>
-      <label class="inline auto-toggle" title="Offres envoyées par l'extension : lues, ajoutées et analysées par l'IA sans passer par le formulaire">
-        <input v-model="autoMode" type="checkbox" /> Ajout automatique depuis l'extension
+      <label class="inline auto-toggle" title="Offres lues depuis un lien ou envoyées par l'extension : ajoutées et analysées par l'IA sans passer par le formulaire">
+        <input v-model="autoMode" type="checkbox" /> Ajout automatique (lien ou extension)
       </label>
     </template>
   </PageHeader>
@@ -535,13 +565,31 @@ const manualUrl = (j: JobSummary) => j.sources.find((s) => s.source === "manual"
       </div>
       <p v-if="importedFrom && !result" class="info imported" role="status">
         <Icon name="check" :size="16" />
-        <span>Offre reçue depuis <strong>{{ importedFrom }}</strong> grâce à l'extension. Vérifie les champs, puis clique sur « Ajouter l'offre ».</span>
+        <span>Offre reçue depuis <strong>{{ importedFrom }}</strong> {{ importVia === "lien" ? "en lisant le lien" : "grâce à l'extension" }}. Vérifie les champs, puis clique sur « Ajouter l'offre ».</span>
       </p>
       <p v-if="failure" class="alert" role="alert"><Icon name="alert" :size="16" />{{ failure }}</p>
 
-      <!-- 1. Coller -->
+      <!-- 1. Lien de l'offre (lu par le serveur), ou texte collé -->
+      <div class="from-url">
+        <span class="step"><b>1</b> Colle le lien de l'offre</span>
+        <div class="url-row">
+          <input
+            v-model="linkUrl"
+            type="url"
+            inputmode="url"
+            placeholder="https://… LinkedIn, HelloWork, France Travail, page carrières…"
+            aria-label="Lien de l'offre"
+            @keydown.enter.prevent="readLink"
+          />
+          <button type="button" class="primary" :disabled="readingLink || !linkUrl.trim()" @click="readLink">
+            <Icon :name="readingLink ? 'refresh' : 'globe'" :size="16" :class="{ spin: readingLink }" />{{ readingLink ? "Lecture…" : "Lire l'offre" }}
+          </button>
+        </div>
+        <p v-if="linkError" class="alert small" role="alert"><Icon name="alert" :size="15" />{{ linkError }}</p>
+      </div>
+
       <label class="paste">
-        <span class="step"><b>1</b> Colle toute l'annonce <span class="req">*</span></span>
+        <span class="step"><span class="or">ou</span> colle toute l'annonce <span class="req">*</span></span>
         <textarea
           v-model="form.description"
           rows="10"
@@ -728,6 +776,9 @@ const manualUrl = (j: JobSummary) => j.sources.find((s) => s.source === "manual"
   background: var(--accent); color: var(--accent-contrast); font-size: 0.8rem;
 }
 .paste textarea { min-height: 14rem; }
+.from-url { display: grid; gap: 0.5rem; }
+.url-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; }
+.or { font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .analysis { display: grid; gap: 0.45rem; padding: 0.8rem 0.95rem; border-radius: var(--radius-sm); background: var(--accent-soft); font-size: 0.9rem; }
 .analysis p { margin: 0; }
 .analysis strong { display: inline-flex; align-items: center; gap: 0.3rem; }

@@ -27,7 +27,8 @@ export function htmlToText(html) {
       .replace(/&gt;/g, ">")
       .replace(/&quot;/g, '"')
       .replace(/&#39;|&#039;|&apos;/g, "'")
-      .replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(Number(n))),
+      .replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n)))
+      .replace(/&#x([0-9a-f]+);/gi, (_m, n) => String.fromCodePoint(parseInt(n, 16))),
   );
 }
 

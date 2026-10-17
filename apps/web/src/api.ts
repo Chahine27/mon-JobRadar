@@ -192,6 +192,9 @@ export const api = {
     request<LetterState>("PUT", `/api/jobs/${encodeURIComponent(id)}/letter`, { content }),
   findAbridged: (page: { url?: string; title?: string; company?: string }) =>
     request<{ job: { id: string; title: string; company: string | null; sources: string[] } | null }>("POST", "/api/jobs/find-abridged", page),
+  /** Le serveur télécharge la page de l'offre et renvoie le même paquet que l'extension. */
+  readJobUrl: (url: string) =>
+    request<{ url: string; source: string | null; text: string; hints: Record<string, unknown> }>("POST", "/api/jobs/manual/from-url", { url }),
   findByUrl: (url: string) =>
     request<{ job: { id: string; title: string; company: string | null; descriptionLength: number } | null }>("POST", "/api/jobs/find-by-url", { url }),
   completeJob: (

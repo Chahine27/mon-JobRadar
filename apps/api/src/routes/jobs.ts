@@ -3,6 +3,7 @@ import { JOB_STATUSES, MANUAL_CONTRACTS, ManualJobSchema } from "@job-radar/shar
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireAuth } from "../auth";
+import { UrlReadError, readJobFromUrl } from "../job-from-url";
 import type { JobService } from "../jobs/service";
 import { skillStats } from "../jobs/stats";
 import type { Stores } from "../stores";
@@ -88,6 +89,18 @@ export async function jobRoutes(
     const body = z.object({ text: z.string().max(30_000) }).safeParse(request.body);
     if (!body.success) return reply.code(400).send({ error: "INVALID_TEXT" });
     return analyzeJobText(body.data.text);
+  });
+
+  // Lien d'une offre : le serveur lit la page et renvoie le même paquet que l'extension (rien n'est enregistré).
+  app.post("/api/jobs/manual/from-url", { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const body = z.object({ url: z.string().trim().min(8).max(2000) }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "INVALID_URL", message: "Colle le lien complet de l'offre (https://…)." });
+    try {
+      return await readJobFromUrl(body.data.url);
+    } catch (e) {
+      if (e instanceof UrlReadError) return reply.code(422).send({ error: "URL_UNREADABLE", message: e.message });
+      throw e;
+    }
   });
 
   app.post("/api/jobs/manual", async (request, reply) => {
