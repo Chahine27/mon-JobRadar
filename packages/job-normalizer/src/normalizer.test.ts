@@ -82,6 +82,10 @@ describe("normalize (France Travail)", () => {
     expect(m.experienceMinYrs).toBe(0);
     const e = normalize(raw({ ...FT_SAMPLE_OFFER, experienceLibelle: "Expérience exigée de 5 An(s)" }))!;
     expect(e.experienceMinYrs).toBe(5);
+    // Champ laissé à « Débutant accepté » mais texte exigeant 7 ans : le texte l'emporte.
+    const t = normalize(raw({ ...FT_SAMPLE_OFFER, experienceExige: "D", experienceLibelle: "Débutant accepté", description: "Vous justifiez de plus de 7 ans d'expérience en développement." }))!;
+    expect(t.experienceMinYrs).toBe(7);
+    expect(t.experienceText).toBe("7 ans minimum");
     expect(normalize(raw({ ...FT_SAMPLE_OFFER, alternance: true }))!.contractType).toBe("ALTERNANCE");
     expect(normalize(raw({ ...FT_SAMPLE_OFFER, typeContrat: "MIS" }))!.contractType).toBe("INTERIM");
     const paris = normalize(raw({ ...FT_SAMPLE_OFFER, lieuTravail: { libelle: "75 - PARIS 09", codePostal: "75009" } }))!;

@@ -14,7 +14,7 @@ export function detectSeniority(title: string): Seniority | null {
     " ",
   );
   if (/\b(stage|stagiaire|intern(ship)?)\b/.test(t)) return "intern";
-  if (/\b(lead|tech ?lead|principal|staff|head of|architecte|manager)\b/.test(t)) return "lead";
+  if (/\b(lead|tech ?lead|principal|staff|head of|architecte?|manager)\b/.test(t)) return "lead";
   if (/\b(senior|sr\.?|confirme|confirmed|expert|experimente|experienced)\b/.test(t)) return "senior";
   if (/\b(junior|jr\.?|debutant|jeune diplome)\b/.test(t)) return "junior";
   return null;
@@ -138,7 +138,8 @@ export function detectNonDevRole(title: string): string | null {
       /\bdeveloppeu(r|se)s?\s+(foncier|fonciere|immobilier|commercial(e)?|d'affaires|business|rh|territorial(e)?|economique|de reseau|de franchise|de clientele)\b/,
       "développement commercial / immobilier",
     ],
-    [/\b(directeur|directrice|responsable|head of)\b/, "poste de direction / responsable"],
+    [/\b(directeur|directrice|director|responsable|head of)\b/, "poste de direction / responsable"],
+    [/\b(web )?analytics\b|\btracking\b|\btag management\b/, "web analytics / tracking"],
   ];
   for (const [re, label] of rules) if (re.test(t)) return label;
   return null;

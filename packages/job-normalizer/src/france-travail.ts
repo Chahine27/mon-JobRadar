@@ -40,7 +40,11 @@ export function normalizeFranceTravail(raw: RawJob): NormalizedJob | null {
   const company = o.entreprise?.nom?.trim() ? titleCase(o.entreprise.nom.trim()) : null;
   const lieu = o.lieuTravail;
   const salary = parseFtSalary(o.salaire?.libelle);
-  const exp = experience(o.experienceExige, o.experienceLibelle);
+  // Le champ France Travail est souvent laissé à « Débutant accepté » / « 0 An(s) » quand le texte exige
+  // « au moins 5 ans » : l'exigence la plus élevée l'emporte (12 offres sur 520 notées 0 an, lues 5-7 ans par l'IA).
+  const field = experience(o.experienceExige, o.experienceLibelle);
+  const inText = parseExperienceYears(`${title}\n${description}`);
+  const exp = inText && (!field || inText.min > field.min) ? inText : field;
   const contract = o.alternance ? "ALTERNANCE" : (normalizeContract(o.typeContrat) ?? normalizeContract(o.typeContratLibelle));
   const partnerUrl = o.origineOffre?.partenaires?.find((p) => p.url)?.url ?? null;
   const sourceUrl = o.origineOffre?.urlOrigine || ftOfferUrl(o.id);
@@ -59,7 +63,7 @@ export function normalizeFranceTravail(raw: RawJob): NormalizedJob | null {
     company,
     description,
     contractType: contract ?? o.typeContrat ?? null,
-    experienceText: o.experienceLibelle ?? null,
+    experienceText: exp !== field && exp ? `${exp.min} an${exp.min > 1 ? "s" : ""} minimum` : (o.experienceLibelle ?? null),
     experienceMinYrs: exp?.min ?? null,
     experienceMaxYrs: exp?.max ?? null,
     salaryMin: salary?.min ?? null,

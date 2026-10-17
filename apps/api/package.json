@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "cv:test": "tsx src/cv-test.ts"
+    "cv:test": "tsx src/cv-test.ts",
+    "score:eval": "tsx src/score-eval.ts"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.2",

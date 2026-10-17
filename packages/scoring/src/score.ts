@@ -163,7 +163,7 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
   const part: Part = { score: rules.noSkillsTechnical, reasons: [], warnings: [] };
   if (items.length === 0) {
     part.warnings.push("Aucune techno détectée : poste peut-être hors informatique");
-    return { part, matched, missing, preferredFound, main: [] as string[], product, requiredIds, missingRequired: [] as string[] };
+    return { part, matched, missing, preferredFound, main: [] as string[], product, requiredIds, missingRequired: [] as string[], blocking: [] as string[] };
   }
 
   const seniority = titleSeniority(input, profile);
@@ -212,7 +212,7 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
   // Langages / frameworks exigés absents (les outils et mots inconnus — Kafka, Scrum… — ne comptent pas).
   // Sans l'IA, « cité dans l'annonce » n'est pas « exigé » : seulement les technos du titre ou à maîtrise exigée.
   const missingRequired = useAi ? requiredIds.filter((id) => !ownedIds.has(id) && getSkill(id)?.core).map(label) : blocking;
-  return { part, matched, missing, preferredFound, main, product, requiredIds, missingRequired };
+  return { part, matched, missing, preferredFound, main, product, requiredIds, missingRequired, blocking };
 }
 
 type ProductExperience = { labels: string[]; years: number } | null;
@@ -229,7 +229,7 @@ function titleSeniority(input: ScoringInput, profile: Profile): Seniority | null
   const s = detectSeniority(input.title);
   const years = input.experienceMinYears;
   if (s !== "lead" || years === null || years > profile.experienceMax) return s;
-  return detectSeniority(normalizeText(input.title).replace(/\barchitecte\b/g, " "));
+  return detectSeniority(normalizeText(input.title).replace(/\barchitecte?\b/g, " "));
 }
 
 function scoreExperience(input: ScoringInput, profile: Profile, rules: ScoringRules, product: ProductExperience): Part {
@@ -247,7 +247,8 @@ function scoreExperience(input: ScoringInput, profile: Profile, rules: ScoringRu
   if (years !== null) {
     if (years < max) byYears = 100;
     else if (years === max) byYears = 85;
-    else if (years === max + 1) byYears = 65;
+    // Un an au-dessus de ta cible : jugé « faible » ou « moyenne » par l'IA, jamais « forte » (17 offres mesurées).
+    else if (years === max + 1) byYears = 35;
     else if (years <= max + 4) byYears = 35;
     else byYears = 10;
 
@@ -451,6 +452,7 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
   const offTopic = tech.matched.length + tech.missing.length === 0 && !looksLikeItTitle(input.title);
   if (offTopic) cap(rules.offTopicCap, "aucune techno et titre sans rapport avec l'informatique");
   if (tech.product) cap(profile.productExperienceCap ?? 40, "expérience exigée sur un produit que tu n'as pas");
+  if (tech.blocking.length) cap(rules.missingMainTechCap, `techno principale ou exigée que tu n'as pas : ${tech.blocking.join(", ")}`);
   // Adéquation faible vérifiée par le code (le petit modèle d'IA s'y trompe) : compétences exigées manquantes, domaine IA.
   const weakFit: string[] = [];
   if (tech.missingRequired.length >= 2) weakFit.push(`compétences exigées manquantes : ${tech.missingRequired.join(", ")}`);

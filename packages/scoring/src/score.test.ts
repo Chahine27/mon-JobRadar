@@ -23,7 +23,7 @@ describe(`scores figés — règles ${DEFAULT_RULES.version}`, () => {
   });
 
   it("version des règles attendue", () => {
-    expect(DEFAULT_RULES.version).toBe("2026-10-15.1");
+    expect(DEFAULT_RULES.version).toBe("2026-10-17.1");
   });
 });
 
@@ -177,6 +177,19 @@ describe("règles détaillées", () => {
     expect(t("Développeur Java / Angular", "Formation : Bac+5 en informatique. Java et Angular.").breakdown.technical).toBe(50);
   });
 
+  it("techno principale absente de ton profil : score plafonné sous le seuil de l'IA, pas si elle s'apprend", () => {
+    const t = (title: string, description: string) => score({ ...PERFECT, title, description, experienceMinYears: null });
+    const base = t("Développeur Java / Angular", "Java et Angular.");
+    expect(base.final).toBe(DEFAULT_RULES.missingMainTechCap);
+    expect(base.capLabel).toBe("techno principale ou exigée que tu n'as pas : Angular");
+    expect(t("Développeur Java / Angular junior", "Java et Angular.").final).toBeGreaterThan(DEFAULT_RULES.missingMainTechCap);
+  });
+
+  it("direction et web analytics : pas un poste de développement", () => {
+    expect(score({ ...PERFECT, title: "Director, Engineering - Vue.js" }).capLabel).toContain("poste de direction");
+    expect(score({ ...PERFECT, title: "Consultant Web Analytics H/F" }).capLabel).toContain("web analytics");
+  });
+
   it("fonction voisine du développement (support, analyste…) : malus", () => {
     const r = score({ ...PERFECT, title: "Ingénieur support applicatif Vue.js" });
     expect(r.adjustments).toContainEqual({ label: "Fonction à vérifier : support", points: DEFAULT_RULES.sideRolePoints });
@@ -236,7 +249,7 @@ describe("règles détaillées", () => {
   it("expérience : paliers pour une cible de 1 à 3 ans", () => {
     const e = (y: number) =>
       score({ ...PERFECT, title: "Développeur", experienceMinYears: y }).breakdown.experience;
-    expect([e(0), e(2), e(3), e(4), e(5), e(7), e(8)]).toEqual([100, 100, 85, 65, 35, 35, 10]);
+    expect([e(0), e(2), e(3), e(4), e(5), e(7), e(8)]).toEqual([100, 100, 85, 35, 35, 35, 10]);
   });
 
   it("un poste junior sans années indiquées est très compatible", () => {
