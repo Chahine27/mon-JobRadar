@@ -1,7 +1,7 @@
 import { type NormalizedJob, fingerprintOf } from "@job-radar/job-normalizer";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { resetDatabase, testPrisma } from "../../db/test/helpers";
-import { dedupeJobs } from "./dedupe";
+import { dedupeJobs, splitMergedAds } from "./dedupe";
 import { ingestJob } from "./ingest";
 
 const prisma = testPrisma();
@@ -109,5 +109,55 @@ describe("dedupeJobs : doublons déjà en base", () => {
     const left = await prisma.job.findMany();
     expect(left).toHaveLength(1);
     expect(left[0]!.status).toBe("SAVED");
+  });
+});
+
+describe("agence qui publie le même titre pour plusieurs clients (asap.work)", () => {
+  const net = (id: string, description: string) =>
+    offer("adzuna", id, "Développeur .Net (H/F)", { company: "asap.work", city: "8ème Arrondissement", description,
+      fingerprint: fingerprintOf({ source: "adzuna", sourceJobId: id, company: "asap.work", title: "Développeur .Net (H/F)", city: "8ème Arrondissement" }) });
+  const A = "Nous recherchons un Développeur .NET (H/F) sur Paris. Vous assurerez la conception et le développement d'applications.";
+  const B = "Nous recherchons un Développeur .Net (H/F) sur Paris, France. Vous assurerez le développement et la maintenance des applications.";
+
+  it("deux annonces Adzuna au texte différent → deux offres", async () => {
+    expect(await ingestJob(prisma, net("az1", A))).toBe("created");
+    expect(await ingestJob(prisma, net("az2", B))).toBe("created");
+    expect(await prisma.job.count()).toBe(2);
+  });
+
+  it("la même annonce republiée (même texte, autre identifiant) → une seule offre", async () => {
+    await ingestJob(prisma, net("az1", A));
+    expect(await ingestJob(prisma, net("az2", A))).toBe("duplicate");
+    expect(await prisma.job.count()).toBe(1);
+  });
+
+  it("offres déjà fusionnées à tort : séparées, l'offre d'origine garde la plus ancienne et ton statut", async () => {
+    const raw = (id: string, description: string) => ({
+      id, title: "Développeur .Net (H/F)", description, redirect_url: `https://www.adzuna.fr/details/${id}`,
+      company: { display_name: "asap.work" }, location: { display_name: "8ème Arrondissement, Paris", area: ["France", "Ile-de-France", "Paris", "8ème Arrondissement"] },
+      created: "2026-10-01T10:00:00Z",
+    });
+    const job = await prisma.job.create({
+      data: {
+        fingerprint: "job:x", contentHash: "h", title: "Développeur .Net (H/F)", company: "asap.work", description: A, status: "SAVED",
+        firstSeenAt: new Date("2026-09-29"), lastSeenAt: new Date(),
+        sources: { create: [
+          { source: "adzuna", sourceJobId: "1", sourceUrl: "https://www.adzuna.fr/details/1", rawData: raw("1", A), firstSeenAt: new Date("2026-09-29"), lastSeenAt: new Date() },
+          { source: "adzuna", sourceJobId: "2", sourceUrl: "https://www.adzuna.fr/details/2", rawData: raw("2", B), firstSeenAt: new Date("2026-10-03"), lastSeenAt: new Date() },
+          { source: "adzuna", sourceJobId: "3", sourceUrl: "https://www.adzuna.fr/details/3", rawData: raw("3", A), firstSeenAt: new Date("2026-10-05"), lastSeenAt: new Date() },
+        ] },
+      },
+    });
+    expect(await splitMergedAds({ prisma })).toEqual({ jobs: 1, created: 1 });
+    const kept = await prisma.job.findUniqueOrThrow({ where: { id: job.id }, include: { sources: true } });
+    expect(kept.status).toBe("SAVED");
+    expect(kept.sources.map((s) => s.sourceJobId).sort()).toEqual(["1", "3"]);
+    const fresh = await prisma.job.findFirstOrThrow({ where: { id: { not: job.id } }, include: { sources: true } });
+    expect(fresh.sources.map((s) => s.sourceJobId)).toEqual(["2"]);
+    expect(fresh.status).toBe("SEEN");
+    expect(fresh.description).toContain("maintenance");
+    // Rien à refaire au passage suivant, et le nettoyage des doublons ne les refusionne pas.
+    expect(await splitMergedAds({ prisma })).toEqual({ jobs: 0, created: 0 });
+    expect((await dedupeJobs(prisma)).groups).toHaveLength(0);
   });
 });

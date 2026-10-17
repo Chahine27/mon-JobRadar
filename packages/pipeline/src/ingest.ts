@@ -1,10 +1,10 @@
 import type { Prisma, PrismaClient } from "@job-radar/db";
-import { type NormalizedJob, dedupeKeyOf, sameOffer, urlKey } from "@job-radar/job-normalizer";
+import { type NormalizedJob, dedupeKeyOf, sameAdText, sameOffer, urlKey } from "@job-radar/job-normalizer";
 import { ABRIDGED_SOURCES } from "@job-radar/shared";
 
 export type IngestOutcome = "created" | "updated" | "unchanged" | "duplicate";
 
-function jobFields(n: NormalizedJob) {
+export function jobFields(n: NormalizedJob) {
   return {
     contentHash: n.contentHash,
     dedupeKey: dedupeKeyOf(n.company, n.title),
@@ -102,10 +102,17 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
   };
 
   const byUrl = key ? await prisma.jobSourceLink.findFirst({ where: { canonicalUrl: key }, select: { jobId: true } }) : null;
+  // Offre qui a déjà une annonce de cette source : seulement si c'est le même texte (cf. sameAdText).
+  const fitsSource = async (job: { id: string; description: string }) =>
+    n.source === "manual" ||
+    sameAdText(job.description, n.description) ||
+    (await prisma.jobSourceLink.count({ where: { jobId: job.id, source: n.source } })) === 0;
   let same: { id: string; description: string } | null = await prisma.job.findUnique({
     where: byUrl ? { id: byUrl.jobId } : { fingerprint: n.fingerprint },
     select: { id: true, description: true },
   });
+  const fingerprintTaken = !byUrl && same !== null;
+  if (same && !byUrl && !(await fitsSource(same))) same = null;
   // Même offre écrite autrement par une autre source (titre, contrat, lieu) : rattachée à l'offre connue.
   if (!same && dedupeKey) {
     const candidates = await prisma.job.findMany({
@@ -113,7 +120,12 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
       select: { id: true, description: true, title: true, city: true, department: true },
       orderBy: { firstSeenAt: "asc" },
     });
-    same = candidates.find((c) => sameOffer(c, n)) ?? null;
+    for (const c of candidates) {
+      if (sameOffer(c, n) && (await fitsSource(c))) {
+        same = c;
+        break;
+      }
+    }
   }
   if (same) {
     // L'offre connue n'avait pas de description, ou seulement un extrait : celle du doublon la complète (score et IA sur le vrai texte).
@@ -129,7 +141,8 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
   await prisma.job.create({
     data: {
       ...jobFields(n),
-      fingerprint: n.fingerprint,
+      // Empreinte (entreprise + titre + ville) déjà prise par une autre annonce de la même agence : celle de l'annonce.
+      fingerprint: fingerprintTaken ? `src:${n.source}:${n.sourceJobId}` : n.fingerprint,
       firstSeenAt: now,
       lastSeenAt: now,
       sources: { create: sourceLink },

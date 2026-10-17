@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dedupeKeyOf, sameOffer } from "./dedupe";
+import { dedupeKeyOf, sameAdText, sameOffer } from "./dedupe";
 
 const offer = (title: string, city: string | null = "Paris", department: string | null = "75") => ({ title, city, department });
 
@@ -40,5 +40,24 @@ describe("sameOffer : titre, contrat, lieu", () => {
     expect(sameOffer(offer("Concepteur .NET - CDI"), offer("Concepteur .NET - Freelance"))).toBe(false);
     expect(sameOffer(offer("Concepteur .NET - Freelance (H/F)"), offer("Concepteur .NET - Freelance"))).toBe(true);
     expect(sameOffer(offer("Développeur c# .net confirmé (CDI)"), offer("Développeur C# .NET Confirmé"))).toBe(true);
+  });
+});
+
+describe("sameAdText : deux annonces d'une même source", () => {
+  it("même annonce collectée deux fois (espaces, intro en plus) → même texte", () => {
+    expect(sameAdText("About The Role What if the code you write could directly power the AI systems", "About The RoleWhat if the code you write could directly power the AI systems")).toBe(true);
+    expect(sameAdText("Le groupe La Centrale recherche un(e) développeur(se) fullstack pour son équipe", "Descriptif du poste : Le groupe La Centrale recherche un(e) développeur(se) fullstack pour son équipe")).toBe(true);
+  });
+
+  it("agence ou ESN : autre client, autre tarif → textes différents", () => {
+    expect(sameAdText(
+      "Nous recherchons un Développeur .NET (H/F) sur Paris. Vous assurerez la conception et le développement d'applications.",
+      "Nous recherchons un Développeur .Net (H/F) sur Paris, France. Vous assurerez le développement et la maintenance.",
+    )).toBe(false);
+    expect(sameAdText("Taux journalier (TJM): 470 Mission Freelance - Développeur Fullstack .NET / Angular", "Taux journalier (TJM): 430 Mission Freelance - Développeur Fullstack .NET / Angular")).toBe(false);
+  });
+
+  it("texte absent ou trop court : rien à conclure", () => {
+    expect(sameAdText("", "Nous recherchons un Développeur .NET (H/F) sur Paris.")).toBe(true);
   });
 });

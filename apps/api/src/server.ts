@@ -11,7 +11,7 @@ import {
   notifyNewMatches,
   notifyNotice,
 } from "@job-radar/notifications";
-import { type CollectReport, CollectionRunner, type RunnerOptions, completeJobScraperDescriptions, renormalizeJobs, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
+import { type CollectReport, CollectionRunner, type RunnerOptions, completeJobScraperDescriptions, renormalizeJobs, splitMergedAds, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
 import { OsrmRoutingService, PrimRoutingService, ensureTravelTimes, fillDepartments, geocode } from "@job-radar/routing";
 import { scoreJob, scoringInputFromJob } from "@job-radar/scoring";
 import { parseProfile, zoneDepartments } from "@job-radar/shared";
@@ -370,7 +370,10 @@ log = (msg) => app.log.info(msg);
 await app.listen({ host: env.API_HOST, port: env.API_PORT });
 // Règles de normalisation changées depuis (contrat, expérience, compétences, salaire) : réappliquées aux offres déjà
 // en base avant de préchauffer le flux, pour que les scores affichés suivent les règles du code. ~1 s, rien si à jour.
-void renormalizeJobs({ prisma, log: (m) => log(m) })
+// Annonces d'une même source fusionnées à tort (agence qui publie le même titre pour plusieurs clients) : séparées d'abord.
+void splitMergedAds({ prisma, log: (m) => log(m) })
+  .catch((err) => log(`Séparation des annonces : ${String(err)}`))
+  .then(() => renormalizeJobs({ prisma, log: (m) => log(m) }))
   .catch((err) => log(`Réapplication des règles : ${String(err)}`))
   .then(() => warmFeed());
 

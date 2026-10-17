@@ -46,6 +46,20 @@ export function dedupeKeyOf(company: string | null | undefined, title: string): 
   return c && t ? `ded:${sha([c, t])}` : null;
 }
 
+/**
+ * Deux annonces d'une même source (identifiants différents) ne sont la même offre republiée que si leur texte commence
+ * pareil : une agence (asap.work…) publie « Développeur .Net (H/F) » à Paris pour plusieurs clients, avec le même
+ * titre et la même ville, et une ESN la même mission à 430 € puis 470 € par jour. Texte absent ou trop court d'un côté : rien à conclure, on les rapproche comme avant.
+ */
+export function sameAdText(a: string, b: string): boolean {
+  // Sans espaces (« role what » / « rolewhat » selon la collecte) ; le début de l'une peut venir après une intro
+  // dans l'autre (« Descriptif du poste : … »).
+  const ca = comparable(a).replace(/ /g, "");
+  const cb = comparable(b).replace(/ /g, "");
+  if (ca.length < 40 || cb.length < 40) return true;
+  return cb.slice(0, 400).includes(ca.slice(0, 60)) || ca.slice(0, 400).includes(cb.slice(0, 60));
+}
+
 export type OfferPlace = { title: string; city: string | null; department: string | null };
 
 /**
