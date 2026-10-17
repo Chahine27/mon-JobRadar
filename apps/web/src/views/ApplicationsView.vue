@@ -444,6 +444,21 @@ button.link { display: inline-flex; align-items: center; gap: 0.2rem; color: var
 .bar.mid span { background: var(--mid); }
 .bar.low span { background: var(--low); }
 
+@media (max-width: 600px) {
+  .hello { margin-bottom: 0.6rem; gap: 0.5rem; align-items: center; }
+  .hello h1 { font-size: 1.3rem; }
+  .hello p { display: none; }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-bottom: 0.6rem; }
+  .tabs button { flex: none; padding: 0.3rem 0.65rem; }
+  /* Compteurs en petites tuiles, 3 par ligne. */
+  .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45rem; margin-bottom: 0.6rem; }
+  .kpi { padding: 0.5rem 0.55rem; }
+  .kpi-icon, .kpi > .icon { display: none; }
+  .kpi-body strong { font-size: 1.3rem; }
+  .kpi-body .small { font-size: 0.7rem; line-height: 1.25; }
+  .kpi-body .small:last-child { display: none; }
+  .panel { padding: 0.75rem 0.85rem; margin-bottom: 0.6rem; }
+}
 @media (max-width: 1100px) { .main-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 720px) {
   .th { display: none; }

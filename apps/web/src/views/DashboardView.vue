@@ -293,9 +293,9 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
       <template v-else>{{ lastRunText }}</template>
     </p>
     <template #actions>
-      <button type="button" class="primary" :disabled="running" @click="refreshNow">
+      <button type="button" class="primary" :disabled="running" :aria-label="running ? 'Collecte en cours' : 'Actualiser maintenant'" @click="refreshNow">
         <Icon name="refresh" :size="16" :class="{ spin: running }" />
-        {{ running ? "Collecte en cours…" : "Actualiser maintenant" }}
+        <span class="refresh-label">{{ running ? "Collecte en cours…" : "Actualiser maintenant" }}</span>
       </button>
       <span v-if="refreshMessage" class="muted small">{{ refreshMessage }}</span>
     </template>
@@ -381,7 +381,7 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
           {{ t.label }}
         </button>
       </div>
-      <div v-if="contracts.length" class="tabs" role="tablist" aria-label="Contrat">
+      <div v-if="contracts.length" class="tabs contract-tabs" :class="{ open: showFilters }" role="tablist" aria-label="Contrat">
         <button
           v-for="t in contractTabs"
           :key="t.value"
@@ -396,7 +396,7 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
       </div>
       </div>
       <button type="button" class="small filters-toggle" :aria-expanded="showFilters" @click="showFilters = !showFilters">
-        <Icon name="sliders" :size="15" />{{ showFilters ? "Masquer les filtres" : "Recherche, compatibilité, tri…" }}
+        <Icon name="sliders" :size="15" />{{ showFilters ? "Masquer les filtres" : "Contrat, recherche, score, tri…" }}
       </button>
       <div class="filters" :class="{ open: showFilters }">
         <div class="field search">
@@ -549,9 +549,15 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
   .source-pill { flex: none; white-space: nowrap; }
   .count { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; }
   .ai-status, .ai-btn { margin-left: 0; }
+  .toolbar { gap: 0.5rem; padding: 0.6rem; }
+  .tab-rows { gap: 0.4rem; }
+  /* En-tête : bouton Actualiser réduit à son icône, à droite du titre. */
+  .page-head { flex-wrap: nowrap; align-items: flex-start; }
+  .refresh-label { display: none; }
+  .tabs { padding: 0.15rem; }
 }
 .filters-toggle { display: none; }
-@media (max-width: 600px) { .filters-toggle { display: inline-flex; justify-self: start; } .filters:not(.open) { display: none; } }
+@media (max-width: 600px) { .filters-toggle { display: inline-flex; justify-self: start; } .filters:not(.open), .contract-tabs:not(.open) { display: none; } }
 .count { margin: 0.15rem 0 -0.2rem; }
 .count strong { color: var(--text); }
 .more { display: flex; justify-content: center; padding: 0.5rem 0 1rem; }
@@ -569,5 +575,22 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
 .company span { display: inline-flex; align-items: center; gap: 0.35rem; }
 .src { margin-left: 0.25rem; }
 .skills { gap: 0.35rem; }
-@media (max-width: 600px) { .job { gap: 0.8rem; } .top { flex-direction: column-reverse; gap: 0.3rem; } .origin { flex-wrap: wrap; } }
+@media (max-width: 600px) { .top { flex-direction: column-reverse; gap: 0.3rem; } .origin { flex-wrap: wrap; } }
+/* Après les règles de base des cartes, pour les remplacer. */
+@media (max-width: 600px) {
+  /* Carte d'offre compacte : contenu sur toute la largeur, petit anneau à droite du titre, seulement les compétences que tu as. */
+  .job { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.35rem 0.6rem; }
+  .body { display: contents; }
+  .body > * { grid-column: 1 / -1; }
+  .body > .top { grid-column: 1; grid-row: 1; }
+  .job > :deep(.ring) { grid-column: 2; grid-row: 1; }
+  .job :deep(.ring) { --size: 40px; }
+  .job :deep(.ring)::before { inset: 4px; }
+  .title { font-size: 0.95rem; line-height: 1.3; }
+  .company { font-size: 0.8rem; gap: 0.1rem 0.8rem; }
+  .job .chip { font-size: 0.72rem; padding: 0.08rem 0.45rem; }
+  .job .row { gap: 0.3rem; }
+  .skills .chip.missing { display: none; }
+  .origin :deep(.source-logo) { width: 20px !important; height: 20px !important; }
+}
 </style>

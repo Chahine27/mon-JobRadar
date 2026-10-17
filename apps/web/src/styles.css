@@ -204,10 +204,29 @@ code { background: var(--surface-2); padding: 0.05rem 0.35rem; border-radius: 5p
   .bottom-nav .tab.active, .bottom-nav .tab.active:hover:not(:disabled) { color: var(--accent); }
 
   /* Cibles au doigt (≥ 44 px) ; champs en 16 px pour que Safari ne zoome pas au focus. */
-  button:not(.link), .btn, select, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), .nav-link { min-height: 44px; }
+  button:not(.link), .btn, select, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { min-height: 40px; }
+  button.small, .btn.small { min-height: 34px; }
+  .nav-link { min-height: 44px; }
   .chip button { min-height: 0; }
   .icon-btn { width: 44px; height: 44px; }
   select, textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { font-size: 16px; }
+}
+
+/* Téléphone : tout plus serré pour voir l'essentiel sans défiler. */
+@media (max-width: 600px) {
+  h1 { font-size: 1.3rem; }
+  h2 { font-size: 0.95rem; margin-bottom: 0.5rem; }
+  .page { padding-top: 0.75rem; }
+  .page-head { gap: 0.5rem; margin-bottom: 0.75rem; align-items: center; }
+  .page-head .subtitle { font-size: 0.8rem; }
+  .page-head .actions { align-items: flex-start; }
+  .page-head .actions button, .page-head .actions .btn { min-height: 34px; padding: 0.3rem 0.75rem; font-size: 0.85rem; }
+  .card { padding: 0.75rem 0.85rem; border-radius: 12px; }
+  .stack { gap: 0.6rem; }
+  .grid-2, .grid-3 { gap: 0.6rem; }
+  .tabs { flex-wrap: nowrap; }
+  .tabs button { padding: 0.2rem 0.65rem; min-height: 30px; }
+  .empty { padding: 1.5rem 1rem; }
 }
 
 /* ───────────── En-tête de page ───────────── */
