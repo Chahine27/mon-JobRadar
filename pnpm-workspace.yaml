@@ -4,8 +4,9 @@ packages:
 allowBuilds:
   # Base de données intégrée : prépare les fichiers de PostgreSQL à l'installation.
   '@embedded-postgres/windows-x64': true
-  # Serveur AWS (Linux ARM) : il utilise le PostgreSQL du système, pas la base intégrée.
+  # Serveur AWS (Linux ARM) et CI GitHub (Linux x64) : pas de base intégrée.
   '@embedded-postgres/linux-arm64': false
+  '@embedded-postgres/linux-x64': false
   '@prisma/engines': true
   esbuild: true
   prisma: true
