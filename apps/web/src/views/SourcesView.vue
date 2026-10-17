@@ -193,7 +193,7 @@ const addCompany = () =>
 .bar .indeterminate { animation: slide 1.2s ease-in-out infinite alternate; }
 @keyframes slide { from { margin-left: 0; } to { margin-left: 65%; } }
 @media (prefers-reduced-motion: reduce) { .bar .indeterminate { animation: none; } }
-.sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; }
+.sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 1rem; }
 .source.wide { grid-column: 1 / -1; }
 .source.off { opacity: 0.75; }
 .src-head { display: grid; grid-template-columns: auto 1fr auto; gap: 0.8rem; align-items: start; }

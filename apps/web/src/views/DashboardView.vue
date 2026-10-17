@@ -25,6 +25,8 @@ function loadFilters(): Required<Omit<JobQuery, "q" | "limit" | "offset">> & { q
 const filters = reactive(loadFilters());
 const jobs = ref<JobSummary[]>([]);
 const loading = ref(true);
+/** Téléphone : filtres repliés derrière un bouton (toujours visibles sur PC). */
+const showFilters = ref(false);
 const error = ref<string | null>(null);
 const threshold = ref(70);
 
@@ -393,7 +395,10 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
         </button>
       </div>
       </div>
-      <div class="filters">
+      <button type="button" class="small filters-toggle" :aria-expanded="showFilters" @click="showFilters = !showFilters">
+        <Icon name="sliders" :size="15" />{{ showFilters ? "Masquer les filtres" : "Recherche, compatibilité, tri…" }}
+      </button>
+      <div class="filters" :class="{ open: showFilters }">
         <div class="field search">
           <Icon name="search" :size="16" />
           <input v-model="filters.q" type="search" placeholder="Titre, entreprise, ville…" aria-label="Recherche" />
@@ -527,7 +532,7 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
 .pill-bar { display: inline-block; width: 56px; height: 5px; }
 .pill-bar > span { display: block; height: 100%; border-radius: 99px; transition: width 0.4s ease; }
 .tab-rows { display: flex; flex-wrap: wrap; gap: 0.6rem; }
-.toolbar { display: grid; gap: 0.9rem; padding: 0.9rem 1rem; }
+.toolbar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.9rem; padding: 0.9rem 1rem; }
 .filters { display: grid; grid-template-columns: minmax(220px, 2fr) minmax(180px, 1.3fr) minmax(150px, 1fr) auto; gap: 0.9rem 1.1rem; align-items: end; }
 .min-scores { display: flex; gap: 0.5rem; margin-top: 0.3rem; }
 .min-score { padding: 0.15rem; border-radius: 50%; background: none; border: 2px solid transparent; cursor: pointer; opacity: 0.55; transition: opacity 0.15s, border-color 0.15s; }
@@ -537,7 +542,16 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
 .filters .range span, .filters .sort span { display: flex; justify-content: space-between; gap: 0.5rem; }
 .filters .switch { padding-bottom: 0.45rem; white-space: nowrap; }
 @media (max-width: 900px) { .filters { grid-template-columns: 1fr 1fr; } .filters .search { grid-column: 1 / -1; } }
-@media (max-width: 520px) { .filters { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .filters { grid-template-columns: 1fr; } .filters .switch { white-space: normal; } }
+/* Téléphone : pastilles de sources sur une ligne qui défile au doigt. */
+@media (max-width: 600px) {
+  .sources-strip { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -1rem; padding: 0 1rem 0.1rem; }
+  .source-pill { flex: none; white-space: nowrap; }
+  .count { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem; }
+  .ai-status, .ai-btn { margin-left: 0; }
+}
+.filters-toggle { display: none; }
+@media (max-width: 600px) { .filters-toggle { display: inline-flex; justify-self: start; } .filters:not(.open) { display: none; } }
 .count { margin: 0.15rem 0 -0.2rem; }
 .count strong { color: var(--text); }
 .more { display: flex; justify-content: center; padding: 0.5rem 0 1rem; }
@@ -545,7 +559,7 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
 .job { display: flex; gap: 1.1rem; align-items: flex-start; color: inherit; transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s; }
 .job:hover { text-decoration: none; border-color: var(--accent); box-shadow: var(--shadow-hover); transform: translateY(-1px); }
 .job.unread { border-left: 3px solid var(--accent); }
-.body { display: grid; gap: 0.5rem; min-width: 0; flex: 1; }
+.body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.5rem; min-width: 0; flex: 1; }
 .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; }
 .title { font-size: 1.04rem; font-weight: 650; }
 .title-row { gap: 0.45rem; }
@@ -555,5 +569,5 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
 .company span { display: inline-flex; align-items: center; gap: 0.35rem; }
 .src { margin-left: 0.25rem; }
 .skills { gap: 0.35rem; }
-@media (max-width: 600px) { .job { gap: 0.8rem; } .top { flex-direction: column-reverse; gap: 0.3rem; } }
+@media (max-width: 600px) { .job { gap: 0.8rem; } .top { flex-direction: column-reverse; gap: 0.3rem; } .origin { flex-wrap: wrap; } }
 </style>

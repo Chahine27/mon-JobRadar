@@ -374,7 +374,7 @@ async function save() {
 .sticky-head { position: sticky; top: 0; z-index: 15; background: var(--bg); margin: -0.5rem 0 -0.5rem; padding-top: 0.5rem; }
 @media (max-width: 900px) { .sticky-head { top: 52px; } }
 .hint { margin: -0.4rem 0 0; }
-.pref { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(100px, 1fr) 2rem auto; gap: 0.6rem; align-items: center; }
+.pref { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(100px, 1fr) auto auto; gap: 0.6rem; align-items: center; }
 .zone { display: grid; grid-template-columns: 1fr 10rem auto; gap: 0.5rem; align-items: center; }
 .icon-btn.danger { color: var(--muted); border: 1px solid transparent; }
 .icon-btn.danger:hover:not(:disabled) { color: var(--low); background: var(--low-bg); border-color: transparent; }

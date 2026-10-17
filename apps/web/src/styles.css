@@ -90,6 +90,7 @@
 /* ───────────── Base ───────────── */
 * { box-sizing: border-box; }
 html, body { margin: 0; }
+html { -webkit-text-size-adjust: 100%; }
 body {
   background: var(--bg);
   color: var(--text);
@@ -112,7 +113,7 @@ code { background: var(--surface-2); padding: 0.05rem 0.35rem; border-radius: 5p
 /* ───────────── Mise en page : barre latérale + contenu ───────────── */
 .shell { display: grid; grid-template-columns: var(--sidebar-w) 1fr; min-height: 100vh; }
 .sidebar {
-  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 0.25rem;
+  position: sticky; top: 0; height: 100vh; height: 100dvh; display: flex; flex-direction: column; gap: 0.25rem;
   background: var(--side-bg); color: var(--side-text); padding: 1.1rem 0.85rem; border-right: 1px solid var(--side-border);
 }
 .sidebar .brand {
@@ -164,9 +165,11 @@ code { background: var(--surface-2); padding: 0.05rem 0.35rem; border-radius: 5p
 .theme-switch button:hover:not(:disabled) { color: #fff; }
 .theme-switch button.active { background: rgb(255 255 255 / 0.1); color: #fff; }
 
-.content { min-width: 0; }
+/* clip : un élément trop large ne fait plus dézoomer toute la page sur iPhone. */
+.content { min-width: 0; overflow-x: clip; }
 .page { max-width: 1180px; margin: 0 auto; padding: 1.75rem 1.75rem 4rem; }
 .mobile-bar { display: none; }
+.bottom-nav { display: none; }
 .backdrop { display: none; }
 
 @media (max-width: 600px) {
@@ -177,16 +180,34 @@ code { background: var(--surface-2); padding: 0.05rem 0.35rem; border-radius: 5p
   .shell { grid-template-columns: 1fr; }
   .sidebar {
     position: fixed; inset: 0 auto 0 0; width: var(--sidebar-w); z-index: 40;
-    transform: translateX(-100%); transition: transform 0.2s ease;
+    transform: translateX(-100%); transition: transform 0.2s ease; overflow-y: auto;
   }
   .sidebar.open { transform: none; box-shadow: 8px 0 30px rgb(0 0 0 / 0.3); }
   .backdrop.open { display: block; position: fixed; inset: 0; z-index: 30; background: rgb(0 0 0 / 0.4); }
   .mobile-bar {
     display: flex; align-items: center; gap: 0.6rem; position: sticky; top: 0; z-index: 20;
-    padding: 0.6rem 1rem; background: var(--surface); border-bottom: 1px solid var(--border); font-weight: 700;
+    height: 52px; padding: 0 1rem; background: var(--surface); border-bottom: 1px solid var(--border); font-weight: 700;
   }
   .mobile-bar .brand-logo { width: 28px; height: 28px; border-radius: 8px; }
-  .page { padding: 1.1rem 1rem 3rem; }
+  .page { padding: 1.1rem 1rem calc(56px + 2rem + env(safe-area-inset-bottom)); }
+
+  /* Barre de navigation en bas (au pouce) ; « Plus » ouvre le menu complet. */
+  .bottom-nav {
+    display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; inset: auto 0 0; z-index: 25;
+    background: var(--surface); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom);
+  }
+  .bottom-nav .tab {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 56px; padding: 0.3rem 0;
+    border: none; border-radius: 0; background: none; box-shadow: none; color: var(--muted); font-size: 0.7rem; font-weight: 600;
+  }
+  .bottom-nav .tab:hover, .bottom-nav .tab:hover:not(:disabled) { text-decoration: none; color: var(--muted); }
+  .bottom-nav .tab.active, .bottom-nav .tab.active:hover:not(:disabled) { color: var(--accent); }
+
+  /* Cibles au doigt (≥ 44 px) ; champs en 16 px pour que Safari ne zoome pas au focus. */
+  button:not(.link), .btn, select, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), .nav-link { min-height: 44px; }
+  .chip button { min-height: 0; }
+  .icon-btn { width: 44px; height: 44px; }
+  select, textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { font-size: 16px; }
 }
 
 /* ───────────── En-tête de page ───────────── */
@@ -202,11 +223,11 @@ code { background: var(--surface-2); padding: 0.05rem 0.35rem; border-radius: 5p
   box-shadow: var(--shadow); padding: 1.1rem 1.25rem;
 }
 .card.flat { box-shadow: none; }
-.stack { display: grid; gap: 0.8rem; align-content: start; }
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.8rem; align-content: start; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .spread { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; }
-.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
-.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 1rem; }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 1rem; }
 
 /* ───────────── Boutons ───────────── */
 button, .btn {
@@ -235,7 +256,7 @@ button.small, .btn.small { padding: 0.28rem 0.65rem; font-size: 0.84rem; border-
 
 /* ───────────── Champs ───────────── */
 input, select, textarea {
-  font: inherit; font-weight: 400; color: var(--text); background: var(--surface);
+  min-width: 0; max-width: 100%; font: inherit; font-weight: 400; color: var(--text); background: var(--surface);
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 0.48rem 0.7rem;
   transition: border-color 0.15s, box-shadow 0.15s;
 }

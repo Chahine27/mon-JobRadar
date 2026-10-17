@@ -12,10 +12,10 @@ const route = useRoute();
 const menuOpen = ref(false);
 watch(() => route.fullPath, () => (menuOpen.value = false));
 
-const NAV: Array<{ to: string; label: string; icon: IconName }> = [
+const NAV: Array<{ to: string; label: string; icon: IconName; short?: string }> = [
   { to: "/", label: "Offres", icon: "briefcase" },
   { to: "/postule", label: "Candidatures", icon: "send" },
-  { to: "/ajouter", label: "Ajouter une offre", icon: "plus" },
+  { to: "/ajouter", label: "Ajouter une offre", icon: "plus", short: "Ajouter" },
   { to: "/entreprises", label: "Entreprises", icon: "building" },
   { to: "/sources", label: "Sources", icon: "rss" },
   { to: "/candidature", label: "CV & lettre", icon: "file" },
@@ -32,6 +32,9 @@ const THEMES: Array<{ mode: ThemeMode; label: string; icon: IconName }> = [
 
 /** « Offres » reste en surbrillance sur la page d'une offre. */
 const isActive = (to: string) => (to === "/" ? route.path === "/" || route.path.startsWith("/offres/") : route.path.startsWith(to));
+/** Téléphone : les 4 premières rubriques en bas de l'écran, les autres derrière « Plus ». */
+const BOTTOM_NAV = NAV.slice(0, 4);
+const inMore = computed(() => !BOTTOM_NAV.some((item) => isActive(item.to)));
 const initial = computed(() => currentEmail.value?.[0] ?? "?");
 
 // Page visible ET fenêtre active : signalée au serveur (toutes les 10 s) pour ne pas notifier une lettre terminée sous tes yeux.
@@ -128,7 +131,6 @@ async function logout() {
 
     <div class="content">
       <div class="mobile-bar">
-        <button class="icon-btn" type="button" aria-label="Ouvrir le menu" @click="menuOpen = true"><Icon name="menu" /></button>
         <span class="brand-logo"><Icon name="radar" :size="16" color="#fff" /></span>
         Job Radar
       </div>
@@ -138,6 +140,14 @@ async function logout() {
           <KeepAlive include="DashboardView,ApplicationsView,LeadsView"><component :is="Component" /></KeepAlive>
         </RouterView>
       </main>
+      <nav class="bottom-nav" aria-label="Navigation">
+        <RouterLink v-for="item in BOTTOM_NAV" :key="item.to" :to="item.to" class="tab" :class="{ active: isActive(item.to) }">
+          <Icon :name="item.icon" :size="21" />{{ item.short ?? item.label }}
+        </RouterLink>
+        <button type="button" class="tab" :class="{ active: inMore }" aria-label="Ouvrir le menu complet" @click="menuOpen = true">
+          <Icon name="menu" :size="21" />Plus
+        </button>
+      </nav>
     </div>
   </div>
   <div v-if="stopped" class="stopped" role="alertdialog" aria-labelledby="stopped-title">

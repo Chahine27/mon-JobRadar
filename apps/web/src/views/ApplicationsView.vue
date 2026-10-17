@@ -395,8 +395,8 @@ const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature sponta
 .panel-title > .icon { margin-top: 0.15rem; color: var(--muted); }
 .panel-title h2 { margin: 0; font-size: 1.1rem; }
 .panel-title p { margin: 0.1rem 0 0; }
-.seg { display: inline-flex; gap: 0.15rem; padding: 0.2rem; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); }
-.seg button { border: 0; background: transparent; padding: 0.3rem 0.6rem; font-size: 0.8rem; color: var(--muted); border-radius: 8px; }
+.seg { display: inline-flex; max-width: 100%; overflow-x: auto; scrollbar-width: none; gap: 0.15rem; padding: 0.2rem; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); }
+.seg button { flex: none; border: 0; background: transparent; padding: 0.3rem 0.6rem; font-size: 0.8rem; color: var(--muted); border-radius: 8px; }
 .seg button.active { background: var(--accent); color: var(--accent-contrast); }
 button.link { display: inline-flex; align-items: center; gap: 0.2rem; color: var(--accent); }
 
@@ -444,7 +444,7 @@ button.link { display: inline-flex; align-items: center; gap: 0.2rem; color: var
 .bar.mid span { background: var(--mid); }
 .bar.low span { background: var(--low); }
 
-@media (max-width: 1100px) { .main-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .main-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 720px) {
   .th { display: none; }
   .tr { grid-template-columns: minmax(0, 1fr) auto; }
