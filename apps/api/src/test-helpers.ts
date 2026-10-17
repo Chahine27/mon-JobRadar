@@ -444,10 +444,10 @@ export async function createTestApp(extra: Partial<AppOptions> = {}) {
   const mailer: Mailer = { isConfigured: () => true, address: () => "alex.martin@example.com", send: async (m) => (sentMails.push(m), `<envoi-${sentMails.length}@test>`) };
   const app = await buildApp({
     followUpPauseMs: 0,
+    appUrl: APP_URL,
     ...extra,
     mailer,
     stores: mem.stores,
-    appUrl: APP_URL,
     secureCookie: false,
     collector,
     notifiers,

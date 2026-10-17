@@ -72,7 +72,8 @@ export async function buildApp(opts: AppOptions) {
     // Pas une ligne par requête (le site interroge l'état de la collecte régulièrement) ; les erreurs restent journalisées.
     logController: new LogController({ disableRequestLogging: true }),
   });
-  const allowedOrigin = new URL(opts.appUrl).origin;
+  // + le site ouvert sur ce PC par le tunnel SSH (secours quand APP_URL est l'adresse Tailscale du serveur).
+  const allowedOrigins = new Set([new URL(opts.appUrl).origin, "http://localhost:5173"]);
 
   await app.register(helmet);
   await app.register(cookie);
@@ -95,7 +96,7 @@ export async function buildApp(opts: AppOptions) {
   app.addHook("onRequest", async (request, reply) => {
     if (!UNSAFE_METHODS.has(request.method)) return;
     const origin = request.headers.origin;
-    if (origin && origin !== allowedOrigin) {
+    if (origin && !allowedOrigins.has(origin)) {
       return reply.code(403).send({ error: "FORBIDDEN_ORIGIN" });
     }
   });

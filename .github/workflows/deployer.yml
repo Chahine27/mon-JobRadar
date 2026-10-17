@@ -1,0 +1,46 @@
+# À chaque push sur main : build + vérification des types + tests, puis mise en ligne sur le serveur AWS.
+# Secrets : DEPLOY_HOST (adresse IP du serveur) et DEPLOY_SSH_KEY (clé privée ~/.ssh/jobradar_deploy).
+name: Build, tests et déploiement
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: deploiement
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: CI=true pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm --filter @job-radar/web build
+
+  deployer:
+    needs: verifier
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Clé SSH du serveur
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # ponytail: empreinte du serveur acceptée au premier contact ; la mettre en secret si on veut la vérifier.
+          ssh-keyscan -t ed25519 "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+      # Copie du code suivi par Git (.env, base, venv Python et node_modules restent sur le serveur), puis mise à jour.
+      - run: git archive HEAD | ssh "ubuntu@${{ secrets.DEPLOY_HOST }}" 'tar -x -C ~/jobradar'
+      - run: ssh "ubuntu@${{ secrets.DEPLOY_HOST }}" 'bash ~/jobradar/scripts/deployer.sh'

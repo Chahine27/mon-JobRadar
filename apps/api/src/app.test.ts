@@ -116,6 +116,15 @@ describe("authentification", () => {
     });
     expect(ok.statusCode).toBe(200);
   });
+
+  it("accepte aussi le tunnel SSH quand APP_URL est l'adresse Tailscale du serveur", async () => {
+    const { app } = await createTestApp({ appUrl: "https://jobradar.exemple.ts.net" });
+    const post = (origin: string) =>
+      app.inject({ method: "POST", url: "/api/auth/login", headers: { origin }, payload: { email: TEST_EMAIL, password: TEST_PASSWORD } });
+    expect((await post("https://jobradar.exemple.ts.net")).statusCode).toBe(200);
+    expect((await post("http://localhost:5173")).statusCode).toBe(200);
+    expect((await post("http://localhost:5174")).statusCode).toBe(403);
+  });
 });
 
 describe("profil", () => {
