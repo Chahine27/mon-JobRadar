@@ -37,7 +37,8 @@ export function createBrowserEngine(): CvEngine {
   let browser: Promise<Browser> | null = null;
   const launch = async (): Promise<Browser> => {
     const { chromium } = await import("playwright-core");
-    for (const channel of ["msedge", "chrome"]) {
+    // undefined = Chromium téléchargé par Playwright (serveur Linux ARM, sans Edge ni Chrome).
+    for (const channel of ["msedge", "chrome", undefined]) {
       try {
         return await chromium.launch({ channel, headless: true });
       } catch {
