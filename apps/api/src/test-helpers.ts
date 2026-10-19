@@ -506,6 +506,11 @@ export async function createTestApp(extra: Partial<AppOptions> = {}) {
             exigees_manquantes: [],
             adequation: aiState.adequation,
             avis: "Ça colle.",
+            contrat: "inconnu",
+            salaire_min: null,
+            salaire_max: null,
+            salaire_periode: "inconnu",
+            adresse: null,
           },
         };
       },

@@ -1,12 +1,14 @@
 import { z } from "zod";
 import { AI_DOMAIN, contractOfJob, normalizeContract } from "@job-radar/scoring";
 import { extractSkills, getSkill, normalizeText, resolveSkill } from "@job-radar/skills";
+import { toFields } from "./job-reading";
 import type { OllamaClient } from "./ollama";
 
 /**
  * Changer ce numéro quand la consigne change : les avis déjà donnés ne comptent plus, et l'IA refait d'elle-même
  * les offres au-dessus du seuil « Analyse IA à partir de » (30 par collecte) ; les autres avec « Relancer »
  * (cf. analysisFitsJob dans l'API).
+ * Pas changé pour contrat / salaire / adresse (2026-10-19) : les anciens avis restent bons, ils n'ont juste pas ces infos.
  */
 export const ANALYSIS_PROMPT_VERSION = "2026-10-13.1";
 
@@ -33,6 +35,12 @@ export const JobAnalysisSchema = z.object({
   exigees_manquantes: list(15, 60).default([]),
   adequation: z.enum(["forte", "moyenne", "faible"]),
   avis: z.string().trim().min(1).max(400),
+  /** Infos lues dans le texte : corrigent ce que la source ou le code ont mal lu (vérifiées par le code, cf. checkInfos). */
+  contrat: z.enum(["CDI", "CDD", "INTERIM", "ALTERNANCE", "STAGE", "FREELANCE", "inconnu"]).default("inconnu"),
+  salaire_min: z.number().nullable().default(null),
+  salaire_max: z.number().nullable().default(null),
+  salaire_periode: z.enum(["annuel", "mensuel", "journalier", "horaire", "inconnu"]).default("inconnu"),
+  adresse: z.string().trim().max(200).nullable().default(null),
 });
 export type JobAnalysisResult = z.infer<typeof JobAnalysisSchema>;
 
@@ -53,6 +61,11 @@ export const JOB_ANALYSIS_JSON_SCHEMA = {
     exigees_manquantes: { type: "array", items: { type: "string" } },
     adequation: { type: "string", enum: ["forte", "moyenne", "faible"] },
     avis: { type: "string" },
+    contrat: { type: "string", enum: ["CDI", "CDD", "INTERIM", "ALTERNANCE", "STAGE", "FREELANCE", "inconnu"] },
+    salaire_min: { type: ["number", "null"] },
+    salaire_max: { type: ["number", "null"] },
+    salaire_periode: { type: "string", enum: ["annuel", "mensuel", "journalier", "horaire", "inconnu"] },
+    adresse: { type: ["string", "null"] },
   },
   required: [
     "resume",
@@ -68,6 +81,11 @@ export const JOB_ANALYSIS_JSON_SCHEMA = {
     "exigees_manquantes",
     "adequation",
     "avis",
+    "contrat",
+    "salaire_min",
+    "salaire_max",
+    "salaire_periode",
+    "adresse",
   ],
 } as const;
 
@@ -128,7 +146,11 @@ Règles :
   faible = contrat connu non souhaité, OU expérience demandée nettement au-dessus de la sienne, OU technologie principale absente de son profil, OU au moins 2 compétences exigées manquantes, OU poste très orienté vers un domaine absent de son expérience en entreprise (IA, LLM, data science…).
   Technologie principale vue seulement en projets : au mieux moyenne.
   moyenne = entre les deux.
-- avis : une phrase directe, en TUTOYANT le candidat (« tu », jamais « vous »), qui dit pourquoi ça colle ou pas, en distinguant ce qu'il a en entreprise, ce qu'il n'a vu qu'en projets et ce qui lui manque. Même règle pour points_attention.`;
+- avis : une phrase directe, en TUTOYANT le candidat (« tu », jamais « vous »), qui dit pourquoi ça colle ou pas, en distinguant ce qu'il a en entreprise, ce qu'il n'a vu qu'en projets et ce qui lui manque. Même règle pour points_attention.
+- contrat / salaire_min / salaire_max / salaire_periode / adresse : ce que dit VRAIMENT le texte de l'annonce, même si les champs « Contrat » ou « Salaire » au-dessus disent autre chose (ils viennent d'un robot qui se trompe parfois).
+  contrat : CDI, CDD, INTERIM, ALTERNANCE, STAGE, FREELANCE (freelance / portage / TJM), sinon inconnu.
+  salaire : seulement un montant écrit pour CE poste, en euros, tel qu'écrit (« 45k€ » → 45000), avec sa période ; un seul montant → min = max ; rien d'écrit → null et inconnu. Jamais le chiffre d'affaires ni une « estimation » du site.
+  adresse : l'adresse du lieu de travail si elle est écrite (« 48 Boulevard des Batignolles, 75017 Paris »), sinon null. Jamais le siège d'un groupe cité en passant.`;
 
 export function buildAnalysisPrompt(job: AnalysisJobInput, profile: AnalysisProfileInput): string {
   const salary =
@@ -236,6 +258,25 @@ function checkAdequation(
   return r.adequation;
 }
 
+/**
+ * Contrat, salaire (annuel) et adresse lus par l'IA, gardés seulement s'ils sont écrits dans l'annonce
+ * (mêmes garde-fous que la lecture d'une page : montants et adresse retrouvés dans le texte).
+ */
+function checkInfos(r: JobAnalysisResult, job: AnalysisJobInput): Pick<JobAnalysisResult, "contrat" | "salaire_min" | "salaire_max" | "salaire_periode" | "adresse"> {
+  const f = toFields(
+    { ...r, titre: null, entreprise: null, ville: null, departement: null, teletravail: "inconnu", experience_min_ans: null, competences: [] },
+    `${job.title}
+${job.description}`,
+  );
+  return {
+    contrat: r.contrat,
+    salaire_min: f.salaryMin,
+    salaire_max: f.salaryMax,
+    salaire_periode: f.salaryMin !== null ? "annuel" : "inconnu",
+    adresse: f.address,
+  };
+}
+
 /** Le niveau écrit dans le titre (« Développeur junior … ») l'emporte sur ce que le modèle a déduit. */
 function checkNiveau(r: JobAnalysisResult, title: string): JobAnalysisResult["niveau"] {
   const t = title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -286,6 +327,7 @@ export async function analyzeJobWithAi(
       return {
         result: {
           ...r,
+          ...checkInfos(r, job),
           avis: checkAvis(r.avis, profile, classes),
           missions: tidy(r.missions),
           competences_obligatoires: required,

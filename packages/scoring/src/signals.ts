@@ -35,10 +35,10 @@ export function parseExperienceYears(text: string): { min: number; max: number |
     const start = m.index ?? 0;
     const context = t.slice(Math.max(0, start - 60), start + m[0].length + 40);
     if (!/(experience|exp\b|minimum|au moins|exige|requis|souhaite|dans un poste|similaire|years)/.test(context)) continue;
-    // « Disposant d'une expérience de plus de 20 ans en la matière » : l'ancienneté de l'ENTREPRISE, pas le poste.
+    // « Disposant d'une expérience de plus de 20 ans en la matière », « Forts de 25 ans d'expérience » : l'ancienneté de l'ENTREPRISE, pas le poste.
     const before = t.slice(Math.max(0, start - 45), start);
     const after = t.slice(start + m[0].length, start + m[0].length + 25);
-    if (/disposant d'une|forte? d'une|riche d'une|depuis|fondee|creee/.test(before) || /en la matiere|d'existence|d'histoire/.test(after)) continue;
+    if (/disposant d'une|forte? d'une|\bforte?s? de\b|riche d'une|depuis|fondee|creee/.test(before) || /en la matiere|d'existence|d'histoire/.test(after)) continue;
     // « Matthieu, notre CTO qui a plus de 12 ans d'expérience » : l'expérience d'une personne de l'équipe, pas celle demandée.
     if (/\bqui (a|ont|possede|possedent|cumule|cumulent|compte|comptent)\b|\b(notre|nos|son|sa|leur|leurs|votre) (cto|ceo|fondateur|fondatrice|directeur|directrice|manager|associes?|equipes?|experts?|consultants?|formateurs?|coachs?)\b/.test(before)) continue;
     // « 2 Tech Leads with a combined 30 years of experience » : l'expérience cumulée de l'équipe.

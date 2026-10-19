@@ -1,5 +1,6 @@
 import { DEFAULT_PROFILE } from "@job-radar/shared";
 import { describe, expect, it } from "vitest";
+import { withAiInfo } from "./jobs/service";
 import { createTestApp, login } from "./test-helpers";
 
 /** Seuil du profil (« Analyse IA à partir de ») : c'est lui qui décide des offres vérifiées. */
@@ -291,6 +292,20 @@ describe("cohérence : l'expérience lue par l'IA prime sur les règles", () => 
       info: { contractType: "CDI", remoteType: "hybrid" },
     })).json();
     expect(res.contractType).toBe("CDI");
+  });
+});
+
+describe("infos lues par l'IA (withAiInfo)", () => {
+  const verdict = { adequation: "faible" as const, avis: "", required: [], bonus: [], experience: null, contract: "STAGE", salary: { min: 18000, max: 18000 }, address: null };
+  it("cas réel (Devoteam) : « 25 ans minimum » des règles effacé, contrat et salaire de l'IA ; correction à la main prioritaire", async () => {
+    const { jobs } = await setup();
+    const job = { ...structuredClone(jobs.get("j-vue")!), experienceMinYrs: 25, experienceText: "25 ans minimum", contractType: "CDI" };
+    expect(withAiInfo(job, verdict)).toMatchObject({ experienceMinYrs: null, experienceText: null, contractType: "STAGE", salaryMin: 18000, salaryMax: 18000 });
+    const edited = { ...job, userEdits: { contractType: "CDI", experienceMinYrs: 3 } };
+    expect(withAiInfo(edited, verdict)).toMatchObject({ experienceMinYrs: 25, contractType: "CDI" });
+    // France Travail : l'expérience vient d'une fiche que l'IA ne voit pas.
+    const ft = { ...job, sources: [{ source: "france-travail", url: "https://x" }] };
+    expect(withAiInfo(ft, verdict).experienceMinYrs).toBe(25);
   });
 });
 

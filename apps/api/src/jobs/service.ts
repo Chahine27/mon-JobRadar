@@ -1,7 +1,7 @@
 import { JOB_STATUSES, type JobStatus, type Profile } from "@job-radar/shared";
 import { DEFAULT_RULES, hashProfile, scoreJob, scoringInputFromJob, type ScoreResult, type ScoringRules } from "@job-radar/scoring";
 import { distanceKm } from "../routes/leads";
-import { AI_SCORE_CAPS, type Adequation, analysisFitsJob, isAbridged, readVerdict } from "../ai-context";
+import { AI_SCORE_CAPS, type Adequation, type AiVerdict, analysisFitsJob, isAbridged, readVerdict } from "../ai-context";
 import { type JobEdits, type JobRow, type Stores, yearsText } from "../stores";
 
 export { ABRIDGED_SOURCES, isAbridged } from "../ai-context";
@@ -83,27 +83,39 @@ const OUT_OF_FEED: JobStatus[] = [...INACTIVE, "APPLIED"];
 export const MANUAL_SOURCE = "manual";
 const isManual = (j: { sources: Array<{ source: string }> }) => j.sources.some((s) => s.source === MANUAL_SOURCE);
 
-type Verdict = { adequation: Adequation; avis: string; experience: number | null; required: string[]; bonus: string[] } | null;
+type Verdict = AiVerdict | null;
 const aiSkillsOf = (v: Verdict) => (v && v.required.length + v.bonus.length > 0 ? { required: v.required, bonus: v.bonus } : null);
 
 /**
- * Quand l'IA a lu l'annonce (analyse à jour), c'est SON expérience demandée qui compte pour le score :
- * les règles se trompent sur les annonces ambiguës (« Exp. 1 à 7 ans » + « Exp. + 7 ans »).
+ * Quand l'IA a lu l'annonce (analyse à jour), c'est SA lecture qui compte pour le score et l'affichage : les règles se
+ * trompent sur les annonces ambiguës (« Exp. 1 à 7 ans » + « Exp. + 7 ans », « Forts de 25 ans d'expérience »).
+ * Une correction à la main prime toujours. L'adresse, elle, est enregistrée à l'analyse (le trajet la lit en base).
  */
-const withAiExperience = (job: JobRow, v: Verdict): JobRow =>
-  v &&
-  v.experience !== null &&
-  // « 0 an » sans « junior / débutant » écrit : l'IA a déduit un niveau que l'annonce ne donne pas (« early in your career »).
-  (v.experience > 0 || BEGINNER.test(`${job.title}
-${job.description}`)) &&
-  job.userEdits?.experienceMinYrs === undefined && // corrigée à la main : elle prime
-  (v.experience !== job.experienceMinYrs || !job.experienceText)
-    ? {
-        ...job,
-        experienceMinYrs: v.experience,
-        experienceText: v.experience === 0 ? "débutant accepté (lu par l'IA)" : `${v.experience} an${v.experience > 1 ? "s" : ""} minimum (lu par l'IA)`,
-      }
-    : job;
+export function withAiInfo(job: JobRow, v: Verdict): JobRow {
+  if (!v) return job;
+  const edited = job.userEdits ?? {};
+  const out = { ...job };
+  if (edited.experienceMinYrs === undefined) {
+    // « 0 an » sans « junior / débutant » écrit : l'IA a déduit un niveau que l'annonce ne donne pas (« early in your career »).
+    const e = v.experience === 0 && !BEGINNER.test(`${job.title}
+${job.description}`) ? null : v.experience;
+    if (e !== null && (e !== job.experienceMinYrs || !job.experienceText)) {
+      out.experienceMinYrs = e;
+      out.experienceText = e === 0 ? "débutant accepté (lu par l'IA)" : `${e} an${e > 1 ? "s" : ""} minimum (lu par l'IA)`;
+    } else if (e === null && job.experienceMinYrs !== null && !job.sources.some((s) => s.source === "france-travail")) {
+      // Rien d'exigé selon l'IA : le chiffre venait des règles (France Travail, lui, le donne dans une fiche que l'IA ne voit pas).
+      out.experienceMinYrs = null;
+      out.experienceText = null;
+    }
+  }
+  if (v.contract && edited.contractType === undefined) out.contractType = v.contract;
+  if (v.salary && edited.salaryMin === undefined && (v.salary.min !== job.salaryMin || v.salary.max !== job.salaryMax)) {
+    out.salaryMin = v.salary.min;
+    out.salaryMax = v.salary.max;
+    out.salaryText = null;
+  }
+  return out;
+}
 
 const BEGINNER = /\b(junior|jr|d[ée]butant(e|s)?|jeune dipl[ôo]m[ée]e?|sans exp[ée]rience|entry[- ]level|graduate|no experience required)\b/i;
 
@@ -186,7 +198,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
     const aiKey = aiSkills ? `${aiSkills.required.join("|")}#${aiSkills.bonus.join("|")}` : "-";
     const home = homes.get(profile) ?? null;
     const km = home && job.latitude !== null && job.longitude !== null ? distanceKm(home, { lat: job.latitude, lng: job.longitude }) : null;
-    const key = `${job.id}:${job.contentHash}:${job.department ?? "-"}:${job.experienceMinYrs ?? "-"}:${job.travelMinutes ?? "-"}:${job.travelMode ?? "-"}:${aiKey}:${profileHash}:${rules.version}:${km === null ? "-" : Math.round(km)}`;
+    const key = `${job.id}:${job.contentHash}:${job.department ?? "-"}:${job.experienceMinYrs ?? "-"}:${job.contractType ?? "-"}:${job.salaryMin ?? "-"}-${job.salaryMax ?? "-"}:${job.travelMinutes ?? "-"}:${job.travelMode ?? "-"}:${aiKey}:${profileHash}:${rules.version}:${km === null ? "-" : Math.round(km)}`;
     let s = cache.get(key);
     if (!s) {
       s = scoreJob({ ...scoringInputFromJob(job), aiSkills, distanceKm: km }, profile, rules);
@@ -226,7 +238,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
     const verdictOf = await loadVerdicts();
     return (j: JobRow) => {
       const v = verdictOf(j);
-      const jj = withAiExperience(j, v);
+      const jj = withAiInfo(j, v);
       return toSummary(jj, scoreOf(jj, profile, hash, v), v);
     };
   }
@@ -240,8 +252,8 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       const items = (await stores.jobs.list(statuses))
         .filter((j) => !q || `${j.title} ${j.company ?? ""} ${j.city ?? ""}`.toLowerCase().includes(q))
         .filter((j) => !f.source || j.sources.some((s) => s.source === f.source))
-        .filter((j) => !f.contract || (j.contractType ?? "unknown") === f.contract)
         .map(summarize)
+        .filter((s) => !f.contract || (s.contractType ?? "unknown") === f.contract)
         .filter((s) => !f.zone || s.zone === f.zone)
         .filter((s) => s.score.final >= f.minScore)
         // Une offre ajoutée à la main n'est jamais masquée : tu l'as choisie. Sauf hors de ta zone :
@@ -284,7 +296,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       if (!job) return null;
       const { profile, hash } = await loadProfile(userId);
       const verdict = (await loadVerdicts())(job);
-      const scored = withAiExperience(job, verdict);
+      const scored = withAiInfo(job, verdict);
       const s = scoreOf(scored, profile, hash, verdict);
       const summary = toSummary(scored, s, verdict);
       // Détail du calcul : note technique, bonus/malus, plafonds (règles, puis avis de l'IA), score final.

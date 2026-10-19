@@ -63,16 +63,32 @@ export const AI_SCORE_CAPS: Record<Adequation, number> = { forte: 100, moyenne: 
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 20) : []);
 
+export type AiVerdict = {
+  adequation: Adequation;
+  avis: string;
+  experience: number | null;
+  required: string[];
+  bonus: string[];
+  /** Lus par l'IA et vérifiés dans le texte (null : rien d'écrit, ou ancienne analyse). */
+  contract: string | null;
+  salary: { min: number; max: number } | null;
+  address: string | null;
+};
+
 /** Lit l'adéquation et l'avis dans une analyse enregistrée (null si illisible). */
 export function readVerdict(
   result: unknown,
-): { adequation: Adequation; avis: string; experience: number | null; required: string[]; bonus: string[] } | null {
+): AiVerdict | null {
   const r = result as {
     adequation?: unknown;
     avis?: unknown;
     experience_min_ans?: unknown;
     competences_obligatoires?: unknown;
     competences_bonus?: unknown;
+    contrat?: unknown;
+    salaire_min?: unknown;
+    salaire_max?: unknown;
+    adresse?: unknown;
   } | null;
   if (!r || typeof r !== "object") return null;
   if (r.adequation !== "forte" && r.adequation !== "moyenne" && r.adequation !== "faible") return null;
@@ -83,5 +99,8 @@ export function readVerdict(
     experience: typeof e === "number" && Number.isInteger(e) && e >= 0 && e <= 30 ? e : null,
     required: strings(r.competences_obligatoires),
     bonus: strings(r.competences_bonus),
+    contract: typeof r.contrat === "string" && r.contrat !== "inconnu" ? r.contrat : null,
+    salary: typeof r.salaire_min === "number" && typeof r.salaire_max === "number" ? { min: r.salaire_min, max: r.salaire_max } : null,
+    address: typeof r.adresse === "string" && r.adresse ? r.adresse : null,
   };
 }

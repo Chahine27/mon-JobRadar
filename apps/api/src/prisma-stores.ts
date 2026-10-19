@@ -219,6 +219,13 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
           create: { jobId, inputHash: a.inputHash, ...data },
           update: { ...data, createdAt: new Date() },
         });
+        // Adresse lue par l'IA (vérifiée dans le texte) : complète une offre sans adresse, et le trajet est refait avec.
+        // ponytail: une collecte qui met l'offre à jour l'efface ; la prochaine analyse (texte changé) la remet.
+        const address = (a.result as { adresse?: unknown } | null)?.adresse;
+        if (typeof address === "string" && address) {
+          const r = await prisma.job.updateMany({ where: { id: jobId, address: null, locationPrecision: { not: "address" } }, data: { address } });
+          if (r.count) await prisma.travelEstimate.deleteMany({ where: { jobId } });
+        }
         return { inputHash: row.inputHash, model: row.model, result: a.result, createdAt: row.createdAt };
       },
     },

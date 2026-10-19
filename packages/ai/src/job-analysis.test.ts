@@ -202,4 +202,15 @@ describe("points d'attention sur le contrat", () => {
     expect(result.experience_min_ans).toBeNull(); // aucun nombre d'années écrit
     expect(result.adequation).toBe("faible"); // poste orienté IA, IA vue seulement en projets
   });
+
+  it("contrat, salaire et adresse lus par l'IA : gardés seulement s'ils sont écrits dans l'annonce", async () => {
+    const job = { ...JOB, description: `${JOB.description} Salaire : 42 000 € à 48 000 € brut annuel. Lieu : 10 rue de Villiers, 92300 Levallois-Perret.` };
+    const read = (extra: object) =>
+      analyzeJobWithAi(new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify({ ...GOOD, ...extra }) } }) }), job, PROFILE);
+    const { result } = await read({ contrat: "CDI", salaire_min: 42000, salaire_max: 48000, salaire_periode: "annuel", adresse: "10 rue de Villiers, 92300 Levallois-Perret" });
+    expect(result).toMatchObject({ contrat: "CDI", salaire_min: 42000, salaire_max: 48000, adresse: "10 rue de Villiers, 92300 Levallois-Perret" });
+    // Inventés (absents du texte) : jetés.
+    const { result: bad } = await read({ salaire_min: 60000, salaire_max: 70000, salaire_periode: "annuel", adresse: "1 avenue des Champs-Élysées, 75008 Paris" });
+    expect(bad).toMatchObject({ salaire_min: null, salaire_max: null, adresse: null });
+  });
 });

@@ -37,6 +37,8 @@ describe("parseExperienceYears", () => {
 
   it("ignore les nombres sans rapport avec l'expérience", () => {
     expect(parseExperienceYears("Entreprise créée il y a 20 ans, 150 salariés")).toBeNull();
+    // Cas réel (Devoteam) : l'ancienneté de l'entreprise, pas l'expérience demandée.
+    expect(parseExperienceYears("Forts de 25 ans d’expérience, nous sommes un acteur clé du digital en Europe")).toBeNull();
   });
 
   it("Welcome to the Jungle (Theodo) : l'expérience du CTO n'est pas celle demandée ; « > 1 an » compris", () => {
