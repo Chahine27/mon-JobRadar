@@ -143,7 +143,8 @@ Règles :
 - points_attention : les pièges concrets pour le candidat (poste senior, mission chez un client, astreintes, déplacements, anglais exigé, habilitation, salaire non indiqué, technologie principale absente de son profil…). 5 maximum.
 - adequation : compare l'annonce au PROFIL DU CANDIDAT donné, y compris le contrat souhaité.
   forte = il a EN ENTREPRISE la plupart des compétences exigées, dont la technologie principale, ET l'expérience demandée ne dépasse pas la sienne.
-  faible = contrat connu non souhaité, OU expérience demandée nettement au-dessus de la sienne, OU technologie principale absente de son profil, OU au moins 2 compétences exigées manquantes, OU poste très orienté vers un domaine absent de son expérience en entreprise (IA, LLM, data science…).
+  faible = contrat connu non souhaité, OU expérience demandée nettement au-dessus de la sienne, OU technologie principale absente de son profil, OU au moins 2 compétences exigées manquantes, OU poste très orienté vers un domaine absent de son expérience en entreprise (concevoir des modèles d'IA ou de LLM, data science…).
+  Développer AVEC des agents de code IA (Claude Code, Cursor, Copilot, Codex) est une méthode de travail, pas un domaine : traite-le comme une compétence (en entreprise, en projets ou manquante), jamais à lui seul comme une raison de « faible ».
   Technologie principale vue seulement en projets : au mieux moyenne.
   moyenne = entre les deux.
 - avis : une phrase directe, en TUTOYANT le candidat (« tu », jamais « vous »), qui dit pourquoi ça colle ou pas, en distinguant ce qu'il a en entreprise, ce qu'il n'a vu qu'en projets et ce qui lui manque. Même règle pour points_attention.
