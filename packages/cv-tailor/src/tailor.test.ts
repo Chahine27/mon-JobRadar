@@ -99,6 +99,21 @@ describe("tailorCv — offres figées", () => {
     expect(tailorCv(off, job, "deux-colonnes").substitutions).toEqual([]);
   });
 
+  it("même compétence deux fois dans un groupe (« Claude Code », « Cursor ») : libellés gardés, pas de doublon", () => {
+    const ia = { id: "ia", label: "Développement assisté par IA", items: [
+      { skillId: "agents-ia", label: "Claude Code", level: "projet" },
+      { skillId: "agents-ia", label: "Cursor", level: "projet" },
+      { skillId: "mcp", label: "MCP", level: "projet" },
+    ] };
+    const master = CvMasterSchema.parse({ ...MASTER_INPUT, skillGroups: [...MASTER_INPUT.skillGroups, ia] });
+    const job = jobFor("Développeur Full Stack", "Vue.js, Java. Vous codez avec Claude Code et des agents IA.", ["Vue.js", "Java"]);
+    const group = tailorCv(master, job, "deux-colonnes").sections.skillGroups.find((g) => g.id === "ia")!;
+    expect(group.items.map((i) => i.label)).toEqual(["Claude Code", "Cursor", "MCP"]);
+    // Rien ajouté ailleurs depuis le profil (Claude Code est déjà dans le CV complet).
+    const elsewhere = tailorCv(master, { ...job, profileSkills: ["agents-ia"] } as typeof job, "deux-colonnes").sections.skillGroups.filter((g) => g.id !== "ia");
+    expect(elsewhere.flatMap((g) => g.items.map((i) => i.label))).not.toContain("Claude Code");
+  });
+
   it("jamais de libellé raccourci : « Docker Compose » reste tel quel quand l'offre écrit « Docker »", () => {
     const d = tailorCv(MASTER, jobFor("Développeur Java", "Java, Docker et Kubernetes.", ["Java", "Docker"]), "deux-colonnes");
     expect(d.sections.projects.find((p) => p.id === "parking")!.technologies).toContain("Docker Compose");

@@ -241,10 +241,15 @@ export function tailorCv(
     })
     .filter((x) => x.kept.length > 0)
     .sort((a, b) => (b.sum > 0 ? 1 : 0) - (a.sum > 0 ? 1 : 0) || b.sum - a.sum || a.gi - b.gi);
+  // Même compétence plusieurs fois dans un groupe (« Claude Code » et « Cursor », tous deux « agents-ia ») : libellés
+  // voulus, jamais remplacés par le mot de l'offre (sinon « Claude Code · Claude Code »).
   const skillGroups = groups.map(({ g, kept }) => ({
     id: g.id,
     label: g.label,
-    items: kept.map(({ it }) => ({ skillId: it.skillId, label: substitute(it.label, it.skillId, `skill:${it.skillId}`) })),
+    items: kept.map(({ it }) => ({
+      skillId: it.skillId,
+      label: kept.filter((k) => k.it.skillId === it.skillId).length > 1 ? it.label : substitute(it.label, it.skillId, `skill:${it.skillId}`),
+    })),
   }));
 
   // ── Titre : celui du type de poste qui partage le plus de compétences exigées ; sinon le titre par défaut.
