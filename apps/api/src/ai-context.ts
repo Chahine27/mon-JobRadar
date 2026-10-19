@@ -71,6 +71,8 @@ export type AiVerdict = {
   bonus: string[];
   /** Lus par l'IA et vérifiés dans le texte (null : rien d'écrit, ou ancienne analyse). */
   contract: string | null;
+  /** L'IA a lu l'annonce et n'y a trouvé aucun contrat (« inconnu » ; une ancienne analyse sans ce champ ne compte pas). */
+  noContract: boolean;
   salary: { min: number; max: number } | null;
   address: string | null;
 };
@@ -100,6 +102,7 @@ export function readVerdict(
     required: strings(r.competences_obligatoires),
     bonus: strings(r.competences_bonus),
     contract: typeof r.contrat === "string" && r.contrat !== "inconnu" ? r.contrat : null,
+    noContract: r.contrat === "inconnu",
     salary: typeof r.salaire_min === "number" && typeof r.salaire_max === "number" ? { min: r.salaire_min, max: r.salaire_max } : null,
     address: typeof r.adresse === "string" && r.adresse ? r.adresse : null,
   };

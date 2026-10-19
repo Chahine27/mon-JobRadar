@@ -23,7 +23,7 @@ describe(`scores figés — règles ${DEFAULT_RULES.version}`, () => {
   });
 
   it("version des règles attendue", () => {
-    expect(DEFAULT_RULES.version).toBe("2026-10-19.2");
+    expect(DEFAULT_RULES.version).toBe("2026-10-19.3");
   });
 });
 

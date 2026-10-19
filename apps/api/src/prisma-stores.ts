@@ -1,7 +1,7 @@
 import type { LetterReview } from "@job-radar/ai";
 import { Prisma, type PrismaClient } from "@job-radar/db";
 import { buildManualJob, removeManualJob, saveManualJob } from "@job-radar/pipeline";
-import { contractOfJob, salaryOfJob } from "@job-radar/scoring";
+import { contractFromTitle, contractOfJob, normalizeContract, salaryOfJob } from "@job-radar/scoring";
 import type { TailoredCvDraft } from "@job-radar/cv-tailor";
 import { type ApplyChannel, type ApplyCv, type CvMaster, CvMasterSchema, CvOverridesSchema, EMPTY_LETTER_KIT, EMPTY_OVERRIDES, LetterKitSchema, parseProfile, type TemplateId } from "@job-radar/shared";
 import { applyEdits, type FullTextInfo, type HomeLocation, type JobEdits, type JobRow, type ProfileRecord, type Stores } from "./stores";
@@ -51,7 +51,9 @@ function toJobRow(j: JobWithRelations): JobRow {
     }
   }
   // Même règle que le score : la pastille « Contrat » affiche ce que le score utilise.
+  const stated = normalizeContract(row.contractType) ?? contractFromTitle(row.title);
   row.contractType = contractOfJob(row);
+  row.contractFromDescription = !stated && row.contractType !== null;
   Object.assign(row, salaryOfJob(row));
   // Corrections saisies à la main : priment sur tout le reste (score et IA recalculés grâce au contentHash).
   const edits = (userEdits && typeof userEdits === "object" ? userEdits : null) as JobEdits | null;

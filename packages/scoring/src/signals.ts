@@ -77,7 +77,13 @@ export function contractFromText(text: string): ContractKind | null {
     if (/alternance|contrat d'apprentissage|en apprentissage|contrat de professionnalisation/.test(value) || (label && /apprentissage|professionnalisation/.test(value)))
       found.add("ALTERNANCE");
     if (/\bstage\b|stagiaire|internship/.test(value)) found.add("STAGE");
-    if ((label && /\b(lib|liberal|tjm)\b/.test(value)) || /\b(freelance|free-lance|independant|portage salarial)\b/.test(value))
+    // « indépendant » seul décrit souvent l'entreprise (« Groupe indépendant de conseil ») : freelance seulement
+    // sur une ligne de contrat ou dans un vrai contexte de statut (« travailleur indépendant », « auto-entrepreneur »).
+    if (
+      (label && /\b(lib|liberal|tjm|independant)\b/.test(value)) ||
+      /\b(freelance|free-lance|portage salarial|auto[- ]?entrepreneur|micro[- ]?entrepreneur)\b/.test(value) ||
+      /\b(travailleurs?|statut|consultants?|developpeurs?|en|d'|profils?)\s*:?\s*independants?\b/.test(value)
+    )
       found.add("FREELANCE");
     return found;
   };

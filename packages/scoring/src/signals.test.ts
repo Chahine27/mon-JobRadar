@@ -146,6 +146,15 @@ describe("contractFromText", () => {
     ["- 3 ans d'expérience minimum sur un poste similaire (alternance inclus)", null],
     ["2 ans d'expérience, stages compris", null],
     ["• Contract: CDI (permanent)\n• Also open to: interns (5–6 month internship)", "CDI"],
+    // « indépendant » qui décrit l'entreprise ou la personne n'est pas un contrat (cas réel : Néosoft).
+    ["Groupe indépendant de conseil en transformation digitale de près de 1800 collaborateurs", null],
+    ["Agence indépendante", null],
+    ["Vous êtes autonome et indépendant dans votre travail", null],
+    ["Mission ouverte aux travailleurs indépendants, TJM selon profil", "FREELANCE"],
+    ["Poste sous statut d'indépendant", "FREELANCE"],
+    ["Statut : indépendant", "FREELANCE"],
+    ["Type de contrat : Indépendant", "FREELANCE"],
+    ["Freelance ou portage salarial", "FREELANCE"],
   ] as const)("%s → %s", (text, expected) => {
     expect(contractFromText(text)).toBe(expected);
   });

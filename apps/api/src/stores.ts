@@ -72,6 +72,8 @@ export type JobRow = {
   applyCv?: ApplyCv | null;
   /** Relance faite après 14 jours sans réponse (null = pas encore relancée). */
   followedUpAt?: Date | null;
+  /** Contrat seulement deviné dans la description par le code (ni la source, ni le titre ne le disent) : l'IA peut l'effacer. */
+  contractFromDescription?: boolean;
 };
 
 export interface JobStore {

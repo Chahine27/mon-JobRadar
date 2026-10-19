@@ -156,7 +156,7 @@ describe("points d'attention sur le contrat", () => {
       description: "Alternance / Apprentissage\nDurée du contrat : 12 mois",
     };
 
-    expect(buildAnalysisPrompt(job, PROFILE)).toContain("Contrat : ALTERNANCE");
+    expect(buildAnalysisPrompt(job, PROFILE)).toContain("à vérifier dans le texte) : ALTERNANCE");
     const { result } = await analyzeJobWithAi(client, job, PROFILE);
     expect(result.adequation).toBe("faible");
     expect(result.points_attention).toContain("Contrat ALTERNANCE hors de tes critères (tu cherches : CDI)");

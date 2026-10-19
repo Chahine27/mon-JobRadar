@@ -296,7 +296,18 @@ describe("cohérence : l'expérience lue par l'IA prime sur les règles", () => 
 });
 
 describe("infos lues par l'IA (withAiInfo)", () => {
-  const verdict = { adequation: "faible" as const, avis: "", required: [], bonus: [], experience: null, contract: "STAGE", salary: { min: 18000, max: 18000 }, address: null };
+  const verdict = { adequation: "faible" as const, avis: "", required: [], bonus: [], experience: null, contract: "STAGE", noContract: false, salary: { min: 18000, max: 18000 }, address: null };
+
+  it("cas réel (Néosoft) : l'IA n'a trouvé aucun contrat dans l'annonce → celui deviné dans la description est effacé", async () => {
+    const { jobs } = await setup();
+    const none = { ...verdict, contract: null, noContract: true, salary: null };
+    const guessed = { ...structuredClone(jobs.get("j-vue")!), contractType: "FREELANCE", contractFromDescription: true };
+    expect(withAiInfo(guessed, none).contractType).toBeNull();
+    // Écrit par la source ou le titre, ou corrigé à la main : gardé ; ancienne analyse sans avis sur le contrat : rien ne change.
+    expect(withAiInfo({ ...guessed, contractFromDescription: false }, none).contractType).toBe("FREELANCE");
+    expect(withAiInfo({ ...guessed, userEdits: { contractType: "FREELANCE" } }, none).contractType).toBe("FREELANCE");
+    expect(withAiInfo(guessed, { ...none, noContract: false }).contractType).toBe("FREELANCE");
+  });
   it("cas réel (Devoteam) : « 25 ans minimum » des règles effacé, contrat et salaire de l'IA ; correction à la main prioritaire", async () => {
     const { jobs } = await setup();
     const job = { ...structuredClone(jobs.get("j-vue")!), experienceMinYrs: 25, experienceText: "25 ans minimum", contractType: "CDI" };

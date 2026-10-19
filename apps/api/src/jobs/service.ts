@@ -116,7 +116,12 @@ ${job.description}`) ? null : v.experience;
       out.experienceText = null;
     }
   }
-  if (v.contract && edited.contractType === undefined) out.contractType = v.contract;
+  if (edited.contractType === undefined) {
+    if (v.contract) out.contractType = v.contract;
+    // L'IA a lu toute l'annonce sans y trouver de contrat : celui que le code avait seulement deviné dans la
+    // description (« Groupe indépendant » → freelance) ne tient pas.
+    else if (v.noContract && job.contractFromDescription && !isAbridged(job)) out.contractType = null;
+  }
   if (v.salary && edited.salaryMin === undefined && (v.salary.min !== job.salaryMin || v.salary.max !== job.salaryMax)) {
     out.salaryMin = v.salary.min;
     out.salaryMax = v.salary.max;

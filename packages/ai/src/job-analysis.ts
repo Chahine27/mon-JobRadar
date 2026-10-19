@@ -171,7 +171,7 @@ ANNONCE
 Titre : ${job.title}
 Entreprise : ${job.company ?? "non indiquée"}
 Lieu : ${place}
-Contrat : ${contractOf(job) ?? "non indiqué"}
+Contrat (champ de la source ou deviné par un robot, à vérifier dans le texte) : ${contractOf(job) ?? "non indiqué"}
 Télétravail : ${job.remoteType === "unknown" ? "non indiqué" : job.remoteType}
 Salaire : ${salary}
 
