@@ -1,4 +1,4 @@
-import type { CvMaster, CvMasterState, CvOverrides, CvPdfResult, CvState, CvTemplateInfo, TemplateId, SpontaneousApplicationState, SpontaneousBatchState, AiReadResult, Application, ApplicationMail, MailTracking, SpontaneousItem, AiStatus, AutoCheckStatus, LetterKit, LetterState, StoredAiAnalysis, JobTextAnalysis, ManualJobForm, CollectionStatus, Company, Lead, LeadStatus, SpontaneousSettings, NotificationSettings, SourceItem, JobDetail, JobEdits, JobStatus, JobSummary, Profile, SkillStats, HomeLocation, ProfileRecord } from "./types";
+import type { ApplyInfo, CvMaster, CvMasterState, CvOverrides, CvPdfResult, CvState, CvTemplateInfo, TemplateId, SpontaneousApplicationState, SpontaneousBatchState, AiReadResult, Application, ApplicationMail, MailTracking, SpontaneousItem, AiStatus, AutoCheckStatus, LetterKit, LetterState, StoredAiAnalysis, JobTextAnalysis, ManualJobForm, CollectionStatus, Company, Lead, LeadStatus, SpontaneousSettings, NotificationSettings, SourceItem, JobDetail, JobEdits, JobStatus, JobSummary, Profile, SkillStats, HomeLocation, ProfileRecord } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -153,6 +153,9 @@ export const api = {
     request<SpontaneousApplicationState>("POST", `/api/leads/${encodeURIComponent(id)}/application/letter`, { title }),
   editApplicationLetter: (id: string, content: string) =>
     request<SpontaneousApplicationState>("PUT", `/api/leads/${encodeURIComponent(id)}/application`, { content }),
+  reviewApplicationLetter: (id: string) => request<SpontaneousApplicationState>("POST", `/api/leads/${encodeURIComponent(id)}/application/review`),
+  validateApplicationReview: (id: string) =>
+    request<SpontaneousApplicationState>("POST", `/api/leads/${encodeURIComponent(id)}/application/review/validate`),
   getApplicationBatch: () => request<SpontaneousBatchState>("GET", "/api/leads/applications/batch"),
   prepareApplicationBatch: () => request<Pick<SpontaneousBatchState, "batch">>("POST", "/api/leads/applications/batch"),
   sendApplication: (id: string, data: { to: string; subject: string; message: string; letter: string; force?: boolean }) =>
@@ -232,6 +235,8 @@ export const api = {
   downloadLetterPdf: (id: string, content: string) => download("POST", `/api/jobs/${encodeURIComponent(id)}/letter/pdf`, { content }, "Lettre_de_motivation.pdf"),
   editLetter: (id: string, content: string) =>
     request<LetterState>("PUT", `/api/jobs/${encodeURIComponent(id)}/letter`, { content }),
+  reviewLetter: (id: string) => request<LetterState>("POST", `/api/jobs/${encodeURIComponent(id)}/letter/review`),
+  validateLetterReview: (id: string) => request<LetterState>("POST", `/api/jobs/${encodeURIComponent(id)}/letter/review/validate`),
   findAbridged: (page: { url?: string; title?: string; company?: string }) =>
     request<{ job: { id: string; title: string; company: string | null; sources: string[] } | null }>("POST", "/api/jobs/find-abridged", page),
   /** Le serveur télécharge la page de l'offre et renvoie le même paquet que l'extension. */
@@ -253,6 +258,14 @@ export const api = {
   /** Corrections à la main ({} = revenir aux infos de la source). */
   editJob: (id: string, edits: JobEdits) => request<JobDetail>("PUT", `/api/jobs/${encodeURIComponent(id)}/edits`, edits),
   resetFullText: (id: string) => request<JobDetail>("DELETE", `/api/jobs/${encodeURIComponent(id)}/full-text`),
-  setJobStatus: (id: string, status: JobStatus) =>
-    request<JobDetail>("POST", `/api/jobs/${encodeURIComponent(id)}/status`, { status }),
+  /**
+   * « Postulé » : canal et CV (et contrat s'il manque) obligatoires. confirmDuplicate : « oui, je postule quand même »
+   * alors que la même offre a déjà reçu une candidature.
+   */
+  setJobStatus: (id: string, status: JobStatus, extra: Partial<ApplyInfo> & { confirmDuplicate?: boolean } = {}) =>
+    request<JobDetail>("POST", `/api/jobs/${encodeURIComponent(id)}/status`, { status, ...extra }),
+  /** Candidature sur offre relancée par toi (done: false = annuler). */
+  setJobFollowedUp: (id: string, done: boolean) => request<{ ok: true }>("POST", `/api/applications/jobs/${encodeURIComponent(id)}/followed-up`, { done }),
+  /** Complète une candidature d'avant la règle (canal, CV, contrat). */
+  setApplyInfo: (id: string, info: ApplyInfo) => request<JobDetail>("PUT", `/api/jobs/${encodeURIComponent(id)}/application-info`, info),
 };

@@ -3,7 +3,8 @@ import { ref, watch } from "vue";
 import { api, errorMessage } from "../api";
 import { type AnyApplication, STAGE_LABEL, STEPS, activeMails, careerUrl, daysSince, isJob, lastActivity, mailLabel, toFollowUp } from "../applications";
 import { mapsUrl, place, timeAgo } from "../format";
-import type { ApplicationMail, JobStatus, SpontaneousItem } from "../types";
+import type { Application, ApplicationMail, ApplyInfo, JobStatus, SpontaneousItem } from "../types";
+import ApplyInfoForm from "./ApplyInfoForm.vue";
 import Icon from "./Icon.vue";
 import SourceLogo from "./SourceLogo.vue";
 
@@ -28,6 +29,19 @@ const setStatus = (status: JobStatus) => act(props.app.id, () => api.setJobStatu
 const siteOutcome = (a: SpontaneousItem, outcome: "applied" | "none" | null) => act(a.id, () => api.setSiteOutcome(a.id, outcome));
 const dismiss = (m: ApplicationMail) => act(m.id, () => api.dismissApplicationMail(m.id));
 const confirm = (m: ApplicationMail) => act(m.id, () => api.confirmApplicationMail(m.id));
+
+/** Candidature d'avant la règle : canal, CV ou contrat manquant, à compléter ici. */
+const CHANNEL_LABEL: Record<ApplyInfo["channel"], string> = { mail: "Mail", formulaire: "Formulaire du site", linkedin: "Candidature simplifiée LinkedIn", autre: "Autre" };
+const incomplete = (a: Application) => !a.applyChannel || !a.applyCv || !a.contractType;
+const infoError = ref<string | null>(null);
+async function saveInfo(a: Application, info: ApplyInfo) {
+  infoError.value = null;
+  try {
+    await act(a.id, () => api.setApplyInfo(a.id, info));
+  } catch (e) {
+    infoError.value = errorMessage(e, "Enregistrement impossible.");
+  }
+}
 
 /** Relance (spontanée sans réponse depuis 7 jours) : texte écrit par le code, modifiable, envoyé seulement au clic. */
 const draft = ref<{ to: string; subject: string; message: string } | null>(null);
@@ -68,8 +82,22 @@ async function sendFollowUp(a: SpontaneousItem) {
       <span><Icon name="pin" :size="14" /><a v-if="place(app)" :href="mapsUrl(app.company, place(app))" target="_blank" rel="noopener">{{ place(app) }}</a><template v-else>Lieu non précisé</template></span>
       <span v-if="!isJob(app) && app.sentTo"><Icon name="mail" :size="14" />{{ app.sentTo }}</span>
       <span v-if="isJob(app) && app.cvs?.length"><Icon name="file" :size="14" />CV {{ app.cvs.map((c) => (c.template === "une-colonne" ? "une colonne" : "deux colonnes")).join(" et ") }}</span>
+      <span v-if="isJob(app) && app.applyChannel"><Icon name="send" :size="14" />{{ CHANNEL_LABEL[app.applyChannel] }} · {{ app.applyCv === "ats" ? "CV ATS" : "CV classique" }}</span>
       <span v-if="isJob(app)" class="origin"><SourceLogo v-for="s in app.sources" :key="s.source" :source="s.source" :size="18" /></span>
     </div>
+
+    <section v-if="isJob(app) && incomplete(app)" class="complete">
+      <strong class="small"><Icon name="alert" :size="14" />À compléter : comment tu as postulé</strong>
+      <ApplyInfoForm
+        :need-contract="!app.contractType"
+        :busy="busy === app.id"
+        :initial="{ channel: app.applyChannel ?? undefined, cv: app.applyCv ?? undefined }"
+        submit-label="Enregistrer"
+        @submit="(info) => saveInfo(app as Application, info)"
+        @cancel="infoError = null"
+      />
+      <p v-if="infoError" class="small low">{{ infoError }}</p>
+    </section>
 
     <div v-if="app.stage === 'CAREER_SITE'" class="career small">
       <Icon name="globe" :size="15" />Ils demandent de postuler sur leur site
@@ -94,6 +122,23 @@ async function sendFollowUp(a: SpontaneousItem) {
       <button type="button" class="link" :disabled="busy === app.id" @click="siteOutcome(app, null)">annuler</button>
     </p>
     <p v-if="isJob(app) && app.noAnswer" class="small muted"><Icon name="clock" :size="14" /> Aucune nouvelle depuis {{ daysSince(lastActivity(app)) }} jours : considérée comme refusée. Si une réponse arrive, elle reprendra son vrai statut.</p>
+    <section v-if="isJob(app) && toFollowUp(app)" class="relance">
+      <div class="small">
+        <strong>Relancer {{ app.company ?? "l'entreprise" }}</strong>
+        <span class="muted">
+          · pas de réponse depuis {{ daysSince(lastActivity(app)) }} jours. Relance par le même chemin que ta candidature<template v-if="app.applyChannel">
+          ({{ CHANNEL_LABEL[app.applyChannel] }})</template> : un message court qui rappelle le poste et ta date d'envoi.
+        </span>
+      </div>
+      <div class="row">
+        <button type="button" class="small primary" :disabled="busy === app.id" @click="act(app.id, () => api.setJobFollowedUp(app.id, true))"><Icon name="check" :size="14" />J'ai relancé</button>
+        <span class="small muted">Elle sort de « À relancer » ; sans réponse 14 jours après, elle sera comptée comme refusée.</span>
+      </div>
+    </section>
+    <p v-if="isJob(app) && app.followedUpAt" class="small muted">
+      <Icon name="send" :size="14" /> Relancée {{ timeAgo(app.followedUpAt) }} ·
+      <button type="button" class="link" :disabled="busy === app.id" @click="act(app.id, () => api.setJobFollowedUp(app.id, false))">annuler</button>
+    </p>
     <section v-if="!isJob(app) && toFollowUp(app)" class="relance">
       <div class="small">
         <strong>Relancer {{ app.company }}</strong>
@@ -150,6 +195,8 @@ async function sendFollowUp(a: SpontaneousItem) {
 .meta span { display: inline-flex; align-items: center; gap: 0.35rem; }
 .origin { gap: 0.25rem; }
 p { margin: 0; }
+.complete { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.7rem 0.9rem; border-radius: 10px; background: var(--mid-bg); }
+.complete strong { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--mid); }
 .steps { list-style: none; display: grid; grid-template-columns: repeat(4, 1fr); margin: 0; padding: 0; max-width: 32rem; }
 .steps li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.3rem; font-size: 0.75rem; color: var(--muted); text-align: center; }
 .steps li::before { content: ""; position: absolute; top: 0.55rem; left: -50%; width: 100%; height: 2px; background: var(--border); }

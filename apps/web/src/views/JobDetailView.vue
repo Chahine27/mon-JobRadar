@@ -3,13 +3,14 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { ApiError, api, errorMessage } from "../api";
 import AiAnalysisCard from "../components/AiAnalysisCard.vue";
+import ApplyInfoForm from "../components/ApplyInfoForm.vue";
 import CoverLetterCard from "../components/CoverLetterCard.vue";
 import CvCard from "../components/CvCard.vue";
 import Icon from "../components/Icon.vue";
 import ScoreBadge from "../components/ScoreBadge.vue";
 import SourceLogo from "../components/SourceLogo.vue";
 import { SOURCE_LABELS, REMOTE_LABELS, STATUS_LABELS, formatSalary, linkLabel, mapsUrl, safeUrl, skillRuleKind, timeAgo } from "../format";
-import type { JobDetail, JobEdits, JobStatus, RemoteType } from "../types";
+import type { ApplyInfo, JobDetail, JobEdits, JobStatus, RemoteType } from "../types";
 import type { ScoreRule } from "@job-radar/shared";
 import { goBack } from "../router";
 
@@ -66,6 +67,36 @@ const setStatus = (status: JobStatus) =>
   act(async () => {
     job.value = await api.setJobStatus(props.id, status);
   });
+
+/**
+ * « Marquer comme postulé » ouvre le formulaire (canal, CV, contrat s'il manque). Déjà postulé à la même offre vue
+ * sur un autre site : le bandeau le dit, et le bouton « Oui, postuler quand même » vaut confirmation.
+ */
+const applying = ref(false);
+async function markApplied(info: ApplyInfo) {
+  await act(async () => {
+    try {
+      job.value = await api.setJobStatus(props.id, "APPLIED", { ...info, confirmDuplicate: !!job.value?.appliedTwins.length });
+      applying.value = false;
+    } catch (e) {
+      if (!(e instanceof ApiError && e.code === "ALREADY_APPLIED")) throw e;
+      await reloadJob(); // candidature faite entre-temps (autre onglet) : le bandeau s'affiche, on redemande
+    }
+  });
+}
+const frDate = (d: string) => new Date(d).toLocaleDateString("fr-FR");
+
+/** Avant de postuler : score sous 60 ou plus de 2 ans d'expérience demandés (profil junior). */
+const MIN_APPLY_SCORE = 60;
+const MAX_JUNIOR_YEARS = 2;
+const applyWarnings = computed(() => {
+  const j = job.value;
+  if (!j || j.status === "APPLIED" || j.status === "REJECTED") return [];
+  const out: string[] = [];
+  if (j.score.final < MIN_APPLY_SCORE) out.push(`Score Job Radar de ${j.score.final} %, sous ${MIN_APPLY_SCORE} % : l'offre colle peu à ton profil.`);
+  if ((j.experienceMinYrs ?? 0) > MAX_JUNIOR_YEARS) out.push(`L'offre demande ${j.experienceMinYrs} ans d'expérience minimum (plus de ${MAX_JUNIOR_YEARS} ans) : ta candidature junior risque d'être écartée.`);
+  return out;
+});
 
 /** Après une analyse IA : le score a pu être corrigé. */
 async function reloadJob() {
@@ -308,6 +339,24 @@ const ruleLabel = (r: ScoreRule) =>
     </p>
 
     <p v-if="actionError" class="alert" role="alert"><Icon name="alert" :size="16" />{{ actionError }}</p>
+    <div v-if="applyWarnings.length" class="alert" role="status">
+      <Icon name="alert" :size="16" />
+      <span>
+        <strong>Avant de postuler :</strong>
+        <template v-for="w in applyWarnings" :key="w"><br />{{ w }}</template>
+      </span>
+    </div>
+    <div v-if="job.appliedTwins.length && job.status !== 'APPLIED'" class="alert twin" role="status">
+      <Icon name="alert" :size="16" />
+      <span>
+        Tu as déjà postulé à cette offre, vue sur un autre site :
+        <template v-for="(t, n) in job.appliedTwins" :key="t.id">
+          <template v-if="n">, </template>
+          <RouterLink :to="`/offres/${t.id}`">« {{ t.title }} »</RouterLink> le {{ frDate(t.appliedAt) }} ({{ t.sources.join(", ") }})
+        </template>.
+        <template v-if="applying"><br /><strong>Si c'est bien une autre candidature, valide avec « Oui, postuler quand même ».</strong></template>
+      </span>
+    </div>
     <section class="card actions">
       <a v-for="l in links" :key="l.url" class="btn primary" :href="l.safe!" target="_blank" rel="noopener noreferrer">
         <SourceLogo :source="l.source" :size="22" /> Voir l'offre sur {{ linkLabel(l.source, l.url) }}
@@ -315,9 +364,21 @@ const ruleLabel = (r: ScoreRule) =>
       </a>
       <span class="sep" />
       <button type="button" :disabled="busy || job.status === 'SAVED'" @click="setStatus('SAVED')"><Icon name="bookmark" :size="16" />Sauvegarder</button>
-      <button type="button" :disabled="busy || job.status === 'APPLIED'" @click="setStatus('APPLIED')"><Icon name="send" :size="16" />Marquer comme postulé</button>
+      <button type="button" :disabled="busy || job.status === 'APPLIED'" @click="applying = true"><Icon name="send" :size="16" />Marquer comme postulé</button>
       <button type="button" class="danger" :disabled="busy || job.status === 'IGNORED'" @click="openNotForMe"><Icon name="eyeOff" :size="16" />Pas pour moi</button>
       <button v-if="job.status !== 'SEEN'" type="button" class="ghost" :disabled="busy" @click="setStatus('SEEN')"><Icon name="undo" :size="16" />Remettre à « vue »</button>
+    </section>
+
+    <section v-if="applying && job.status !== 'APPLIED'" class="card apply">
+      <h2><Icon name="send" :size="17" />Ta candidature</h2>
+      <p class="muted small">Pour suivre ce qui marche : par où tu l'as envoyée, et avec quel CV.</p>
+      <ApplyInfoForm
+        :need-contract="!job.contractType"
+        :busy="busy"
+        :submit-label="job.appliedTwins.length ? 'Oui, postuler quand même' : 'Enregistrer la candidature'"
+        @submit="markApplied"
+        @cancel="applying = false"
+      />
     </section>
 
     <section v-if="notForMe" class="card not-for-me">

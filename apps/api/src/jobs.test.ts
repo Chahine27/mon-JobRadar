@@ -141,7 +141,7 @@ describe("statuts", () => {
   it("sauvegarder, postuler, ignorer — avec historique", async () => {
     const { post, get, events } = await setup();
     expect((await post("/api/jobs/j-vue/save")).json().status).toBe("SAVED");
-    expect((await post("/api/jobs/j-vue/apply")).json().status).toBe("APPLIED");
+    expect((await post("/api/jobs/j-vue/apply", { channel: "mail", cv: "ats" })).json().status).toBe("APPLIED");
     expect((await post("/api/jobs/j-ruby/ignore")).json().status).toBe("IGNORED");
     expect(events.map(({ at: _at, ...e }) => e)).toEqual([
       { jobId: "j-vue", from: "NEW", to: "SAVED" },
@@ -237,7 +237,7 @@ describe("candidatures (offres où j'ai postulé)", () => {
 
   it("« Postulé » sort du flux et apparaît dans Candidatures (avec la date) ; « Refusée » après candidature y reste", async () => {
     const { req } = await setup();
-    await req("POST", "/api/jobs/j-vue/apply");
+    await req("POST", "/api/jobs/j-vue/apply", { channel: "linkedin", cv: "classique" });
     const feed = (await req("GET", "/api/jobs?limit=50")).json().items as Array<{ id: string }>;
     expect(feed.some((j) => j.id === "j-vue")).toBe(false);
     expect((await req("GET", "/api/jobs?status=APPLIED")).json().items.map((j: { id: string }) => j.id)).toEqual(["j-vue"]);

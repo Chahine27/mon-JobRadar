@@ -77,9 +77,11 @@ const WRITE_LABEL: Record<WriteStatus, string> = {
 const sentIds = computed(() => new Set(sendSteps.value.filter((s) => s.status === "sent").map((s) => s.id)));
 const canSend = computed(() => !!state.value && state.value.mail.configured && state.value.cvPdf.found);
 const items = computed(() => (state.value?.items ?? []).filter((i) => !sentIds.value.has(i.lead.id)));
-const allSelected = computed(() => items.value.length > 0 && items.value.every((i) => selected.value.has(i.lead.id)));
+/** Lettres qui peuvent partir : relues sans problème, ou validées (les autres ne se cochent pas). */
+const sendable = computed(() => items.value.filter((i) => !i.blocked));
+const allSelected = computed(() => sendable.value.length > 0 && sendable.value.every((i) => selected.value.has(i.lead.id)));
 function toggleAll() {
-  selected.value = new Set(allSelected.value ? [] : items.value.map((i) => i.lead.id));
+  selected.value = new Set(allSelected.value ? [] : sendable.value.map((i) => i.lead.id));
 }
 function toggle(id: string) {
   const s = new Set(selected.value);
@@ -236,12 +238,13 @@ const ICON: Record<WriteStatus | SendStep["status"], IconName> = {
       <article v-for="i in items" :key="i.lead.id" class="item stack">
         <div class="top">
           <label class="row pick">
-            <input type="checkbox" :checked="selected.has(i.lead.id)" :disabled="sendingAll" @change="toggle(i.lead.id)" />
+            <input type="checkbox" :checked="selected.has(i.lead.id)" :disabled="sendingAll || !!i.blocked" @change="toggle(i.lead.id)" />
             <strong>{{ i.lead.name }}</strong>
             <span class="muted small">{{ i.lead.city ?? "" }}</span>
           </label>
           <span class="muted small"><Icon name="mail" :size="13" /> {{ i.lead.contactEmail }}</span>
         </div>
+        <p v-if="i.blocked" class="alert small"><Icon name="alert" :size="15" />{{ i.blocked }} Ouvre « Relire / modifier ».</p>
         <div v-if="i.warnings.length" class="warn-box small">
           <strong><Icon name="alert" :size="15" />À vérifier avant d'envoyer</strong>
           <ul class="clean"><li v-for="w in i.warnings" :key="w">{{ w }}</li></ul>
@@ -252,7 +255,7 @@ const ICON: Record<WriteStatus | SendStep["status"], IconName> = {
         </details>
         <div class="row buttons">
           <RouterLink :to="`/entreprises/${i.lead.id}/candidature`" class="btn ghost small"><Icon name="edit" :size="15" />Relire / modifier</RouterLink>
-          <button type="button" class="small" :disabled="!canSend || sendingAll" @click="sendOne(i)"><Icon name="send" :size="15" />Envoyer</button>
+          <button type="button" class="small" :disabled="!canSend || sendingAll || !!i.blocked" @click="sendOne(i)"><Icon name="send" :size="15" />Envoyer</button>
         </div>
       </article>
     </section>

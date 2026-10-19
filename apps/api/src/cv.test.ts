@@ -120,7 +120,7 @@ describe("CV adapté à une offre", () => {
     const both = (await req("POST", "/api/jobs/j-vue/cv/pdf", { templates: ["une-colonne", "deux-colonnes"] })).json();
     expect(both.results.map((x: { fileName: string }) => x.fileName)).toEqual(["TESTEUR_CAMILLE_ATS.pdf", "TESTEUR_CAMILLE.pdf"]);
 
-    await req("POST", "/api/jobs/j-vue/apply");
+    await req("POST", "/api/jobs/j-vue/apply", { channel: "formulaire", cv: "ats" });
     const apps = (await req("GET", "/api/applications")).json();
     const cvs = apps.jobs.find((j: { id: string }) => j.id === "j-vue").cvs;
     expect(cvs.map((c: { template: string }) => c.template).sort()).toEqual(["deux-colonnes", "une-colonne"]);

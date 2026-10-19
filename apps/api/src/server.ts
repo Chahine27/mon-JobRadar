@@ -1,4 +1,4 @@
-import { aiChain, analyzeJobWithAi, readApplicationMailWithAi, readJobWithAi, writeCoverLetter } from "@job-radar/ai";
+import { aiChain, analyzeJobWithAi, readApplicationMailWithAi, readJobWithAi, reviewLetter, writeCoverLetter } from "@job-radar/ai";
 import { createPrismaClient } from "@job-radar/db";
 import {
   createEmailNotifier,
@@ -336,6 +336,8 @@ const app = await buildApp({
     analyze: (job, profile) => analyzeJobWithAi(generalAi, job, profile),
     writeLetter: (job, kit, opts) => writeCoverLetter(opts?.spontaneous ? spontaneousLetterAi : letterAi, job, kit, new Date(), opts),
     readJob: (text, hints) => readJobWithAi(generalAi, text, hints),
+    // Relecture avant envoi : LanguageTool (gratuit) + IA gratuite seulement (comme la lecture des mails).
+    reviewLetter: (text, ctx) => reviewLetter(text, ctx, { ai: mailAi }),
   },
   mailer,
   // CV adapté : Edge (ou Chrome) sans fenêtre pour mesurer la page et créer le PDF, lancé à la première demande.

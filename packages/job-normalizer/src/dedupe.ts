@@ -79,3 +79,26 @@ export function sameOffer(a: OfferPlace, b: OfferPlace): boolean {
   if (pa && pb) return pa === pb;
   return !(a.department && b.department && a.department !== b.department);
 }
+
+/** Mots qui ne distinguent pas deux offres (liaisons, (H/F) éclaté, catégorie ajoutée par Adzuna : « (IT) »). */
+const FILLER = new Set(["de", "des", "du", "la", "le", "les", "et", "en", "a", "au", "aux", "pour", "sur", "h", "f", "x", "it"]);
+const titleWords = (title: string) => new Set(titleCore(title).split(" ").filter((w) => w && !FILLER.has(w)));
+
+/**
+ * Même offre « ou presque », vue sur un autre site (avant de postuler, pour ne pas envoyer deux fois) :
+ * même entreprise, intitulé quasi identique (80 % des mots en commun, ex. « … BDD Cucumber - F/H » et
+ * « … BDD Cucumber - F/H (IT) »), lieu compatible. Plus souple que sameOffer : sert à PRÉVENIR, jamais à fusionner.
+ * Deux postes différents chez la même entreprise (« C++/C# - Finance de marché » / « … (Deal Capture) ») restent distincts.
+ */
+export function similarOffer(a: OfferPlace & { company: string | null }, b: OfferPlace & { company: string | null }): boolean {
+  const ca = companyCore(a.company);
+  if (!ca || ca !== companyCore(b.company)) return false;
+  const wa = titleWords(a.title);
+  const wb = titleWords(b.title);
+  const common = [...wa].filter((w) => wb.has(w)).length;
+  if (!wa.size || common / new Set([...wa, ...wb]).size < 0.8) return false;
+  const pa = placeCore(a.city);
+  const pb = placeCore(b.city);
+  if (pa && pb) return pa === pb;
+  return !(a.department && b.department && a.department !== b.department);
+}

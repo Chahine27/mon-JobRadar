@@ -1,4 +1,5 @@
-import { JOB_STATUSES, type JobStatus, type Profile } from "@job-radar/shared";
+import { type ApplyChannel, type ApplyCv, JOB_STATUSES, type JobStatus, type Profile } from "@job-radar/shared";
+import { similarOffer } from "@job-radar/job-normalizer";
 import { DEFAULT_RULES, hashProfile, scoreJob, scoringInputFromJob, type ScoreResult, type ScoringRules } from "@job-radar/scoring";
 import { distanceKm } from "../routes/leads";
 import { AI_SCORE_CAPS, type Adequation, type AiVerdict, analysisFitsJob, isAbridged, readVerdict } from "../ai-context";
@@ -71,8 +72,15 @@ export type JobDetail = JobSummary & {
   scoreSteps: ScoreStep[];
   /** Critère Technique calculé sur les compétences lues par l'IA. */
   aiSkills: boolean;
-};
+  /** Candidatures déjà envoyées pour la même offre vue sur un autre site. */
+  appliedTwins: AppliedTwin[];
+} & ApplyInfoFields;
 
+/** Candidature : canal d'envoi et CV utilisé (null = pas encore renseigné). */
+export type ApplyInfoFields = { applyChannel: ApplyChannel | null; applyCv: ApplyCv | null; followedUpAt: Date | null };
+
+/** Candidature déjà envoyée pour la même offre (autre site). */
+export type AppliedTwin = { id: string; title: string; company: string | null; city: string | null; appliedAt: Date; sources: string[] };
 
 /** base : note technique ; adjust : bonus/malus en points ; cap : plafond (valeur atteinte) ; total : score final. */
 export type ScoreStep = { kind: "base" | "adjust" | "cap" | "total"; label: string; value: number };
@@ -273,12 +281,30 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
      * Candidatures : offres « Postulé », et celles refusées après une candidature, la plus récente d'abord.
      * `appliedAt` = date où tu as marqué l'offre comme postulée.
      */
-    async listApplications(userId: string): Promise<Array<JobSummary & { appliedAt: Date | null }>> {
+    /**
+     * Candidatures déjà envoyées pour la même offre vue sur un autre site (même entreprise, intitulé quasi identique,
+     * même lieu) : pour ne pas postuler deux fois. Plusieurs postes différents chez la même entreprise n'y sont pas.
+     */
+    async appliedTwins(id: string): Promise<AppliedTwin[]> {
+      const job = await stores.jobs.get(id);
+      if (!job) return [];
+      const applied = await stores.jobs.appliedDates();
+      return (await stores.jobs.list(["APPLIED", "REJECTED"]))
+        .filter((j) => j.id !== id && applied.has(j.id) && similarOffer(job, j))
+        .map((j) => ({ id: j.id, title: j.title, company: j.company, city: j.city, appliedAt: applied.get(j.id)!, sources: j.sources.map((s) => s.source) }));
+    },
+
+    /** Déjà marquée « Postulé » un jour (même refusée depuis) ? */
+    async wasApplied(id: string): Promise<boolean> {
+      return (await stores.jobs.appliedDates()).has(id);
+    },
+
+    async listApplications(userId: string): Promise<Array<JobSummary & ApplyInfoFields & { appliedAt: Date | null }>> {
       const summarize = await summarizer(userId);
       const applied = await stores.jobs.appliedDates();
       return (await stores.jobs.list(["APPLIED", "REJECTED"]))
         .filter((j) => j.status === "APPLIED" || (j.status === "REJECTED" && applied.has(j.id)))
-        .map((j) => ({ ...summarize(j), appliedAt: applied.get(j.id) ?? null }))
+        .map((j) => ({ ...summarize(j), applyChannel: j.applyChannel ?? null, applyCv: j.applyCv ?? null, followedUpAt: j.followedUpAt ?? null, appliedAt: applied.get(j.id) ?? null }))
         .sort((a, b) => (b.appliedAt?.getTime() ?? 0) - (a.appliedAt?.getTime() ?? 0));
     },
 
@@ -328,6 +354,10 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
         userEdits: job.userEdits ?? null,
         scoreSteps,
         aiSkills: !!aiSkillsOf(verdict),
+        appliedTwins: await this.appliedTwins(id),
+        applyChannel: job.applyChannel ?? null,
+        applyCv: job.applyCv ?? null,
+        followedUpAt: job.followedUpAt ?? null,
       };
     },
 

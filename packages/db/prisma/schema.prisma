@@ -118,6 +118,11 @@ model Job {
   status            JobStatus         @default(NEW)
   /// garde-fou anti double notification
   notifiedAt        DateTime?
+  /// Candidature : comment elle est partie (mail | formulaire | linkedin | autre) et quel CV (classique | ats). Demandés à « Postulé ».
+  applyChannel      String?
+  applyCv           String?
+  /// Relance faite par toi (par le canal d'envoi) après 14 jours sans réponse : une seule est proposée
+  followedUpAt      DateTime?
 
   sources  JobSourceLink[]
   scores   JobScore[]
@@ -212,6 +217,8 @@ model CoverLetter {
   content   String
   /// true = modifiée à la main
   edited    Boolean  @default(false)
+  /// Relecture automatique avant envoi (LetterReview, @job-radar/ai) : problèmes trouvés, validée ou non. null = pas encore relue.
+  review    Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -417,6 +424,8 @@ model SpontaneousApplication {
   letter    String
   /// true = modifiée à la main
   edited    Boolean     @default(false)
+  /// Relecture automatique avant envoi (LetterReview, @job-radar/ai). null = pas encore relue.
+  review    Json?
   sentAt    DateTime?
   sentTo    String?
   /// Message-ID du mail envoyé : une réponse dans ce fil se reconnaît sans deviner

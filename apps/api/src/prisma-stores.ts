@@ -1,8 +1,9 @@
+import type { LetterReview } from "@job-radar/ai";
 import { Prisma, type PrismaClient } from "@job-radar/db";
 import { buildManualJob, removeManualJob, saveManualJob } from "@job-radar/pipeline";
 import { contractOfJob, salaryOfJob } from "@job-radar/scoring";
 import type { TailoredCvDraft } from "@job-radar/cv-tailor";
-import { type CvMaster, CvMasterSchema, CvOverridesSchema, EMPTY_LETTER_KIT, EMPTY_OVERRIDES, LetterKitSchema, parseProfile, type TemplateId } from "@job-radar/shared";
+import { type ApplyChannel, type ApplyCv, type CvMaster, CvMasterSchema, CvOverridesSchema, EMPTY_LETTER_KIT, EMPTY_OVERRIDES, LetterKitSchema, parseProfile, type TemplateId } from "@job-radar/shared";
 import { applyEdits, type FullTextInfo, type HomeLocation, type JobEdits, type JobRow, type ProfileRecord, type Stores } from "./stores";
 
 const jobInclude = {
@@ -10,7 +11,7 @@ const jobInclude = {
   travel: { select: { minutes: true, mode: true } },
 } as const;
 
-type JobWithRelations = Omit<JobRow, "sources" | "travelMinutes" | "travelMode" | "userEdits" | "userEditsAt"> & {
+type JobWithRelations = Omit<JobRow, "sources" | "travelMinutes" | "travelMode" | "userEdits" | "userEditsAt" | "applyChannel" | "applyCv"> & {
   sources: Array<{ source: string; sourceUrl: string }>;
   travel: { minutes: number | null; mode: string | null } | null;
   fullText: string | null;
@@ -18,12 +19,16 @@ type JobWithRelations = Omit<JobRow, "sources" | "travelMinutes" | "travelMode" 
   fullInfo: unknown;
   userEdits: unknown;
   userEditsAt: Date | null;
+  applyChannel: string | null;
+  applyCv: string | null;
 };
 
 function toJobRow(j: JobWithRelations): JobRow {
-  const { sources, travel, fullText, fullExperienceYrs, fullInfo, userEdits, ...rest } = j;
+  const { sources, travel, fullText, fullExperienceYrs, fullInfo, userEdits, applyChannel, applyCv, ...rest } = j;
   const row: JobRow = {
     ...rest,
+    applyChannel: (applyChannel as ApplyChannel | null) ?? null,
+    applyCv: (applyCv as ApplyCv | null) ?? null,
     sources: sources.map((s) => ({ source: s.source, url: s.sourceUrl })),
     travelMinutes: travel?.minutes ?? null,
     travelMode: travel?.mode ?? null,
@@ -83,6 +88,9 @@ const jobSelect = {
   fullInfo: true,
   userEdits: true,
   userEditsAt: true,
+  applyChannel: true,
+  applyCv: true,
+  followedUpAt: true,
   ...jobInclude,
 } as const;
 
@@ -112,8 +120,15 @@ function homeColumns(home: HomeLocation | null | undefined) {
 const MAIL_SELECT = {
   id: true, jobId: true, spontaneousId: true, kind: true, detail: true, summary: true, needsReview: true, subject: true, fromAddress: true, messageId: true, receivedAt: true, dismissed: true,
 } as const;
+/** La colonne JSON « review » lue comme une relecture (écrite seulement par setReview). */
+function withReview<T extends { review: unknown }>(row: T): Omit<T, "review"> & { review: LetterReview | null };
+function withReview<T extends { review: unknown }>(row: T | null): (Omit<T, "review"> & { review: LetterReview | null }) | null;
+function withReview<T extends { review: unknown }>(row: T | null) {
+  return row && { ...row, review: (row.review as LetterReview | null) ?? null };
+}
+const LETTER_SELECT = { inputHash: true, model: true, content: true, edited: true, review: true, createdAt: true, updatedAt: true } as const;
 const APP_SELECT = {
-  inputHash: true, model: true, letter: true, edited: true, sentAt: true, sentTo: true, messageId: true, followedUpAt: true, createdAt: true, updatedAt: true,
+  inputHash: true, model: true, letter: true, edited: true, review: true, sentAt: true, sentTo: true, messageId: true, followedUpAt: true, createdAt: true, updatedAt: true,
 } as const;
 
 export function createPrismaStores(prisma: PrismaClient): Stores {
@@ -253,42 +268,40 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
       },
     },
     letters: {
-      get: (jobId) =>
-        prisma.coverLetter.findUnique({
-          where: { jobId },
-          select: { inputHash: true, model: true, content: true, edited: true, createdAt: true, updatedAt: true },
-        }),
+      get: async (jobId) => withReview(await prisma.coverLetter.findUnique({ where: { jobId }, select: LETTER_SELECT })),
       async save(jobId, l) {
-        const data = { inputHash: l.inputHash, model: l.model, content: l.content, edited: false };
-        return prisma.coverLetter.upsert({
-          where: { jobId },
-          create: { jobId, ...data },
-          update: { ...data, createdAt: new Date() },
-          select: { inputHash: true, model: true, content: true, edited: true, createdAt: true, updatedAt: true },
-        });
+        const data = { inputHash: l.inputHash, model: l.model, content: l.content, edited: false, review: Prisma.DbNull };
+        return withReview(
+          await prisma.coverLetter.upsert({ where: { jobId }, create: { jobId, ...data }, update: { ...data, createdAt: new Date() }, select: LETTER_SELECT }),
+        );
       },
       async edit(jobId, content) {
-        const r = await prisma.coverLetter.updateMany({ where: { jobId }, data: { content, edited: true } });
+        const r = await prisma.coverLetter.updateMany({ where: { jobId }, data: { content, edited: true, review: Prisma.DbNull } });
         if (r.count === 0) return null;
-        return prisma.coverLetter.findUnique({
-          where: { jobId },
-          select: { inputHash: true, model: true, content: true, edited: true, createdAt: true, updatedAt: true },
-        });
+        return withReview(await prisma.coverLetter.findUnique({ where: { jobId }, select: LETTER_SELECT }));
+      },
+      async setReview(jobId, review) {
+        await prisma.coverLetter.updateMany({ where: { jobId }, data: { review } });
       },
     },
     applications: {
-      get: (leadId) => prisma.spontaneousApplication.findUnique({ where: { leadId }, select: APP_SELECT }),
-      save: (leadId, a) =>
-        prisma.spontaneousApplication.upsert({
-          where: { leadId },
-          create: { leadId, ...a, edited: false },
-          update: { ...a, edited: false, createdAt: new Date() },
-          select: APP_SELECT,
-        }),
+      get: async (leadId) => withReview(await prisma.spontaneousApplication.findUnique({ where: { leadId }, select: APP_SELECT })),
+      save: async (leadId, a) =>
+        withReview(
+          await prisma.spontaneousApplication.upsert({
+            where: { leadId },
+            create: { leadId, ...a, edited: false },
+            update: { ...a, edited: false, review: Prisma.DbNull, createdAt: new Date() },
+            select: APP_SELECT,
+          }),
+        ),
       async edit(leadId, letter) {
-        const r = await prisma.spontaneousApplication.updateMany({ where: { leadId }, data: { letter, edited: true } });
+        const r = await prisma.spontaneousApplication.updateMany({ where: { leadId }, data: { letter, edited: true, review: Prisma.DbNull } });
         if (r.count === 0) return null;
-        return prisma.spontaneousApplication.findUnique({ where: { leadId }, select: APP_SELECT });
+        return withReview(await prisma.spontaneousApplication.findUnique({ where: { leadId }, select: APP_SELECT }));
+      },
+      async setReview(leadId, review) {
+        await prisma.spontaneousApplication.updateMany({ where: { leadId }, data: { review } });
       },
       async markSent(leadId, to, at, messageId) {
         await prisma.spontaneousApplication.update({ where: { leadId }, data: { sentAt: at, sentTo: to, messageId: messageId ?? null } });
@@ -528,6 +541,12 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
         if (r.count === 0) return null;
         const row = await prisma.job.findUnique({ where: { id }, select: jobSelect });
         return row ? toJobRow(row) : null;
+      },
+      async setFollowedUp(id, at) {
+        return (await prisma.job.updateMany({ where: { id }, data: { followedUpAt: at } })).count > 0;
+      },
+      async setApplyInfo(id, info) {
+        return (await prisma.job.updateMany({ where: { id }, data: { applyChannel: info.channel, applyCv: info.cv } })).count > 0;
       },
       async setEdits(id, edits) {
         const r = await prisma.job.updateMany({

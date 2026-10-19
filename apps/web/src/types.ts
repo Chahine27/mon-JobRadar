@@ -34,6 +34,8 @@ export type JobSummary = {
   department: string | null;
   zone: "local" | "remote" | "unknown";
   contractType: string | null;
+  /** années d'expérience minimum demandées (null = non précisé) */
+  experienceMinYrs: number | null;
   salaryMin: number | null;
   salaryMax: number | null;
   salaryText: string | null;
@@ -80,7 +82,9 @@ export type JobDetail = JobSummary & {
   scoreSteps: Array<{ kind: "base" | "adjust" | "cap" | "total"; label: string; value: number }>;
   /** Critère Technique calculé sur les compétences lues par l'IA. */
   aiSkills: boolean;
-};
+  /** Candidatures déjà envoyées pour la même offre vue sur un autre site. */
+  appliedTwins: Array<{ id: string; title: string; company: string | null; city: string | null; appliedAt: string; sources: string[] }>;
+} & ApplyInfoFields;
 
 export type HomeLocation = { label: string; lat: number; lng: number };
 
@@ -192,6 +196,7 @@ export type SpontaneousApplicationState = {
     letter: string;
     model: string;
     edited: boolean;
+    review: LetterReview | null;
     sentAt: string | null;
     sentTo: string | null;
     createdAt: string;
@@ -200,6 +205,8 @@ export type SpontaneousApplicationState = {
   upToDate: boolean;
   kitReady: boolean;
   warnings: string[];
+  /** raison du blocage de l'envoi (null = la lettre peut partir) */
+  blocked: string | null;
   mail: { configured: boolean; from: string | null };
   cvPdf: { name: string; found: boolean };
   letterPdfName: string;
@@ -290,8 +297,25 @@ export type LetterKit = {
   bannedWords: string;
   pdfName: string;
 };
-export type StoredLetter = { inputHash: string; model: string; content: string; edited: boolean; createdAt: string; updatedAt: string };
-export type LetterState = { letter: StoredLetter | null; upToDate: boolean; kitReady: boolean; warnings: string[]; cached?: boolean; durationMs?: number };
+/** Relecture automatique d'une lettre avant envoi (null = pas encore relue). */
+export type LetterReview = {
+  hash: string;
+  problems: Array<{ kind: "sujet" | "fragment" | "repetition" | "faute"; excerpt: string; detail: string }>;
+  errors: string[];
+  validated: boolean;
+  at: string;
+};
+export type StoredLetter = { inputHash: string; model: string; content: string; edited: boolean; review: LetterReview | null; createdAt: string; updatedAt: string };
+export type LetterState = {
+  letter: StoredLetter | null;
+  upToDate: boolean;
+  kitReady: boolean;
+  warnings: string[];
+  /** raison du blocage du PDF (null = la lettre peut partir) */
+  blocked: string | null;
+  cached?: boolean;
+  durationMs?: number;
+};
 
 /** Offre où tu as postulé (page « Candidatures »). */
 export type ApplicationStage = "SENT" | "ACK" | "INTERVIEW" | "OFFER" | "REJECTED" | "CAREER_SITE";
@@ -314,8 +338,17 @@ export type ApplicationMail = {
   dismissed: boolean;
 };
 
+/** Infos obligatoires d'une candidature (contractType : seulement si l'offre ne le dit pas). */
+export type ApplyInfo = {
+  channel: "mail" | "formulaire" | "linkedin" | "autre";
+  cv: "classique" | "ats";
+  contractType?: "CDI" | "CDD" | "INTERIM" | "ALTERNANCE" | "STAGE" | "FREELANCE";
+};
+/** Canal et CV enregistrés (null = pas encore renseigné, candidature d'avant la règle). */
+export type ApplyInfoFields = { applyChannel: ApplyInfo["channel"] | null; applyCv: ApplyInfo["cv"] | null; followedUpAt: string | null };
+
 /** Candidature sur une offre. */
-export type Application = JobSummary & {
+export type Application = JobSummary & ApplyInfoFields & {
   appliedAt: string | null;
   stage: ApplicationStage;
   /** aucune nouvelle depuis 14 jours : considérée refusée */

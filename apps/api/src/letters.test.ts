@@ -91,4 +91,30 @@ describe("lettre de motivation", () => {
     await req("POST", "/api/jobs/j-vue/letter?force=true");
     expect(letterNotices).toHaveLength(1); // une autre page ouverte ne compte pas… mais j-vue l'est encore
   });
+
+  it("relecture : un problème bloque le PDF jusqu'à validation ; une retouche relance la relecture", async () => {
+    const { req } = await setup();
+    await req("PUT", "/api/letter-kit", KIT);
+    const written = (await req("POST", "/api/jobs/j-vue/letter")).json();
+    expect(written.letter.review).toMatchObject({ problems: [], validated: false });
+    expect(written.blocked).toBeNull();
+
+    const bad = "Titulaire d'un Mastère, je souhaite vous rejoindre. Elle demande de comprendre le besoin métier.";
+    const flagged = (await req("PUT", "/api/jobs/j-vue/letter", { content: bad })).json();
+    expect(flagged.letter.review.problems).toMatchObject([{ kind: "sujet", excerpt: "Elle demande" }]);
+    expect(flagged.blocked).toContain("1 problème");
+    const pdf = await req("POST", "/api/jobs/j-vue/letter/pdf", { content: bad });
+    expect(pdf.statusCode).toBe(409);
+    expect(pdf.json().error).toBe("REVIEW_PENDING");
+
+    // Validée : le PDF part, mais seulement pour ce texte-là.
+    expect((await req("POST", "/api/jobs/j-vue/letter/review/validate")).json().blocked).toBeNull();
+    expect((await req("POST", "/api/jobs/j-vue/letter/pdf", { content: bad })).statusCode).toBe(200);
+    expect((await req("POST", "/api/jobs/j-vue/letter/pdf", { content: `${bad} Texte non enregistré.` })).statusCode).toBe(409);
+
+    // Retouchée : relue à nouveau, la validation est à refaire.
+    const again = (await req("PUT", "/api/jobs/j-vue/letter", { content: `${bad} Et une phrase.` })).json();
+    expect(again.letter.review.validated).toBe(false);
+    expect(again.blocked).not.toBeNull();
+  });
 });

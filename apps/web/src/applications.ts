@@ -41,7 +41,7 @@ export const toReview = (a: AnyApplication) => activeMails(a).filter((m) => m.ne
 export const daysSince = (d: string | null) => (d ? Math.floor((Date.now() - new Date(d).getTime()) / 86_400_000) : null);
 /** Dernière nouvelle : le plus récent entre l'envoi, la relance et le dernier mail reçu. */
 export const lastActivity = (a: AnyApplication) =>
-  [sentAt(a), isJob(a) ? null : a.followedUpAt, lastMail(a)?.receivedAt ?? null]
+  [sentAt(a), a.followedUpAt, lastMail(a)?.receivedAt ?? null]
     .filter((d): d is string => !!d)
     .reduce<string | null>((x, d) => (!x || new Date(d) > new Date(x) ? d : x), null);
 /** Absent (message d'absence) et pas encore rentré : jour du retour, sinon null. */
@@ -59,5 +59,10 @@ export const stageClass = (a: AnyApplication) =>
   awayUntil(a) ? "s-AWAY" : isFollowedUp(a) ? "s-FOLLOWED" : isJob(a) && a.noAnswer ? "s-NOANSWER" : `s-${a.stage}`;
 /** Spontanée envoyée il y a 7 jours ou plus, sans aucune réponse, jamais relancée : onglet « À relancer ». */
 // Même règle que le serveur (followUpDue) : 7 jours sans réponse, et après le retour d'une absence.
-export const toFollowUp = (a: AnyApplication) => !isJob(a) && a.stage === "SENT" && !a.noOpeningAt && !a.appliedOnSiteAt && followUpDue(a, a.mails);
+/**
+ * À relancer : spontanée sans réponse depuis 7 jours (relance par mail depuis Job Radar), ou candidature sur offre sans
+ * nouvelles depuis 14 jours et pas encore relancée (relance par toi, par le canal d'envoi). Une seule relance chacune.
+ */
+export const toFollowUp = (a: AnyApplication) =>
+  isJob(a) ? !!a.noAnswer && !a.followedUpAt : a.stage === "SENT" && !a.noOpeningAt && !a.appliedOnSiteAt && followUpDue(a, a.mails);
 export const careerUrl = (a: AnyApplication) => activeMails(a).findLast((m) => m.kind === "CAREER_SITE")?.detail ?? null;

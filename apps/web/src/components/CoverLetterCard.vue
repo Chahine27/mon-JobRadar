@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { ApiError, api, errorMessage } from "../api";
 import type { LetterState } from "../types";
 import Icon from "./Icon.vue";
+import LetterReviewBox from "./LetterReviewBox.vue";
 
 /** Carte « Lettre de motivation » d'une offre : écrite par l'IA, à relire et modifier. */
 const props = defineProps<{ jobId: string; title: string; company: string | null }>();
@@ -19,6 +20,7 @@ const copied = ref(false);
 const pdfSaved = ref<string | null>(null);
 const pdfSaving = ref(false);
 const confirmRedo = ref(false);
+const reviewing = ref(false);
 let timer: ReturnType<typeof setInterval> | undefined;
 
 function apply(s: LetterState) {
@@ -83,6 +85,22 @@ async function save() {
     saving.value = false;
   }
 }
+
+/** Relance la relecture, ou « J'ai relu, envoyer quand même ». */
+async function review(action: "rerun" | "validate") {
+  reviewing.value = true;
+  error.value = null;
+  try {
+    apply(await (action === "rerun" ? api.reviewLetter(props.jobId) : api.validateLetterReview(props.jobId)));
+  } catch (e) {
+    error.value = errorMessage(e, "Relecture impossible.");
+  } finally {
+    reviewing.value = false;
+  }
+}
+
+/** La lettre ne part pas (PDF, copie) tant qu'elle n'est pas enregistrée et relue, ou validée. */
+const locked = computed(() => dirty.value || saving.value || reviewing.value || !!state.value?.blocked);
 
 async function copy() {
   try {
@@ -163,11 +181,20 @@ const when = computed(() =>
           <ul class="clean"><li v-for="w in state.warnings" :key="w">{{ w }}</li></ul>
         </div>
 
+        <LetterReviewBox
+          :review="state.letter.review"
+          :blocked="state.blocked"
+          :dirty="dirty"
+          :busy="saving || reviewing"
+          @rerun="review('rerun')"
+          @validate="review('validate')"
+        />
+
         <textarea ref="box" v-model="draft" rows="12" spellcheck="true" lang="fr" aria-label="Texte de la lettre" />
 
         <div class="row buttons">
-          <button type="button" class="primary" @click="copy"><Icon :name="copied ? 'check' : 'file'" :size="16" />{{ copied ? "Copiée !" : "Copier" }}</button>
-          <button type="button" :disabled="pdfSaving" @click="savePdf">
+          <button type="button" class="primary" :disabled="locked" @click="copy"><Icon :name="copied ? 'check' : 'file'" :size="16" />{{ copied ? "Copiée !" : "Copier" }}</button>
+          <button type="button" :disabled="pdfSaving || locked" @click="savePdf">
             <Icon :name="pdfSaved ? 'check' : 'save'" :size="16" />{{ pdfSaving ? "Création…" : pdfSaved ? "PDF téléchargé !" : "Télécharger en PDF" }}
           </button>
           <button v-if="dirty" type="button" :disabled="saving" @click="save"><Icon name="check" :size="16" />Enregistrer mes modifications</button>

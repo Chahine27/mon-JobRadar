@@ -4,6 +4,13 @@ export const MAIL_KINDS = ["ACK", "INTERVIEW", "OFFER", "REJECTION", "CAREER_SIT
 export type MailKind = (typeof MAIL_KINDS)[number];
 
 /** Étape d'une candidature, de l'envoi à la réponse finale. */
+/** Comment la candidature à une offre est partie (obligatoire à « Postulé »). */
+export const APPLY_CHANNELS = ["mail", "formulaire", "linkedin", "autre"] as const;
+export type ApplyChannel = (typeof APPLY_CHANNELS)[number];
+/** CV envoyé : le classique (e-mail) ou celui fait pour les logiciels de tri (ATS). */
+export const APPLY_CVS = ["classique", "ats"] as const;
+export type ApplyCv = (typeof APPLY_CVS)[number];
+
 export const APPLICATION_STAGES = ["SENT", "ACK", "INTERVIEW", "OFFER", "REJECTED", "CAREER_SITE"] as const;
 export type ApplicationStage = (typeof APPLICATION_STAGES)[number];
 

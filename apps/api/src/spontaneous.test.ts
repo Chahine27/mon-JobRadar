@@ -123,7 +123,26 @@ describe("candidature spontanée", () => {
     expect(after.batch.steps).toMatchObject([{ name: "ALPHA LOGICIELS", status: "done" }]);
     expect(after.items.map((i: { lead: { id: string } }) => i.lead.id)).toEqual([lead.id]);
     expect(after.items[0].application.letter).toContain("Candidature spontanée");
+    expect(after.items[0].application.review).toMatchObject({ problems: [] }); // relue aussi en lot
     expect(sentMails).toHaveLength(0);
+  });
+
+  it("relecture : une lettre avec un problème ne part pas tant qu'elle n'est pas validée", async () => {
+    const t = await setup();
+    const { req, lead, sentMails } = t;
+    await req("PUT", "/api/letter-kit", KIT);
+    await t.app.inject({ method: "PUT", url: "/api/letter-kit/cv-pdf?name=CV.pdf", cookies: t.cookies, headers: { "content-type": "application/pdf" }, payload: "%PDF-1.4 faux CV" });
+    await req("POST", `/api/leads/${lead.id}/application/letter`, { title: "Développeur Vue.js" });
+    const letter = "Madame, Monsieur,\n\nJe souhaite rejoindre Alpha Logiciels. Elle demande de comprendre le besoin métier, ce que j'ai fait chez Banquo.";
+    expect((await req("PUT", `/api/leads/${lead.id}/application`, { content: letter })).json().blocked).toContain("problème");
+    const mail = { to: "rh@alpha.fr", subject: "Candidature spontanée", message: "Madame, Monsieur, voici ma candidature.", letter };
+    const refused = await req("POST", `/api/leads/${lead.id}/application/send`, mail);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error).toBe("REVIEW_PENDING");
+    expect(sentMails).toHaveLength(0);
+    await req("POST", `/api/leads/${lead.id}/application/review/validate`);
+    expect((await req("POST", `/api/leads/${lead.id}/application/send`, mail)).statusCode).toBe(200);
+    expect(sentMails).toHaveLength(1);
   });
 });
 

@@ -1,5 +1,5 @@
 import { analyzeJobText, cleanFullText } from "@job-radar/pipeline";
-import { JOB_STATUSES, MANUAL_CONTRACTS, ManualJobSchema } from "@job-radar/shared";
+import { APPLY_CHANNELS, APPLY_CVS, JOB_STATUSES, MANUAL_CONTRACTS, ManualJobSchema } from "@job-radar/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireAuth } from "../auth";
@@ -33,6 +33,8 @@ const ListQuery = z.object({
 
 const IdParams = z.object({ id: z.string().min(1).max(64) });
 const StatusBody = z.object({ status: z.enum(JOB_STATUSES) });
+/** Infos obligatoires d'une candidature : canal d'envoi, CV utilisé, et contrat si l'offre ne le dit pas. */
+const ApplyInfo = z.object({ channel: z.enum(APPLY_CHANNELS), cv: z.enum(APPLY_CVS), contractType: z.enum(MANUAL_CONTRACTS).optional() });
 const FullTextBody = z.object({
   text: z.string().max(60_000),
   /** Expérience demandée lue par l'IA (sinon lue dans le texte). */
@@ -178,6 +180,30 @@ export async function jobRoutes(
     return p;
   }
 
+  /**
+   * Vérifie et enregistre canal, CV (et contrat s'il manque à l'offre). Renvoie un message d'erreur si quelque chose
+   * manque, sinon null. `save: false` : vérifie seulement.
+   */
+  async function applyInfo(id: string, body: unknown, save: boolean): Promise<{ status: number; error: string; message: string } | null> {
+    const row = await opts.stores.jobs.get(id);
+    if (!row) return { status: 404, error: "JOB_NOT_FOUND", message: "Offre introuvable." };
+    const b = ApplyInfo.partial().catch({}).parse(body ?? {}); // une valeur inconnue compte comme absente
+    const missing = [
+      !b.channel && "le canal d'envoi",
+      !b.cv && "le CV utilisé",
+      !row.contractType && !b.contractType && "le type de contrat",
+    ].filter(Boolean);
+    const info = ApplyInfo.safeParse(b);
+    if (missing.length || !info.success) {
+      return { status: 400, error: "APPLY_INFO_MISSING", message: `Pour enregistrer la candidature, indique ${missing.join(", ")}.` };
+    }
+    if (!save) return null;
+    await opts.stores.jobs.setApplyInfo(id, info.data);
+    // Contrat inconnu de l'offre : enregistré comme une correction à la main (il compte aussi pour le score).
+    if (!row.contractType && info.data.contractType) await opts.stores.jobs.setEdits(id, { ...(row.userEdits ?? {}), contractType: info.data.contractType });
+    return null;
+  }
+
   const setStatus = (status?: (typeof JOB_STATUSES)[number]) =>
     async (request: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => {
       const params = IdParams.safeParse(request.params);
@@ -188,10 +214,33 @@ export async function jobRoutes(
         if (!body.success) return reply.code(400).send({ error: "INVALID_STATUS" });
         target = body.data.status;
       }
+      // « Postulé » une première fois : déjà postulé à la même offre vue sur un autre site ? On demande confirmation.
+      // (Une offre déjà postulée, remise en attente après un refus, ne redemande rien.)
+      const confirmed = z.object({ confirmDuplicate: z.literal(true) }).safeParse(request.body).success;
+      const firstApply = target === "APPLIED" && !(await jobs.wasApplied(params.data.id));
+      if (firstApply) {
+        const bad = await applyInfo(params.data.id, request.body, false);
+        if (bad) return reply.code(bad.status).send({ error: bad.error, message: bad.message });
+      }
+      if (firstApply && !confirmed) {
+        const twins = await jobs.appliedTwins(params.data.id);
+        if (twins.length) {
+          const t = twins[0]!;
+          return reply.code(409).send({
+            error: "ALREADY_APPLIED",
+            message: `Tu as déjà postulé à cette offre le ${t.appliedAt.toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" })} (vue sur ${t.sources.join(", ")}) : « ${t.title} ». Confirme si c'est bien une autre candidature.`,
+            twins,
+          });
+        }
+      }
       const job = await jobs.setStatus(request.userId!, params.data.id, target);
       if (!job) return reply.code(404).send({ error: "JOB_NOT_FOUND" });
       // « Postulé » : on mémorise quel CV exporté a été envoyé (modèle + date).
       if (target === "APPLIED") await opts.stores.tailoredCvs.markSent(params.data.id, new Date());
+      if (firstApply) {
+        await applyInfo(params.data.id, request.body, true);
+        return jobs.get(request.userId!, params.data.id);
+      }
       return job;
     };
 
@@ -249,6 +298,15 @@ export async function jobRoutes(
     if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
     const row = await opts.stores.jobs.setFullText(params.data.id, null);
     if (!row) return reply.code(404).send({ error: "JOB_NOT_FOUND" });
+    return jobs.get(request.userId!, params.data.id);
+  });
+
+  // Candidature déjà envoyée sans canal / CV / contrat : on les complète.
+  app.put("/api/jobs/:id/application-info", async (request, reply) => {
+    const params = IdParams.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
+    const bad = await applyInfo(params.data.id, request.body, true);
+    if (bad) return reply.code(bad.status).send({ error: bad.error, message: bad.message });
     return jobs.get(request.userId!, params.data.id);
   });
 

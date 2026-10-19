@@ -1,5 +1,6 @@
+import type { LetterReview } from "@job-radar/ai";
 import type { TailoredCvDraft } from "@job-radar/cv-tailor";
-import type { CvMaster, CvOverrides, JobStatus, LetterKit, Profile, RemoteType, TemplateId } from "@job-radar/shared";
+import type { ApplyChannel, ApplyCv, CvMaster, CvOverrides, JobStatus, LetterKit, Profile, RemoteType, TemplateId } from "@job-radar/shared";
 
 /**
  * Accès aux données dont l'API a besoin.
@@ -66,6 +67,11 @@ export type JobRow = {
   /** Corrections saisies à la main (déjà appliquées aux champs ci-dessus). */
   userEdits?: JobEdits | null;
   userEditsAt?: Date | null;
+  /** Candidature : canal d'envoi et CV utilisé (null = pas encore renseigné). */
+  applyChannel?: ApplyChannel | null;
+  applyCv?: ApplyCv | null;
+  /** Relance faite après 14 jours sans réponse (null = pas encore relancée). */
+  followedUpAt?: Date | null;
 };
 
 export interface JobStore {
@@ -83,6 +89,10 @@ export interface JobStore {
   setFullText(id: string, full: { text: string; experienceYears: number | null; info?: FullTextInfo | null } | null): Promise<JobRow | null>;
   /** Corrections saisies à la main (null = on revient aux infos de la source). null si l'offre n'existe pas. */
   setEdits(id: string, edits: JobEdits | null): Promise<JobRow | null>;
+  /** Canal d'envoi et CV utilisé pour la candidature. false si l'offre n'existe pas. */
+  setApplyInfo(id: string, info: { channel: ApplyChannel; cv: ApplyCv }): Promise<boolean>;
+  /** Relance faite (null = annulée). false si l'offre n'existe pas. */
+  setFollowedUp(id: string, at: Date | null): Promise<boolean>;
 }
 
 /** Infos corrigées à la main : un champ absent garde la valeur de la source. */
@@ -236,14 +246,15 @@ export interface LetterKitStore {
   setCvPdf(userId: string, file: { name: string; content: Buffer } | null): Promise<void>;
 }
 
-export type StoredLetter = { inputHash: string; model: string; content: string; edited: boolean; createdAt: Date; updatedAt: Date };
+export type StoredLetter = { inputHash: string; model: string; content: string; edited: boolean; review: LetterReview | null; createdAt: Date; updatedAt: Date };
 
 export interface CoverLetterStore {
   get(jobId: string): Promise<StoredLetter | null>;
   /** Nouvelle lettre de l'IA (remplace l'ancienne). */
   save(jobId: string, l: { inputHash: string; model: string; content: string }): Promise<StoredLetter>;
-  /** Modification à la main. null si pas de lettre pour cette offre. */
+  /** Modification à la main (la relecture est effacée : elle portait sur l'ancien texte). null si pas de lettre pour cette offre. */
   edit(jobId: string, content: string): Promise<StoredLetter | null>;
+  setReview(jobId: string, review: LetterReview): Promise<void>;
 }
 
 /** Candidature spontanée préparée pour une entreprise. */
@@ -252,6 +263,8 @@ export type StoredApplication = {
   model: string;
   letter: string;
   edited: boolean;
+  /** relecture automatique avant envoi (null = pas encore relue) */
+  review: LetterReview | null;
   sentAt: Date | null;
   sentTo: string | null;
   /** Message-ID du mail envoyé (la relance répond dans ce fil) */
@@ -266,6 +279,7 @@ export interface ApplicationStore {
   /** Nouvelle lettre de l'IA (remplace l'ancienne, garde la trace d'un envoi). */
   save(leadId: string, a: { inputHash: string; model: string; letter: string }): Promise<StoredApplication>;
   edit(leadId: string, letter: string): Promise<StoredApplication | null>;
+  setReview(leadId: string, review: LetterReview): Promise<void>;
   markSent(leadId: string, to: string, at: Date, messageId?: string | null): Promise<void>;
   /** Candidatures spontanées envoyées (onglet « Spontanées » de la page Candidatures). */
   listSent(): Promise<SentApplication[]>;

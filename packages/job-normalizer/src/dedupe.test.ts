@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dedupeKeyOf, sameAdText, sameOffer } from "./dedupe";
+import { dedupeKeyOf, sameAdText, sameOffer, similarOffer } from "./dedupe";
 
 const offer = (title: string, city: string | null = "Paris", department: string | null = "75") => ({ title, city, department });
 
@@ -59,5 +59,32 @@ describe("sameAdText : deux annonces d'une même source", () => {
 
   it("texte absent ou trop court : rien à conclure", () => {
     expect(sameAdText("", "Nous recherchons un Développeur .NET (H/F) sur Paris.")).toBe(true);
+  });
+});
+
+describe("même offre ou presque (avant de postuler)", () => {
+  const at = (title: string, company: string | null, city: string | null = "Paris", department: string | null = null) => ({ title, company, city, department });
+  // Cas réel : envoyée le 15/10 via Free-Work puis le 16/10 via Adzuna (qui ajoute « (IT) »).
+  const freeWork = at("Développeur Java Junior Spring Boot / BDD Cucumber - F/H", "INGENIANCE");
+  const adzuna = at("Développeur Java Junior Spring Boot / BDD Cucumber - F/H (IT)", "Ingeniance");
+
+  it("reconnaît la même offre sur un autre site (casse, « (IT) », lieu absent d'un côté)", () => {
+    expect(similarOffer(freeWork, adzuna)).toBe(true);
+    expect(similarOffer(freeWork, { ...adzuna, city: null })).toBe(true);
+  });
+
+  it("ne confond pas des postes différents chez la même entreprise", () => {
+    for (const other of [
+      "Développeur / Architecte Java Big Data - Finance de marché - F/H",
+      "Développeur Java Full Stack — Produits Dérivés Actions - F/H",
+      "Développeur C++/C# - Finance de marché (Deal Capture) - F/H",
+    ]) expect(similarOffer(freeWork, at(other, "Ingeniance"))).toBe(false);
+    expect(similarOffer(at("Développeur C++/C# - Finance de marché - F/H", "Ingeniance"), at("Développeur C++/C# - Finance de marché (Deal Capture) - F/H", "Ingeniance"))).toBe(false);
+  });
+
+  it("autre entreprise, entreprise inconnue ou autre ville : pas la même offre", () => {
+    expect(similarOffer(freeWork, { ...adzuna, company: "Acme" })).toBe(false);
+    expect(similarOffer({ ...freeWork, company: null }, { ...adzuna, company: null })).toBe(false);
+    expect(similarOffer(freeWork, { ...adzuna, city: "Lyon" })).toBe(false);
   });
 });

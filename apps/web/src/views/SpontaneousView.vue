@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { goBack } from "../router";
 import { api, errorMessage } from "../api";
 import Icon from "../components/Icon.vue";
+import LetterReviewBox from "../components/LetterReviewBox.vue";
 import PageHeader from "../components/PageHeader.vue";
 import type { SpontaneousApplicationState } from "../types";
 
@@ -67,7 +68,8 @@ const checks = computed(() => {
   const s = state.value;
   if (!s) return [];
   return [
-    { ok: !!letter.value.trim(), text: "Lettre écrite et relue" },
+    { ok: !!letter.value.trim(), text: "Lettre écrite" },
+    { ok: !dirty.value && !s.blocked, text: dirty.value ? "Lettre modifiée : enregistre-la pour qu'elle soit relue" : s.blocked ? "Relecture : problèmes à corriger ou à valider" : "Lettre relue" },
     { ok: emailOk.value, text: "Email de contact de l'entreprise" },
     { ok: s.cvPdf.found, text: s.cvPdf.found ? `CV joint : ${cvName.value}` : "CV PDF : envoie-le dans « CV & lettre »" },
     { ok: s.mail.configured, text: s.mail.configured ? `Envoi depuis ${s.mail.from}` : "Envoi d'email : SMTP à remplir dans .env" },
@@ -93,6 +95,20 @@ async function write() {
   } finally {
     clearInterval(timer);
     running.value = false;
+  }
+}
+
+const reviewing = ref(false);
+/** Relance la relecture, ou « J'ai relu, envoyer quand même ». */
+async function review(action: "rerun" | "validate") {
+  reviewing.value = true;
+  error.value = null;
+  try {
+    apply(await (action === "rerun" ? api.reviewApplicationLetter(props.id) : api.validateApplicationReview(props.id)));
+  } catch (e) {
+    error.value = errorMessage(e, "Relecture impossible.");
+  } finally {
+    reviewing.value = false;
   }
 }
 
@@ -185,6 +201,15 @@ async function send() {
           <strong><Icon name="alert" :size="15" />À vérifier avant d'envoyer</strong>
           <ul class="clean"><li v-for="w in state.warnings" :key="w">{{ w }}</li></ul>
         </div>
+        <LetterReviewBox
+          v-if="state.application"
+          :review="state.application.review"
+          :blocked="state.blocked"
+          :dirty="dirty"
+          :busy="saving || reviewing"
+          @rerun="review('rerun')"
+          @validate="review('validate')"
+        />
         <textarea ref="box" v-model="letter" rows="14" spellcheck="true" lang="fr" aria-label="Texte de la lettre" />
         <div class="row buttons">
           <button v-if="dirty" type="button" :disabled="saving" @click="save"><Icon name="check" :size="16" />Enregistrer mes modifications</button>

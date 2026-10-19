@@ -1,7 +1,10 @@
 import {
   LETTER_PROMPT_VERSION,
   checkLetter,
+  letterHash,
+  reviewBlock,
   spontaneousJobInput,
+  type LetterReview,
   type LetterOptions,
   type AiStatus,
   type AnalysisJobInput,
@@ -29,7 +32,10 @@ export type AiService = {
   analyze(job: AnalysisJobInput, profile: AnalysisProfileInput): Promise<{ result: JobAnalysisResult; model: string; durationMs: number }>;
   writeLetter(job: AnalysisJobInput, kit: LetterKit, opts?: LetterOptions): Promise<{ content: string; model: string; durationMs: number }>;
   readJob(text: string, hints: { title?: string | null; company?: string | null } | null): Promise<{ fields: ReadFields; model: string; durationMs: number }>;
+  /** Relecture avant envoi (LanguageTool + IA gratuite). Absente → la lettre devra être validée à la main. */
+  reviewLetter?(text: string, ctx: ReviewContext): Promise<LetterReview>;
 };
+type ReviewContext = { cvText: string; jobText: string; jobTitle?: string; spontaneous?: boolean };
 
 const LetterBody = z.object({ content: z.string().trim().min(1).max(20_000) });
 const IdParams = z.object({ id: z.string().min(1).max(64) });
@@ -355,6 +361,14 @@ export async function aiRoutes(
     return { kit, ready: letterKitReady(kit) };
   });
 
+  /** Relecture automatique d'une lettre (jamais d'erreur : un relecteur absent est noté, la lettre sera à valider). */
+  async function runReview(text: string, ctx: ReviewContext): Promise<LetterReview> {
+    if (ai?.reviewLetter) return ai.reviewLetter(text, ctx);
+    return { hash: letterHash(text), problems: [], errors: ["Relecture automatique non configurée."], validated: false, at: new Date().toISOString() };
+  }
+  const reviewPending = (reply: FastifyReply, message: string) => reply.code(409).send({ error: "REVIEW_PENDING", message });
+  const NOT_SAVED = "Enregistre d'abord la lettre : elle sera relue automatiquement.";
+
   /** Ce qui change le texte d'une lettre (le nom du PDF n'en fait pas partie) : sert à savoir si une lettre est à jour. */
   const writingKit = ({ pdfName: _, ...kit }: LetterKit) => kit;
 
@@ -376,7 +390,21 @@ export async function aiRoutes(
     if (letter && ctx.abridged) {
       warnings.unshift("L'annonce n'est qu'un extrait : colle l'annonce complète (bouton « Compléter l'annonce ») puis réécris la lettre, elle sera plus précise.");
     }
-    return { letter, upToDate: !!letter && letter.inputHash === ctx.inputHash, kitReady: letterKitReady(ctx.kit), warnings };
+    return {
+      letter,
+      upToDate: !!letter && letter.inputHash === ctx.inputHash,
+      kitReady: letterKitReady(ctx.kit),
+      warnings,
+      /** raison du blocage du PDF (null = la lettre peut partir) */
+      blocked: letter ? reviewBlock(letter.review, letter.content) : null,
+    };
+  }
+
+  /** Relit la lettre enregistrée d'une offre et garde le résultat. */
+  async function reviewJobLetter(letter: StoredLetter, jobId: string, ctx: { job: JobRow; kit: LetterKit | null }): Promise<StoredLetter> {
+    const review = await runReview(letter.content, { cvText: ctx.kit?.cvText ?? "", jobText: ctx.job.description, jobTitle: ctx.job.title });
+    await stores.letters.setReview(jobId, review);
+    return { ...letter, review };
   }
 
   app.get("/api/jobs/:id/letter", async (request, reply) => {
@@ -403,8 +431,8 @@ export async function aiRoutes(
 
     try {
       const { content, model, durationMs } = await withLock(() => ai.writeLetter(toJobInput(ctx.job), ctx.kit!));
-      const saved = await stores.letters.save(params.data.id, { inputHash: ctx.inputHash, model, content });
-      request.log.info({ jobId: params.data.id, durationMs, model }, "lettre IA écrite");
+      const saved = await reviewJobLetter(await stores.letters.save(params.data.id, { inputHash: ctx.inputHash, model, content }), params.data.id, ctx);
+      request.log.info({ jobId: params.data.id, durationMs, model, problems: saved.review?.problems.length }, "lettre IA écrite et relue");
       notifyLetter(reply, request.userId!, {
         title: "Lettre de motivation terminée",
         body: `${ctx.job.title}${ctx.job.company ? ` — ${ctx.job.company}` : ""}`,
@@ -426,6 +454,9 @@ export async function aiRoutes(
     if (!body.success) return reply.code(400).send({ error: "INVALID_LETTER" });
     const ctx = await letterContext(request.userId!, params.data.id);
     if (!ctx) return reply.code(404).send({ error: "JOB_NOT_FOUND" });
+    const saved = await stores.letters.get(params.data.id);
+    const blocked = saved ? reviewBlock(saved.review, body.data.content) : NOT_SAVED;
+    if (blocked) return reviewPending(reply, blocked);
     const pdf = await renderLetterPdf(body.data.content, `Lettre de motivation - ${ctx.job.company ?? ctx.job.title}`);
     const name = safeName(ctx.kit?.pdfName || DEFAULT_PDF_NAME);
     return reply.type("application/pdf").header("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(name)}`).send(pdf);
@@ -438,9 +469,33 @@ export async function aiRoutes(
     if (!body.success) return reply.code(400).send({ error: "INVALID_LETTER" });
     const ctx = await letterContext(request.userId!, params.data.id);
     if (!ctx) return reply.code(404).send({ error: "JOB_NOT_FOUND" });
-    const saved = await stores.letters.edit(params.data.id, body.data.content);
-    if (!saved) return reply.code(404).send({ error: "LETTER_NOT_FOUND" });
-    return letterReply(saved, ctx);
+    const edited = await stores.letters.edit(params.data.id, body.data.content);
+    if (!edited) return reply.code(404).send({ error: "LETTER_NOT_FOUND" });
+    return letterReply(await reviewJobLetter(edited, params.data.id, ctx), ctx);
+  });
+
+  /** Relance la relecture (relecteur injoignable la première fois, ou lettre écrite avant la relecture automatique). */
+  app.post("/api/jobs/:id/letter/review", async (request, reply) => {
+    const params = IdParams.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
+    const ctx = await letterContext(request.userId!, params.data.id);
+    if (!ctx) return reply.code(404).send({ error: "JOB_NOT_FOUND" });
+    const letter = await stores.letters.get(params.data.id);
+    if (!letter) return reply.code(404).send({ error: "LETTER_NOT_FOUND" });
+    return letterReply(await reviewJobLetter(letter, params.data.id, ctx), ctx);
+  });
+
+  /** « J'ai lu, j'envoie quand même » : valable pour ce texte-là seulement (une retouche relance la relecture). */
+  app.post("/api/jobs/:id/letter/review/validate", async (request, reply) => {
+    const params = IdParams.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
+    const ctx = await letterContext(request.userId!, params.data.id);
+    if (!ctx) return reply.code(404).send({ error: "JOB_NOT_FOUND" });
+    const letter = await stores.letters.get(params.data.id);
+    if (!letter?.review || letter.review.hash !== letterHash(letter.content)) return reviewPending(reply, NOT_SAVED);
+    const review = { ...letter.review, validated: true };
+    await stores.letters.setReview(params.data.id, review);
+    return letterReply({ ...letter, review }, ctx);
   });
 
   // ───── Candidatures spontanées (entreprises La Bonne Boîte) : lettre IA + envoi par email après relecture ─────
@@ -477,11 +532,20 @@ export async function aiRoutes(
       upToDate: !!ctx.application && ctx.application.inputHash === ctx.inputHash,
       kitReady: letterKitReady(ctx.kit),
       warnings: letter ? checkLetter(letter, kit, ctx.job.description, ctx.title, { spontaneous: true }) : [],
+      /** raison du blocage de l'envoi (null = la lettre peut partir) */
+      blocked: ctx.application ? reviewBlock(ctx.application.review, letter) : null,
       mail: { configured: !!opts.mailer?.isConfigured(), from: opts.mailer?.address() ?? null },
       cvPdf: { name: ctx.cvPdfName ?? "", found: !!ctx.cvPdfName },
       letterPdfName: safeName(kit.pdfName || DEFAULT_PDF_NAME),
       defaults: defaultMail(kit, ctx.lead.name, ctx.title),
     };
+  }
+
+  /** Relit la lettre spontanée enregistrée et garde le résultat. */
+  async function reviewApplication(application: StoredApplication, leadId: string, ctx: { kit: LetterKit | null; job: AnalysisJobInput }): Promise<StoredApplication> {
+    const review = await runReview(application.letter, { cvText: ctx.kit?.cvText ?? "", jobText: ctx.job.description, spontaneous: true });
+    await stores.applications.setReview(leadId, review);
+    return { ...application, review };
   }
 
   app.get("/api/leads/:id/application", async (request, reply) => {
@@ -505,8 +569,8 @@ export async function aiRoutes(
     }
     try {
       const { content, model, durationMs } = await withLock(() => ai.writeLetter(ctx.job, ctx.kit!, { spontaneous: true }));
-      const saved = await stores.applications.save(params.data.id, { inputHash: ctx.inputHash, model, letter: content });
-      request.log.info({ leadId: params.data.id, durationMs, model }, "lettre spontanée écrite");
+      const saved = await reviewApplication(await stores.applications.save(params.data.id, { inputHash: ctx.inputHash, model, letter: content }), params.data.id, ctx);
+      request.log.info({ leadId: params.data.id, durationMs, model, problems: saved.review?.problems.length }, "lettre spontanée écrite et relue");
       notifyLetter(reply, request.userId!, {
         title: "Lettre de motivation terminée",
         body: `Candidature spontanée — ${ctx.lead.name}`,
@@ -526,9 +590,29 @@ export async function aiRoutes(
     if (!params.success || !body.success) return reply.code(400).send({ error: "INVALID_LETTER" });
     const ctx = await applicationContext(request.userId!, params.data.id);
     if (!ctx) return reply.code(404).send({ error: "LEAD_NOT_FOUND" });
-    const saved = await stores.applications.edit(params.data.id, body.data.content);
-    if (!saved) return reply.code(404).send({ error: "APPLICATION_NOT_FOUND" });
-    return applicationReply({ ...ctx, application: saved });
+    const edited = await stores.applications.edit(params.data.id, body.data.content);
+    if (!edited) return reply.code(404).send({ error: "APPLICATION_NOT_FOUND" });
+    return applicationReply({ ...ctx, application: await reviewApplication(edited, params.data.id, ctx) });
+  });
+
+  app.post("/api/leads/:id/application/review", async (request, reply) => {
+    const params = IdParams.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
+    const ctx = await applicationContext(request.userId!, params.data.id);
+    if (!ctx?.application) return reply.code(404).send({ error: "APPLICATION_NOT_FOUND" });
+    return applicationReply({ ...ctx, application: await reviewApplication(ctx.application, params.data.id, ctx) });
+  });
+
+  app.post("/api/leads/:id/application/review/validate", async (request, reply) => {
+    const params = IdParams.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
+    const ctx = await applicationContext(request.userId!, params.data.id);
+    const application = ctx?.application;
+    if (!ctx || !application) return reply.code(404).send({ error: "APPLICATION_NOT_FOUND" });
+    if (!application.review || application.review.hash !== letterHash(application.letter)) return reviewPending(reply, NOT_SAVED);
+    const review = { ...application.review, validated: true };
+    await stores.applications.setReview(params.data.id, review);
+    return applicationReply({ ...ctx, application: { ...application, review } });
   });
 
   /** Envoi après relecture : lettre en PDF + CV PDF en pièces jointes, depuis ton adresse Gmail. Rien ne part sans ce clic. */
@@ -545,6 +629,8 @@ export async function aiRoutes(
     const kit = ctx.kit ?? EMPTY_LETTER_KIT;
     const cvPdf = await stores.letterKits.cvPdf(request.userId!);
     if (!cvPdf) return reply.code(400).send({ error: "CV_PDF_MISSING", message: "CV PDF manquant : envoie-le dans « CV & lettre »." });
+    const blocked = ctx.application ? reviewBlock(ctx.application.review, body.data.letter) : NOT_SAVED;
+    if (blocked) return reviewPending(reply, blocked);
     if (ctx.application?.sentAt && !body.data.force) {
       return reply.code(409).send({ error: "ALREADY_SENT", message: `Déjà envoyée le ${ctx.application.sentAt.toLocaleDateString("fr-FR")} à ${ctx.application.sentTo}.` });
     }
@@ -751,7 +837,7 @@ export async function aiRoutes(
           try {
             if (ctx?.kit && !ctx.application?.letter) {
               const { content, model } = await withLock(() => ai.writeLetter(ctx.job, ctx.kit!, { spontaneous: true }));
-              await stores.applications.save(step.leadId, { inputHash: ctx.inputHash, model, letter: content });
+              await reviewApplication(await stores.applications.save(step.leadId, { inputHash: ctx.inputHash, model, letter: content }), step.leadId, ctx);
             }
             step.status = "done";
             batch.done++;

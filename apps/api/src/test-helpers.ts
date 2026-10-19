@@ -1,4 +1,5 @@
 import { hash } from "@node-rs/argon2";
+import { letterHash } from "@job-radar/ai";
 import { DEFAULT_PROFILE, type LetterKit, type Profile } from "@job-radar/shared";
 import type { Mailer, Notifier, OutgoingMail } from "@job-radar/notifications";
 import { buildManualJob } from "@job-radar/pipeline";
@@ -131,16 +132,20 @@ export async function createMemoryStores() {
       save: async (leadId, a) => {
         const now = new Date();
         const prev = appRows.get(leadId);
-        const row = { ...a, edited: false, sentAt: prev?.sentAt ?? null, sentTo: prev?.sentTo ?? null, messageId: prev?.messageId ?? null, followedUpAt: prev?.followedUpAt ?? null, createdAt: now, updatedAt: now };
+        const row = { ...a, edited: false, review: null, sentAt: prev?.sentAt ?? null, sentTo: prev?.sentTo ?? null, messageId: prev?.messageId ?? null, followedUpAt: prev?.followedUpAt ?? null, createdAt: now, updatedAt: now };
         appRows.set(leadId, row);
         return row;
       },
       edit: async (leadId, letter) => {
         const row = appRows.get(leadId);
         if (!row) return null;
-        const next = { ...row, letter, edited: true, updatedAt: new Date() };
+        const next = { ...row, letter, edited: true, review: null, updatedAt: new Date() };
         appRows.set(leadId, next);
         return next;
+      },
+      setReview: async (leadId, review) => {
+        const row = appRows.get(leadId);
+        if (row) appRows.set(leadId, { ...row, review });
       },
       markSent: async (leadId, to, at, messageId) => {
         const row = appRows.get(leadId);
@@ -187,16 +192,20 @@ export async function createMemoryStores() {
       get: async (jobId) => letterRows.get(jobId) ?? null,
       save: async (jobId, l) => {
         const now = new Date();
-        const row = { ...l, edited: false, createdAt: now, updatedAt: now };
+        const row = { ...l, edited: false, review: null, createdAt: now, updatedAt: now };
         letterRows.set(jobId, row);
         return row;
       },
       edit: async (jobId, content) => {
         const row = letterRows.get(jobId);
         if (!row) return null;
-        const next = { ...row, content, edited: true, updatedAt: new Date() };
+        const next = { ...row, content, edited: true, review: null, updatedAt: new Date() };
         letterRows.set(jobId, next);
         return next;
+      },
+      setReview: async (jobId, review) => {
+        const row = letterRows.get(jobId);
+        if (row) letterRows.set(jobId, { ...row, review });
       },
     },
     analyses: {
@@ -356,12 +365,25 @@ export async function createMemoryStores() {
         }
         return j;
       },
+      setFollowedUp: async (id, at) => {
+        const j = jobs.get(id);
+        if (!j) return false;
+        j.followedUpAt = at;
+        return true;
+      },
+      setApplyInfo: async (id, info) => {
+        const j = jobs.get(id);
+        if (!j) return false;
+        Object.assign(j, { applyChannel: info.channel, applyCv: info.cv });
+        return true;
+      },
       setEdits: async (id, edits) => {
         const j = jobs.get(id);
         if (!j) return null;
         const before = beforeEdits.get(id) ?? structuredClone(j);
         beforeEdits.set(id, before);
-        Object.assign(j, structuredClone(before), { userEdits: null, userEditsAt: null });
+        // Les infos de candidature ne sont pas des corrections de l'offre : gardées.
+        Object.assign(j, structuredClone(before), { userEdits: null, userEditsAt: null, applyChannel: j.applyChannel ?? null, applyCv: j.applyCv ?? null, followedUpAt: j.followedUpAt ?? null });
         if (edits) applyEdits(j, edits, new Date());
         return j;
       },
@@ -489,6 +511,14 @@ export async function createTestApp(extra: Partial<AppOptions> = {}) {
         }
         return { model: "fake-model", durationMs: 7, content: `${kit.header}\n\nObjet : Candidature au poste de ${job.title}\n\nJe maîtrise Kafka.` };
       },
+      // Fausse relecture (sans Internet) : « Elle demande » est un sujet sans référent, le reste passe.
+      reviewLetter: async (text) => ({
+        hash: letterHash(text),
+        problems: text.includes("Elle demande") ? [{ kind: "sujet" as const, excerpt: "Elle demande", detail: "« Elle » ne renvoie à rien." }] : [],
+        errors: [],
+        validated: false,
+        at: new Date().toISOString(),
+      }),
       analyze: async (job, profile) => {
         if (!aiState.online) throw Object.assign(new Error("Ollama ne répond pas : lance l'appli Ollama sur ce PC."), { code: "AI_UNAVAILABLE" });
         aiCalls.push({ title: job.title, skills: profile.skills });

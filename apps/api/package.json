@@ -17,6 +17,7 @@
     "@job-radar/cv-render": "workspace:*",
     "@job-radar/cv-tailor": "workspace:*",
     "@job-radar/db": "workspace:*",
+    "@job-radar/job-normalizer": "workspace:*",
     "@job-radar/notifications": "workspace:*",
     "@job-radar/pipeline": "workspace:*",
     "@job-radar/routing": "workspace:*",

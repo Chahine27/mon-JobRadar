@@ -50,8 +50,9 @@ export async function applicationRoutes(app: FastifyInstance, opts: { stores: St
         const own_cvs = cvs.filter((c) => c.jobId === j.id);
         const sentCvs = own_cvs.some((c) => c.sentAt) ? own_cvs.filter((c) => c.sentAt) : own_cvs;
         const stage = applicationStage(own, j.status === "REJECTED");
-        // Aucune nouvelle depuis 14 jours : refus de fait (le statut de l'offre ne change pas, une réponse le corrige).
-        const silent = noAnswer(stage, j.appliedAt, own);
+        // Aucune nouvelle depuis 14 jours (depuis la relance, s'il y en a eu une) : refus de fait (le statut de l'offre
+        // ne change pas, une réponse le corrige).
+        const silent = noAnswer(stage, j.followedUpAt ?? j.appliedAt, own);
         return {
           ...j,
           stage: silent ? "REJECTED" : stage,
@@ -92,6 +93,16 @@ export async function applicationRoutes(app: FastifyInstance, opts: { stores: St
     }
     await opts.mailTracker.run({ full: true });
     return opts.mailTracker.status();
+  });
+
+  // Candidature sur offre sans réponse depuis 14 jours : « J'ai relancé » (par le même canal que l'envoi), ou null pour annuler.
+  app.post("/api/applications/jobs/:id/followed-up", async (request, reply) => {
+    const params = IdParams.safeParse(request.params);
+    const body = z.object({ done: z.boolean() }).safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: "INVALID_BODY" });
+    const ok = await stores.jobs.setFollowedUp(params.data.id, body.data.done ? new Date() : null);
+    if (!ok) return reply.code(404).send({ error: "JOB_NOT_FOUND" });
+    return { ok: true };
   });
 
   // Renvoyé vers leur site carrière : « J'ai postulé sur leur site » (le suivi des réponses continue),

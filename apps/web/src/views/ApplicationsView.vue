@@ -29,7 +29,7 @@ const error = ref<string | null>(null);
 const checking = ref(false);
 const open = ref<string | null>(null);
 
-type View = "overview" | "offers" | "spontaneous" | "followup" | "interviews" | "mails";
+type View = "overview" | "offers" | "spontaneous" | "followup" | "interviews" | "mails" | "incomplete";
 const view = ref<View>("overview");
 type Filter = "all" | "sent" | "answered" | "interview" | "rejected";
 const filter = ref<Filter>("all");
@@ -56,10 +56,12 @@ api.getLetterKit().then((r) => (firstName.value = r.kit.signature.trim().split(/
  * envoie une par une (pause entre deux) ; la page suit l'avancement chaque seconde.
  */
 const batch = ref<FollowUpBatch | null>(null);
+/** Seules les spontanées se relancent d'un clic (Job Radar connaît leur fil de mail) ; les offres, c'est toi. */
+const spontaneousToFollow = computed(() => spontaneous.value.filter(toFollowUp));
 const batchError = ref<string | null>(null);
 const batching = computed(() => !!batch.value?.running);
 async function followUpBatch() {
-  const n = Math.min(10, spontaneous.value.filter(toFollowUp).length);
+  const n = Math.min(10, spontaneousToFollow.value.length);
   if (!n || !window.confirm(`Envoyer ${n} relance${n > 1 ? "s" : ""} maintenant ? Chacune répond à ton premier mail, avec la même lettre et ton CV actuel.`)) return;
   batchError.value = null;
   try {
@@ -139,6 +141,9 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
 ];
 const matches = (a: AnyApplication, f: Filter) =>
   f === "all" ? a.stage !== "REJECTED" : f === "sent" ? a.stage === "SENT" : f === "answered" ? a.stage === "ACK" || a.stage === "CAREER_SITE" : f === "interview" ? a.stage === "INTERVIEW" || a.stage === "OFFER" : a.stage === "REJECTED";
+/** Candidatures sur offre sans canal d'envoi, CV ou contrat (d'avant la règle) : à compléter. */
+const incomplete = computed(() => jobs.value.filter((a) => !a.applyChannel || !a.applyCv || !a.contractType));
+
 /** Vue d'ensemble : les 8 plus urgentes du filtre ; onglets : toute la liste. */
 const rows = computed(() => {
   const list =
@@ -147,10 +152,12 @@ const rows = computed(() => {
       : view.value === "spontaneous"
         ? spontaneous.value
         : view.value === "followup"
-          ? spontaneous.value.filter(toFollowUp)
+          ? all.value.filter(toFollowUp)
           : view.value === "interviews"
             ? [...interviews.value, ...offers.value]
-            : all.value;
+            : view.value === "incomplete"
+              ? incomplete.value
+              : all.value;
   const shown = list.filter((a) => (view.value === "overview" ? matches(a, filter.value) : true));
   // À relancer : les plus anciennes d'abord, comme le bouton « Relancer les 10 plus anciennes ».
   const sorted = [...shown].sort((x, y) =>
@@ -199,8 +206,9 @@ const TABS: Array<{ id: View; label: string; icon: IconName; count?: () => numbe
   { id: "offers", label: "Sur une offre", icon: "briefcase", count: () => jobs.value.length },
   { id: "spontaneous", label: "Spontanées", icon: "send", count: () => spontaneous.value.length },
   { id: "interviews", label: "Entretiens", icon: "calendar", count: () => interviews.value.length + offers.value.length },
-  { id: "followup", label: "À relancer", icon: "clock", count: () => spontaneous.value.filter(toFollowUp).length },
+  { id: "followup", label: "À relancer", icon: "clock", count: () => all.value.filter(toFollowUp).length },
   { id: "mails", label: "E-mails", icon: "mail", count: () => reviewCount.value },
+  { id: "incomplete", label: "À compléter", icon: "edit", count: () => incomplete.value.length },
 ];
 const initial = (a: AnyApplication) => companyOf(a).trim().charAt(0).toUpperCase() || "?";
 const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature spontanée");
@@ -261,9 +269,9 @@ const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature sponta
               <p class="small muted">{{ view === "overview" ? "Les candidatures qui demandent ton attention" : `${rows.length} candidature${rows.length > 1 ? "s" : ""}` }}</p>
             </div>
           </div>
-          <div v-if="view === 'followup' && rows.length" class="row">
+          <div v-if="view === 'followup' && spontaneousToFollow.length" class="row">
             <button type="button" class="primary" :disabled="batching" @click="followUpBatch">
-              <Icon name="send" :size="16" />{{ batching ? "Envoi en cours…" : `Relancer les ${Math.min(10, rows.length)} plus anciennes` }}
+              <Icon name="send" :size="16" />{{ batching ? "Envoi en cours…" : spontaneousToFollow.length === 1 ? "Relancer la spontanée en attente" : `Relancer les ${Math.min(10, spontaneousToFollow.length)} spontanées les plus anciennes` }}
             </button>
           </div>
           <div v-if="view === 'overview'" class="seg" role="tablist" aria-label="Étape">
