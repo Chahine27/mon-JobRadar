@@ -12,15 +12,12 @@ import {
 import { cleanPastedText } from "@job-radar/pipeline";
 import type { Mailer } from "@job-radar/notifications";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
 import { DEFAULT_PROFILE, EMPTY_LETTER_KIT, LetterKitSchema, letterKitReady, type LetterKit, followUpDue } from "@job-radar/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import { analysisHash, isAbridged, toJobInput, toProfileInput } from "../ai-context";
 import { requireAuth } from "../auth";
-import { DEFAULT_PDF_NAME, renderLetterPdf, safeName, saveLetterPdf } from "../letter-pdf";
+import { DEFAULT_PDF_NAME, renderLetterPdf, safeName } from "../letter-pdf";
 import { DEFAULT_SPONTANEOUS_TITLE, defaultMail, followUpMail } from "../spontaneous-mail";
 import type { JobService } from "../jobs/service";
 import type { JobRow, LeadRow, StoredAnalysis, StoredApplication, StoredLetter, Stores } from "../stores";
@@ -67,7 +64,6 @@ export async function aiRoutes(
     stores: Stores;
     jobs: JobService;
     ai?: AiService;
-    savePdf?: typeof saveLetterPdf;
     mailer?: Mailer;
     /** Lettre terminée : prévient l'utilisateur (notification). Une erreur ici ne fait jamais échouer la lettre. */
     onLetterReady?: (n: { title: string; body: string; path: string; tag: string }) => Promise<unknown>;
@@ -78,7 +74,6 @@ export async function aiRoutes(
   },
 ) {
   const { stores, ai } = opts;
-  const savePdf = opts.savePdf ?? saveLetterPdf;
   app.addHook("preHandler", requireAuth);
 
   /**
@@ -322,7 +317,30 @@ export async function aiRoutes(
 
   app.get("/api/letter-kit", async (request) => {
     const kit = (await stores.letterKits.get(request.userId!)) ?? EMPTY_LETTER_KIT;
-    return { kit, ready: letterKitReady(kit) };
+    return { kit, ready: letterKitReady(kit), cvPdfName: await stores.letterKits.cvPdfName(request.userId!) };
+  });
+
+  // CV PDF joint aux candidatures spontanées : envoyé tel quel par le navigateur (le serveur ne voit pas les fichiers du PC).
+  app.addContentTypeParser("application/pdf", { parseAs: "buffer", bodyLimit: 5 * 1024 * 1024 }, (_request, body, done) => done(null, body));
+  // onRequest : la session est vérifiée avant de lire jusqu'à 5 Mo.
+  app.put("/api/letter-kit/cv-pdf", { onRequest: requireAuth }, async (request, reply) => {
+    const q = z.object({ name: z.string().trim().min(1).max(120) }).safeParse(request.query);
+    const body = request.body;
+    if (!q.success || !Buffer.isBuffer(body) || body.subarray(0, 5).toString("latin1") !== "%PDF-") {
+      return reply.code(400).send({ error: "INVALID_PDF", message: "Ce fichier n'est pas un PDF." });
+    }
+    const name = safeName(q.data.name.split(/[\\/]/).pop()!);
+    await stores.letterKits.setCvPdf(request.userId!, { name, content: body });
+    return { cvPdfName: name };
+  });
+  app.get("/api/letter-kit/cv-pdf", async (request, reply) => {
+    const file = await stores.letterKits.cvPdf(request.userId!);
+    if (!file) return reply.code(404).send({ error: "NO_CV_PDF" });
+    return reply.type("application/pdf").header("content-disposition", `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`).send(file.content);
+  });
+  app.delete("/api/letter-kit/cv-pdf", async (request) => {
+    await stores.letterKits.setCvPdf(request.userId!, null);
+    return { cvPdfName: null };
   });
 
   app.put("/api/letter-kit", async (request, reply) => {
@@ -337,12 +355,15 @@ export async function aiRoutes(
     return { kit, ready: letterKitReady(kit) };
   });
 
+  /** Ce qui change le texte d'une lettre (le nom du PDF n'en fait pas partie) : sert à savoir si une lettre est à jour. */
+  const writingKit = ({ pdfName: _, ...kit }: LetterKit) => kit;
+
   async function letterContext(userId: string, jobId: string) {
     const [job, kit] = await Promise.all([stores.jobs.get(jobId), stores.letterKits.get(userId)]);
     if (!job) return null;
     const inputHash = kit
       ? createHash("sha256")
-          .update(JSON.stringify([job.contentHash, kit, ai?.model ?? "", LETTER_PROMPT_VERSION]))
+          .update(JSON.stringify([job.contentHash, writingKit(kit), ai?.model ?? "", LETTER_PROMPT_VERSION]))
           .digest("hex")
           .slice(0, 32)
       : "";
@@ -397,7 +418,7 @@ export async function aiRoutes(
     }
   });
 
-  /** Enregistre la lettre (le texte affiché, même non enregistré) en PDF dans le dossier choisi, en remplaçant l'ancien. */
+  /** La lettre (le texte affiché, même non enregistré) en PDF, téléchargée par le navigateur. */
   app.post("/api/jobs/:id/letter/pdf", async (request, reply) => {
     const params = IdParams.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
@@ -405,20 +426,9 @@ export async function aiRoutes(
     if (!body.success) return reply.code(400).send({ error: "INVALID_LETTER" });
     const ctx = await letterContext(request.userId!, params.data.id);
     if (!ctx) return reply.code(404).send({ error: "JOB_NOT_FOUND" });
-    const folder = ctx.kit?.pdfFolder?.trim();
-    if (!folder) return reply.code(400).send({ error: "PDF_FOLDER_MISSING", message: "Choisis d'abord le dossier dans « CV & lettre »." });
-    try {
-      const title = `Lettre de motivation - ${ctx.job.company ?? ctx.job.title}`;
-      const file = await savePdf(body.data.content, folder, ctx.kit?.pdfName || DEFAULT_PDF_NAME, title);
-      return { file };
-    } catch (err) {
-      const code = (err as { code?: string }).code;
-      const message =
-        code === "EBUSY" || code === "EPERM" || code === "EACCES"
-          ? "Le PDF est ouvert dans un autre logiciel (ou le dossier est protégé) : ferme-le puis réessaie."
-          : `Enregistrement du PDF impossible : ${err instanceof Error ? err.message : String(err)}`;
-      return reply.code(500).send({ error: "PDF_FAILED", message });
-    }
+    const pdf = await renderLetterPdf(body.data.content, `Lettre de motivation - ${ctx.job.company ?? ctx.job.title}`);
+    const name = safeName(ctx.kit?.pdfName || DEFAULT_PDF_NAME);
+    return reply.type("application/pdf").header("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(name)}`).send(pdf);
   });
 
   app.put("/api/jobs/:id/letter", async (request, reply) => {
@@ -435,7 +445,6 @@ export async function aiRoutes(
 
   // ───── Candidatures spontanées (entreprises La Bonne Boîte) : lettre IA + envoi par email après relecture ─────
 
-  const cleanPath = (p: string) => p.trim().replace(/^"+|"+$/g, "");
   const TitleBody = z.object({ title: z.string().trim().min(3).max(120).optional() });
   const SendBody = z.object({
     to: z.email().max(200),
@@ -446,21 +455,20 @@ export async function aiRoutes(
   });
 
   async function applicationContext(userId: string, leadId: string, title = DEFAULT_SPONTANEOUS_TITLE) {
-    const [lead, kit, application] = await Promise.all([stores.leads.get(leadId), stores.letterKits.get(userId), stores.applications.get(leadId)]);
+    const [lead, kit, application, cvPdfName] = await Promise.all([stores.leads.get(leadId), stores.letterKits.get(userId), stores.applications.get(leadId), stores.letterKits.cvPdfName(userId)]);
     if (!lead) return null;
     const job = spontaneousJobInput(
       { name: lead.name, sector: lead.nafLabel, city: lead.city, department: lead.department, headcountMin: lead.headcountMin, headcountMax: lead.headcountMax },
       title,
     );
     const inputHash = kit
-      ? createHash("sha256").update(JSON.stringify(["spontanee", job, kit, ai?.model ?? "", LETTER_PROMPT_VERSION])).digest("hex").slice(0, 32)
+      ? createHash("sha256").update(JSON.stringify(["spontanee", job, writingKit(kit), ai?.model ?? "", LETTER_PROMPT_VERSION])).digest("hex").slice(0, 32)
       : "";
-    return { lead, kit, application, job, inputHash, title };
+    return { lead, kit, application, job, inputHash, title, cvPdfName };
   }
 
-  function applicationReply(ctx: { lead: LeadRow; kit: LetterKit | null; application: StoredApplication | null; job: AnalysisJobInput; inputHash: string; title: string }) {
+  function applicationReply(ctx: { lead: LeadRow; kit: LetterKit | null; application: StoredApplication | null; job: AnalysisJobInput; inputHash: string; title: string; cvPdfName: string | null }) {
     const kit = ctx.kit ?? EMPTY_LETTER_KIT;
-    const cvPath = cleanPath(kit.cvPdfPath ?? "");
     const letter = ctx.application?.letter ?? "";
     return {
       lead: ctx.lead,
@@ -470,7 +478,7 @@ export async function aiRoutes(
       kitReady: letterKitReady(ctx.kit),
       warnings: letter ? checkLetter(letter, kit, ctx.job.description, ctx.title, { spontaneous: true }) : [],
       mail: { configured: !!opts.mailer?.isConfigured(), from: opts.mailer?.address() ?? null },
-      cvPdf: { path: cvPath, found: !!cvPath && /\.pdf$/i.test(cvPath) && existsSync(cvPath) },
+      cvPdf: { name: ctx.cvPdfName ?? "", found: !!ctx.cvPdfName },
       letterPdfName: safeName(kit.pdfName || DEFAULT_PDF_NAME),
       defaults: defaultMail(kit, ctx.lead.name, ctx.title),
     };
@@ -535,10 +543,8 @@ export async function aiRoutes(
       return reply.code(503).send({ error: "MAIL_NOT_CONFIGURED", message: "Envoi d'email non configuré : remplis SMTP_HOST, SMTP_USER et SMTP_PASSWORD dans .env." });
     }
     const kit = ctx.kit ?? EMPTY_LETTER_KIT;
-    const cvPath = cleanPath(kit.cvPdfPath ?? "");
-    if (!cvPath || !/\.pdf$/i.test(cvPath) || !existsSync(cvPath)) {
-      return reply.code(400).send({ error: "CV_PDF_MISSING", message: "CV PDF introuvable : indique son chemin dans « CV & lettre »." });
-    }
+    const cvPdf = await stores.letterKits.cvPdf(request.userId!);
+    if (!cvPdf) return reply.code(400).send({ error: "CV_PDF_MISSING", message: "CV PDF manquant : envoie-le dans « CV & lettre »." });
     if (ctx.application?.sentAt && !body.data.force) {
       return reply.code(409).send({ error: "ALREADY_SENT", message: `Déjà envoyée le ${ctx.application.sentAt.toLocaleDateString("fr-FR")} à ${ctx.application.sentTo}.` });
     }
@@ -552,7 +558,7 @@ export async function aiRoutes(
         text: body.data.message,
         attachments: [
           { filename: safeName(kit.pdfName || DEFAULT_PDF_NAME), content: await renderLetterPdf(body.data.letter, title) },
-          { filename: basename(cvPath.replace(/\\/g, "/")), content: await readFile(cvPath) },
+          { filename: cvPdf.name, content: cvPdf.content },
         ],
       })) || null;
     } catch (err) {
@@ -606,10 +612,8 @@ export async function aiRoutes(
       return { status: 503, error: "MAIL_NOT_CONFIGURED", message: "Envoi d'email non configuré : remplis SMTP_HOST, SMTP_USER et SMTP_PASSWORD dans .env." };
     }
     const kit = ctx.kit ?? EMPTY_LETTER_KIT;
-    const cvPath = cleanPath(kit.cvPdfPath ?? "");
-    if (!cvPath || !/\.pdf$/i.test(cvPath) || !existsSync(cvPath)) {
-      return { status: 400, error: "CV_PDF_MISSING", message: "CV PDF introuvable : indique son chemin dans « CV & lettre »." };
-    }
+    const cvPdf = await stores.letterKits.cvPdf(userId);
+    if (!cvPdf) return { status: 400, error: "CV_PDF_MISSING", message: "CV PDF manquant : envoie-le dans « CV & lettre »." };
     const { subject, message } = mail ?? followUpMail(kit, ctx.lead.name, ctx.title, sent.sentAt);
     try {
       await opts.mailer.send({
@@ -620,7 +624,7 @@ export async function aiRoutes(
         inReplyTo: sent.messageId,
         attachments: [
           { filename: safeName(kit.pdfName || DEFAULT_PDF_NAME), content: await renderLetterPdf(sent.letter, `Lettre de motivation - ${ctx.lead.name}`) },
-          { filename: basename(cvPath.replace(/\\/g, "/")), content: await readFile(cvPath) },
+          { filename: cvPdf.name, content: cvPdf.content },
         ],
       });
     } catch (err) {
@@ -714,13 +718,13 @@ export async function aiRoutes(
     const all = await batchContexts(request.userId!);
     const ready = all.filter((c) => c.application?.letter);
     const kit = all[0]?.kit ?? (await stores.letterKits.get(request.userId!));
-    const cvPath = cleanPath(kit?.cvPdfPath ?? "");
+    const cvPdfName = await stores.letterKits.cvPdfName(request.userId!);
     return {
       batch,
       enabled: !!ai,
       kitReady: letterKitReady(kit),
       mail: { configured: !!opts.mailer?.isConfigured(), from: opts.mailer?.address() ?? null },
-      cvPdf: { path: cvPath, found: !!cvPath && /\.pdf$/i.test(cvPath) && existsSync(cvPath) },
+      cvPdf: { name: cvPdfName ?? "", found: !!cvPdfName },
       toWrite: all.length - ready.length,
       items: ready.map(applicationReply),
     };

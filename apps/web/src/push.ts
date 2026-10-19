@@ -21,7 +21,7 @@ export async function currentSubscription(): Promise<PushSubscription | null> {
 export async function subscribeThisBrowser(vapidPublicKey: string): Promise<PushSubscriptionJSON> {
   if (!pushSupported()) throw new Error("Ce navigateur ne gère pas les notifications.");
   const permission = await Notification.requestPermission();
-  if (permission !== "granted") throw new Error("Autorisation refusée : active les notifications pour localhost dans ton navigateur.");
+  if (permission !== "granted") throw new Error("Autorisation refusée : active les notifications pour ce site dans ton navigateur.");
   const reg = await navigator.serviceWorker.register("/sw.js");
   await navigator.serviceWorker.ready;
   const sub =

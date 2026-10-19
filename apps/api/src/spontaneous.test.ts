@@ -1,6 +1,3 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { defaultMail } from "./spontaneous-mail";
 import { createTestApp, login } from "./test-helpers";
@@ -21,7 +18,7 @@ async function setup() {
     t.app.inject({ method, url, cookies, ...(payload ? { payload } : {}) });
   await req("POST", "/api/leads/refresh");
   const lead = (await req("GET", "/api/leads?status=all")).json().items.find((l: { name: string }) => l.name === "ALPHA LOGICIELS");
-  return { ...t, req, lead };
+  return { ...t, req, lead, cookies };
 }
 
 describe("candidature spontanée", () => {
@@ -41,7 +38,8 @@ describe("candidature spontanée", () => {
   });
 
   it("lettre écrite en mode « spontanée », puis envoi seulement quand tout est prêt ; lettre PDF + CV joints ; entreprise « Contactée »", async () => {
-    const { req, lead, aiCalls, sentMails } = await setup();
+    const t = await setup();
+    const { req, lead, aiCalls, sentMails } = t;
     await req("PUT", "/api/letter-kit", KIT);
 
     const first = (await req("GET", `/api/leads/${lead.id}/application`)).json();
@@ -57,10 +55,12 @@ describe("candidature spontanée", () => {
     expect(noCv.json().error).toBe("CV_PDF_MISSING");
     expect(sentMails).toHaveLength(0);
 
-    const dir = await mkdtemp(join(tmpdir(), "jr-cv-"));
-    const cv = join(dir, "CV_Alex_Martin.pdf");
-    await writeFile(cv, "%PDF-1.4 faux CV");
-    await req("PUT", "/api/letter-kit", { ...KIT, cvPdfPath: `"${cv}"` });
+    // Le CV PDF est envoyé par le navigateur (corps binaire) ; un fichier qui n'est pas un PDF est refusé.
+    const upload = (payload: string, name = "C:\\Users\\alex\\CV_Alex_Martin.pdf") =>
+      t.app.inject({ method: "PUT", url: `/api/letter-kit/cv-pdf?name=${encodeURIComponent(name)}`, cookies: t.cookies, headers: { "content-type": "application/pdf" }, payload });
+    expect((await upload("pas un pdf")).statusCode).toBe(400);
+    expect((await upload("%PDF-1.4 faux CV")).json()).toEqual({ cvPdfName: "CV_Alex_Martin.pdf" });
+    expect((await req("GET", "/api/letter-kit")).json().cvPdfName).toBe("CV_Alex_Martin.pdf");
 
     const sent = await req("POST", `/api/leads/${lead.id}/application/send`, mail);
     expect(sent.statusCode).toBe(200);
@@ -131,10 +131,7 @@ describe("relance groupée des spontanées", () => {
   it("relance les plus anciennes sans réponse (7 jours et plus), dans leur fil, puis plus rien", async () => {
     const t = await setup();
     const { req, sentMails, stores, leadRows } = t;
-    const dir = await mkdtemp(join(tmpdir(), "jr-cv-"));
-    const cv = join(dir, "CV_Alex_Martin.pdf");
-    await writeFile(cv, "%PDF-1.4 faux CV");
-    await req("PUT", "/api/letter-kit", { ...KIT, cvPdfPath: cv });
+    await stores.letterKits.setCvPdf("u1", { name: "CV_Alex_Martin.pdf", content: Buffer.from("%PDF-1.4 faux CV") });
     const leads = [...leadRows.values()].slice(0, 2);
     const day = 86_400_000;
     // Deux envoyées il y a 10 et 9 jours ; une troisième il y a 2 jours (trop récente).

@@ -1,14 +1,18 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import PDFDocument from "pdfkit";
 
 /** Nom par défaut : le même à chaque fois, le nouveau PDF remplace l'ancien. */
 export const DEFAULT_PDF_NAME = "Lettre_de_motivation.pdf";
 
 const CM = 72 / 2.54;
-/** Calibri si Windows l'a (comme Word), sinon Helvetica (intégrée au PDF). */
-const WINDOWS_FONTS = { regular: "C:\\Windows\\Fonts\\calibri.ttf", bold: "C:\\Windows\\Fonts\\calibrib.ttf" };
+/**
+ * Calibri (Windows, comme Word), sinon Carlito (mêmes dimensions, serveur Linux : apt install fonts-crosextra-carlito),
+ * sinon Helvetica (intégrée au PDF).
+ */
+const FONTS = [
+  { regular: "C:\\Windows\\Fonts\\calibri.ttf", bold: "C:\\Windows\\Fonts\\calibrib.ttf" },
+  { regular: "/usr/share/fonts/truetype/crosextra/Carlito-Regular.ttf", bold: "/usr/share/fonts/truetype/crosextra/Carlito-Bold.ttf" },
+].find((f) => existsSync(f.regular) && existsSync(f.bold));
 
 const isDate = (b: string) => /^(À .+, )?le \d{2}\/\d{2}\/\d{4}$/i.test(b);
 const isObject = (b: string) => /^Objet\s*:/i.test(b);
@@ -23,10 +27,9 @@ export function renderLetterPdf(content: string, title = "Lettre de motivation")
     margins: { top: 2 * CM, bottom: 2 * CM, left: 2.2 * CM, right: 2.2 * CM },
     info: { Title: title },
   });
-  const calibri = existsSync(WINDOWS_FONTS.regular) && existsSync(WINDOWS_FONTS.bold);
-  const regular = calibri ? WINDOWS_FONTS.regular : "Helvetica";
-  const bold = calibri ? WINDOWS_FONTS.bold : "Helvetica-Bold";
-  const size = calibri ? 11 : 10.5;
+  const regular = FONTS?.regular ?? "Helvetica";
+  const bold = FONTS?.bold ?? "Helvetica-Bold";
+  const size = FONTS ? 11 : 10.5;
   const gap = size * 0.85;
 
   const chunks: Buffer[] = [];
@@ -55,14 +58,6 @@ export function renderLetterPdf(content: string, title = "Lettre de motivation")
   });
   doc.end();
   return done;
-}
-
-/** Enregistre (en remplaçant) le PDF dans le dossier choisi. Crée le dossier s'il n'existe pas. */
-export async function saveLetterPdf(content: string, folder: string, name: string, title?: string): Promise<string> {
-  const file = join(folder, safeName(name));
-  await mkdir(folder, { recursive: true });
-  await writeFile(file, await renderLetterPdf(content, title));
-  return file;
 }
 
 export function safeName(name: string): string {

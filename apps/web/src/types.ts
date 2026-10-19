@@ -201,7 +201,7 @@ export type SpontaneousApplicationState = {
   kitReady: boolean;
   warnings: string[];
   mail: { configured: boolean; from: string | null };
-  cvPdf: { path: string; found: boolean };
+  cvPdf: { name: string; found: boolean };
   letterPdfName: string;
   defaults: { subject: string; message: string };
   sentAt?: string;
@@ -220,7 +220,7 @@ export type SpontaneousBatchState = {
   enabled: boolean;
   kitReady: boolean;
   mail: { configured: boolean; from: string | null };
-  cvPdf: { path: string; found: boolean };
+  cvPdf: { name: string; found: boolean };
   toWrite: number;
   items: SpontaneousApplicationState[];
 };
@@ -288,12 +288,7 @@ export type LetterKit = {
   mastered: string;
   closing: string;
   bannedWords: string;
-  pdfFolder: string;
   pdfName: string;
-  cvPdfPath: string;
-  cvFolder: string;
-  cvSubfolder: boolean;
-  cvReplace: boolean;
 };
 export type StoredLetter = { inputHash: string; model: string; content: string; edited: boolean; createdAt: string; updatedAt: string };
 export type LetterState = { letter: StoredLetter | null; upToDate: boolean; kitReady: boolean; warnings: string[]; cached?: boolean; durationMs?: number };
@@ -399,8 +394,8 @@ export type TailoredCv = {
 };
 export type CvState = { cv: TailoredCv | null; stale: boolean; staleReasons: string[]; rulesVersion: string; pdfAvailable: boolean };
 export type CvPdfResult = {
-  results: Array<{ template: TemplateId; ok: boolean; path: string | null; checks: CvCheck[]; warnings: string[] }>;
-  folder: string | null;
+  /** pdf : contenu en base64, téléchargé par le navigateur. */
+  results: Array<{ template: TemplateId; ok: boolean; fileName: string | null; pdf: string | null; checks: CvCheck[]; warnings: string[] }>;
 };
 
 /** Compétences demandées dans toutes les offres collectées (page Statistiques). */

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { ApiError, api, errorMessage } from "../api";
+import { ApiError, api, downloadFile, errorMessage } from "../api";
 import type { CvMaster, CvOverrides, CvPicked, CvState, CvTemplateInfo, TemplateId } from "../types";
 import Icon from "./Icon.vue";
 
@@ -118,11 +118,12 @@ const validate = () =>
 async function exportPdf(both: boolean) {
   await run(both ? "both" : "pdf", async () => {
     const res = await api.exportJobCv(props.jobId, both ? templates.value.map((t) => t.id) : [tab.value]);
-    exported.value = res.results.filter((r) => r.path).map((r) => r.path).join(" et ");
+    const files = res.results.filter((r) => r.pdf && r.fileName);
+    for (const r of files) downloadFile(new Blob([Uint8Array.from(atob(r.pdf!), (c) => c.charCodeAt(0))], { type: "application/pdf" }), r.fileName!);
+    exported.value = files.map((r) => r.fileName).join(" et ");
     await load();
   });
 }
-const openFolder = () => run("folder", () => api.openJobCvFolder(props.jobId));
 
 /** Variantes validées d'une ligne ou d'un projet (pour « autre version »). */
 function variantsOf(id: string) {
@@ -277,9 +278,8 @@ const STATUS = { DRAFT: "Brouillon", VALIDATED: "Validé", EXPORTED: "Exporté" 
           <button type="button" :disabled="!!busy || !state?.pdfAvailable" title="Les deux modèles doivent être validés" @click="exportPdf(true)">
             <Icon name="save" :size="16" />{{ busy === "both" ? "Création…" : "Exporter les deux" }}
           </button>
-          <button v-if="cv.pdfPath" type="button" class="ghost" :disabled="!!busy" @click="openFolder"><Icon name="external" :size="15" />Ouvrir le dossier</button>
         </div>
-        <p v-if="exported" class="success small" role="status"><Icon name="check" :size="15" />Enregistré : {{ exported }}</p>
+        <p v-if="exported" class="success small" role="status"><Icon name="check" :size="15" />Téléchargé : {{ exported }}</p>
         <p v-else-if="cv.exportedAt" class="muted small">Exporté le {{ new Date(cv.exportedAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) }}{{ cv.sentAt ? " · envoyé (offre marquée « Postulé »)" : "" }}.</p>
       </template>
     </template>

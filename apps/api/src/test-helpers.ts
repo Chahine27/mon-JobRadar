@@ -90,6 +90,7 @@ export async function createMemoryStores() {
   const leadRows = new Map<string, LeadRow>();
   const analysisRows = new Map<string, { inputHash: string; model: string; result: unknown; createdAt: Date }>();
   const kitRows = new Map<string, LetterKit>();
+  const cvPdfs = new Map<string, { name: string; content: Buffer }>();
   const beforeEdits = new Map<string, JobRow>();
   const originals = new Map<string, Pick<JobRow, "description" | "contentHash" | "experienceMinYrs" | "contractType">>();
   const letterRows = new Map<string, StoredLetter>();
@@ -178,6 +179,9 @@ export async function createMemoryStores() {
     letterKits: {
       get: async (userId) => kitRows.get(userId) ?? null,
       save: async (userId, kit) => (kitRows.set(userId, kit), kit),
+      cvPdf: async (userId) => cvPdfs.get(userId) ?? null,
+      cvPdfName: async (userId) => cvPdfs.get(userId)?.name ?? null,
+      setCvPdf: async (userId, file) => void (file ? cvPdfs.set(userId, file) : cvPdfs.delete(userId)),
     },
     letters: {
       get: async (jobId) => letterRows.get(jobId) ?? null,

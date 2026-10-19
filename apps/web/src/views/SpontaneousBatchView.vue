@@ -160,7 +160,7 @@ const ICON: Record<WriteStatus | SendStep["status"], IconName> = {
   <div v-else-if="state && batch" class="stack">
     <p v-if="error" class="alert" role="alert"><Icon name="alert" :size="16" />{{ error }}</p>
     <p v-if="!state.mail.configured" class="alert small"><Icon name="alert" :size="15" />Envoi d'email non configuré : SMTP à remplir dans .env.</p>
-    <p v-if="!state.cvPdf.found" class="alert small"><Icon name="alert" :size="15" />CV PDF introuvable : indique son chemin dans « CV & lettre ».</p>
+    <p v-if="!state.cvPdf.found" class="alert small"><Icon name="alert" :size="15" />CV PDF manquant : envoie-le dans « CV & lettre ».</p>
 
     <!-- Étape 1 : écriture des lettres -->
     <section class="card stack">
@@ -174,7 +174,7 @@ const ICON: Record<WriteStatus | SendStep["status"], IconName> = {
         </template>
       </div>
       <p class="muted small">
-        <template v-if="batch.running">L'IA écrit les lettres sur ton PC, une par une. Tu peux quitter la page : une notification te prévient à la fin.</template>
+        <template v-if="batch.running">L'IA écrit les lettres une par une. Tu peux quitter la page : une notification te prévient à la fin.</template>
         <template v-else-if="state.toWrite">{{ state.toWrite }} entreprise(s) avec email n'ont pas encore de lettre. Une lettre déjà écrite (ou modifiée par toi) n'est jamais réécrite.</template>
         <template v-else>Toutes les entreprises avec email ont leur lettre.</template>
       </p>

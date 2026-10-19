@@ -230,6 +230,10 @@ export interface AnalysisStore {
 export interface LetterKitStore {
   get(userId: string): Promise<LetterKit | null>;
   save(userId: string, kit: LetterKit): Promise<LetterKit>;
+  /** CV PDF joint aux candidatures spontanées (null = aucun). */
+  cvPdf(userId: string): Promise<{ name: string; content: Buffer } | null>;
+  cvPdfName(userId: string): Promise<string | null>;
+  setCvPdf(userId: string, file: { name: string; content: Buffer } | null): Promise<void>;
 }
 
 export type StoredLetter = { inputHash: string; model: string; content: string; edited: boolean; createdAt: Date; updatedAt: Date };

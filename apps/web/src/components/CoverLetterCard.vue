@@ -4,7 +4,7 @@ import { ApiError, api, errorMessage } from "../api";
 import type { LetterState } from "../types";
 import Icon from "./Icon.vue";
 
-/** Carte « Lettre de motivation » d'une offre : écrite par l'IA sur le PC, à relire et modifier. */
+/** Carte « Lettre de motivation » d'une offre : écrite par l'IA, à relire et modifier. */
 const props = defineProps<{ jobId: string; title: string; company: string | null }>();
 
 const state = ref<LetterState | null>(null);
@@ -94,61 +94,21 @@ async function copy() {
   }
 }
 
-const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
-/** PDF enregistré directement dans le dossier choisi (« CV & lettre »), en remplaçant l'ancien. Sinon : fenêtre d'impression. */
+/** PDF créé par le serveur, téléchargé par le navigateur (dossier Téléchargements). */
 async function savePdf() {
   pdfSaving.value = true;
   pdfSaved.value = null;
   error.value = null;
   try {
-    pdfSaved.value = (await api.saveLetterPdf(props.jobId, draft.value)).file;
+    pdfSaved.value = await api.downloadLetterPdf(props.jobId, draft.value);
     setTimeout(() => (pdfSaved.value = null), 8000);
   } catch (e) {
-    if (e instanceof ApiError && e.code === "PDF_FOLDER_MISSING") printPdf();
-    else error.value = errorMessage(e, "Enregistrement du PDF impossible.");
+    error.value = errorMessage(e, "Création du PDF impossible.");
   } finally {
     pdfSaving.value = false;
   }
 }
 
-/** Fenêtre d'impression : choisir « Enregistrer au format PDF ». Marges de page à 0 = pas d'en-tête ni de pied de page du navigateur. */
-function printPdf() {
-  const blocks = draft.value
-    .split(/\n\s*\n/)
-    .map((b) => b.trim())
-    .filter(Boolean)
-    .map((b) => {
-      const cls = /^(À .+, )?le \d{2}\/\d{2}\/\d{4}$/i.test(b) ? ' class="date"' : /^Objet\s*:/i.test(b) ? ' class="objet"' : "";
-      return `<p${cls}>${esc(b).replace(/\n/g, "<br>")}</p>`;
-    })
-    .join("\n");
-  const name = `Lettre de motivation - ${props.company ?? props.title}`.replace(/[\\/:*?"<>|]/g, " ");
-  const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${esc(name)}</title><style>
-    @page { size: A4; margin: 0; }
-    body { font-family: Calibri, "Segoe UI", Arial, sans-serif; font-size: 11pt; line-height: 1.45; color: #111; margin: 0; padding: 2cm 2.2cm; }
-    p { margin: 0 0 0.85em; text-align: justify; }
-    p:first-child { text-align: left; }
-    .date { text-align: right; margin: 1.4em 0; }
-    .objet { font-weight: bold; text-align: left; margin-bottom: 1.4em; }
-  </style></head><body>${blocks}</body></html>`;
-  const frame = document.createElement("iframe");
-  frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
-  document.body.appendChild(frame);
-  const doc = frame.contentDocument!;
-  doc.open();
-  doc.write(html);
-  doc.close();
-  // Le titre de la page principale sert aussi de nom de fichier dans certains navigateurs.
-  const previous = document.title;
-  document.title = name;
-  setTimeout(() => {
-    frame.contentWindow!.focus();
-    frame.contentWindow!.print();
-    document.title = previous;
-    setTimeout(() => frame.remove(), 1000);
-  }, 100);
-}
 
 const when = computed(() =>
   state.value?.letter ? new Date(state.value.letter.updatedAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "",
@@ -166,7 +126,7 @@ const when = computed(() =>
 
     <div v-else-if="running" class="waiting">
       <Icon name="refresh" :size="18" class="spin" />
-      <span>L'IA écrit ta lettre sur ton PC… <span class="num">{{ seconds }} s</span></span>
+      <span>L'IA écrit ta lettre… <span class="num">{{ seconds }} s</span></span>
       <span class="muted small">Ça prend en général entre 20 secondes et 1 minute.</span>
     </div>
 
@@ -175,7 +135,7 @@ const when = computed(() =>
         <Icon name="alert" :size="16" />
         <span>
           {{ error }}
-          <template v-if="offline"><br />Ouvre l'appli Ollama (icône en bas à droite de Windows), puis réessaie.</template>
+          <template v-if="offline"><br />L'IA ne répond pas pour l'instant : réessaie dans un moment.</template>
         </span>
       </div>
 
@@ -208,7 +168,7 @@ const when = computed(() =>
         <div class="row buttons">
           <button type="button" class="primary" @click="copy"><Icon :name="copied ? 'check' : 'file'" :size="16" />{{ copied ? "Copiée !" : "Copier" }}</button>
           <button type="button" :disabled="pdfSaving" @click="savePdf">
-            <Icon :name="pdfSaved ? 'check' : 'save'" :size="16" />{{ pdfSaving ? "Enregistrement…" : pdfSaved ? "PDF enregistré !" : "Enregistrer en PDF" }}
+            <Icon :name="pdfSaved ? 'check' : 'save'" :size="16" />{{ pdfSaving ? "Création…" : pdfSaved ? "PDF téléchargé !" : "Télécharger en PDF" }}
           </button>
           <button v-if="dirty" type="button" :disabled="saving" @click="save"><Icon name="check" :size="16" />Enregistrer mes modifications</button>
           <span class="sep" />
@@ -218,11 +178,10 @@ const when = computed(() =>
           <button v-if="confirmRedo" type="button" class="ghost" @click="confirmRedo = false">Annuler</button>
         </div>
 
-        <p v-if="pdfSaved" class="success small" role="status"><Icon name="check" :size="15" />Enregistré dans {{ pdfSaved }}</p>
+        <p v-if="pdfSaved" class="success small" role="status"><Icon name="check" :size="15" />{{ pdfSaved }} est dans tes téléchargements.</p>
 
         <p class="muted small foot">
-          {{ state.letter.edited ? "Modifiée" : "Écrite" }} le {{ when }} · IA {{ state.letter.model }} sur ton PC.
-          Le PDF va dans le dossier choisi dans « CV & lettre » (sinon, choisis « Enregistrer au format PDF » comme imprimante).
+          {{ state.letter.edited ? "Modifiée" : "Écrite" }} le {{ when }} · IA {{ state.letter.model }}.
         </p>
       </div>
     </template>

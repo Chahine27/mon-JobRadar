@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { ApiError, api } from "../api";
+import { ApiError, api, errorMessage } from "../api";
 import Icon from "../components/Icon.vue";
 import PageHeader from "../components/PageHeader.vue";
 import type { LetterKit } from "../types";
 
-const kit = reactive<LetterKit>({ header: "", city: "", signature: "", cvText: "", letterExample: "", rules: "", mastered: "", closing: "", bannedWords: "", pdfFolder: "", pdfName: "Lettre_de_motivation.pdf", cvPdfPath: "", cvFolder: "", cvSubfolder: true, cvReplace: true });
+const kit = reactive<LetterKit>({ header: "", city: "", signature: "", cvText: "", letterExample: "", rules: "", mastered: "", closing: "", bannedWords: "", pdfName: "Lettre_de_motivation.pdf" });
+const cvPdfName = ref<string | null>(null);
+const cvBusy = ref(false);
+const cvError = ref<string | null>(null);
 let saved = "";
 const loading = ref(true);
 const saving = ref(false);
@@ -15,11 +18,42 @@ onMounted(async () => {
   try {
     const res = await api.getLetterKit();
     Object.assign(kit, res.kit);
+    cvPdfName.value = res.cvPdfName;
     saved = JSON.stringify(kit);
   } finally {
     loading.value = false;
   }
 });
+
+/** Le CV PDF part tout de suite (pas besoin du bouton « Enregistrer »). */
+async function uploadCv(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  cvBusy.value = true;
+  cvError.value = null;
+  try {
+    cvPdfName.value = (await api.uploadCvPdf(file)).cvPdfName;
+  } catch (err) {
+    cvError.value = errorMessage(err, "Envoi du PDF impossible.");
+  } finally {
+    cvBusy.value = false;
+  }
+}
+
+async function removeCv() {
+  if (!window.confirm("Retirer ton CV PDF ? Les candidatures spontanées ne pourront plus partir sans lui.")) return;
+  cvBusy.value = true;
+  cvError.value = null;
+  try {
+    cvPdfName.value = (await api.deleteCvPdf()).cvPdfName;
+  } catch (err) {
+    cvError.value = errorMessage(err, "Retrait du PDF impossible.");
+  } finally {
+    cvBusy.value = false;
+  }
+}
 
 const dirty = computed(() => !loading.value && JSON.stringify(kit) !== saved);
 const cvOk = computed(() => kit.cvText.trim().length >= 200);
@@ -45,7 +79,7 @@ async function save() {
 <template>
   <PageHeader
     title="CV & lettre"
-    subtitle="Ce dont l'IA a besoin pour écrire tes lettres de motivation. Tout reste dans Job Radar, sur ton PC."
+    subtitle="Ce dont l'IA a besoin pour écrire tes lettres de motivation. Tout reste privé, dans ta base Job Radar."
   >
     <template #actions>
       <button type="button" class="primary" :disabled="saving || loading || !dirty" @click="save">
@@ -128,39 +162,26 @@ async function save() {
     </section>
 
     <section class="card stack">
-      <h2><span class="step">5</span>Où enregistrer le PDF de la lettre</h2>
-      <div class="grid-2">
-        <label>
-          Dossier sur ton PC
-          <input v-model="kit.pdfFolder" maxlength="300" placeholder="C:\Users\…\Documents\pour postuler" />
-          <span class="hint">Dans l'Explorateur Windows : clic sur la barre d'adresse du dossier, Ctrl + C, puis colle ici.</span>
-        </label>
-        <label>
-          Nom du fichier
-          <input v-model="kit.pdfName" maxlength="120" placeholder="Lettre_de_motivation.pdf" />
-          <span class="hint">Toujours le même : chaque nouvelle lettre remplace l'ancienne.</span>
-        </label>
-      </div>
+      <h2><span class="step">5</span>Tes PDF</h2>
       <label>
-        Ton CV en PDF (pour les candidatures spontanées envoyées par email)
-        <input v-model="kit.cvPdfPath" maxlength="400" placeholder="C:\Users\…\Documents\CV.pdf" />
-        <span class="hint">Dans l'Explorateur Windows : Maj + clic droit sur ton CV → « Copier en tant que chemin d'accès », puis colle ici (les guillemets sont retirés tout seuls).</span>
+        Nom du PDF de la lettre
+        <input v-model="kit.pdfName" maxlength="120" placeholder="Lettre_de_motivation.pdf" />
+        <span class="hint">Nom du fichier téléchargé et de la lettre jointe aux candidatures spontanées.</span>
       </label>
-    </section>
-
-    <section class="card stack">
-      <h2><span class="step">6</span>Où enregistrer le PDF du CV adapté à une offre</h2>
-      <label>
-        Dossier sur ton PC
-        <input v-model="kit.cvFolder" maxlength="300" :placeholder="kit.pdfFolder || 'C:\Users\…\Documents\pour postuler'" />
-        <span class="hint">Vide = le même dossier que les lettres (point 5). Dans l'Explorateur Windows : clic sur la barre d'adresse du dossier, Ctrl + C, puis colle ici.</span>
-      </label>
-      <label class="switch"><input v-model="kit.cvSubfolder" type="checkbox" />Un sous-dossier par candidature (« Entreprise_AAAA-MM-JJ »)</label>
-      <div class="choices">
-        <label class="switch"><input v-model="kit.cvReplace" type="radio" :value="true" />Remplacer le fichier s'il existe déjà</label>
-        <label class="switch"><input v-model="kit.cvReplace" type="radio" :value="false" />Garder l'ancien et enregistrer à côté (« _2 », « _3 »…)</label>
+      <div class="stack cv-pdf">
+        <span>Ton CV en PDF (joint aux candidatures spontanées envoyées par email)</span>
+        <p v-if="cvPdfName" class="row small">
+          <Icon name="file" :size="15" /><a :href="api.cvPdfUrl" target="_blank" rel="noopener">{{ cvPdfName }}</a>
+          <button type="button" class="ghost" :disabled="cvBusy" @click="removeCv">Retirer</button>
+        </p>
+        <p v-else class="alert small"><Icon name="alert" :size="15" />Aucun CV PDF : les candidatures spontanées ne peuvent pas partir.</p>
+        <label class="file-btn">
+          <input type="file" accept="application/pdf,.pdf" :disabled="cvBusy" @change="uploadCv" />
+          <span class="btn"><Icon name="save" :size="16" />{{ cvBusy ? "Envoi…" : cvPdfName ? "Remplacer le PDF" : "Choisir le PDF" }}</span>
+        </label>
+        <p v-if="cvError" class="alert small">{{ cvError }}</p>
+        <span class="hint">Gardé par Job Radar sur le serveur : plus besoin que le PC soit allumé. 5 Mo au plus.</span>
       </div>
-      <span class="hint">Nom du fichier : NOM_PRÉNOM.pdf (avec « _ATS » pour la version ATS quand les deux modèles sont dans le même dossier).</span>
     </section>
 
     <div>
@@ -171,6 +192,10 @@ async function save() {
 </template>
 
 <style scoped>
+.file-btn { align-self: flex-start; cursor: pointer; }
+.file-btn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.file-btn:focus-within .btn { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cv-pdf p { margin: 0; align-items: center; gap: 0.4rem; }
 h2 { display: flex; align-items: center; gap: 0.55rem; margin: 0; }
 .step { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 0.8rem; }
 .req { color: var(--low); }

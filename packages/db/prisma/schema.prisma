@@ -195,6 +195,9 @@ model LetterKit {
   userId    String   @unique
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   data      Json
+  /// CV PDF joint aux candidatures spontanées (envoyé depuis le navigateur).
+  cvPdf     Bytes?
+  cvPdfName String?
   updatedAt DateTime @updatedAt
 }
 

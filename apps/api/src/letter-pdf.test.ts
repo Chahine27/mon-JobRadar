@@ -1,6 +1,3 @@
-import { mkdtemp, readFile, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { renderLetterPdf, safeName } from "./letter-pdf";
 import { createTestApp, login } from "./test-helpers";
@@ -30,27 +27,18 @@ describe("lettre en PDF", () => {
     expect(safeName("")).toBe("Lettre_de_motivation.pdf");
   });
 
-  it("enregistre dans le dossier choisi et remplace l'ancien fichier ; sans dossier → 400", async () => {
+  it("renvoie le PDF à télécharger, au nom choisi dans « CV & lettre »", async () => {
     const { app } = await createTestApp();
     const cookies = await login(app);
     const req = (method: "POST" | "PUT", url: string, payload: object) => app.inject({ method, url, cookies, payload });
     const kit = { header: "Alex", city: "Paris", signature: "Alex", cvText: "Vue.js, TypeScript, Java. ".repeat(20), letterExample: "" };
 
-    await req("PUT", "/api/letter-kit", kit);
-    const missing = await req("POST", "/api/jobs/j-vue/letter/pdf", { content: LETTER });
-    expect(missing.statusCode).toBe(400);
-    expect(missing.json().error).toBe("PDF_FOLDER_MISSING");
-
-    const folder = join(await mkdtemp(join(tmpdir(), "jr-")), "pour postuler");
-    await req("PUT", "/api/letter-kit", { ...kit, pdfFolder: folder, pdfName: "Lettre_de_motivation.pdf" });
-    const first = await req("POST", "/api/jobs/j-vue/letter/pdf", { content: LETTER });
-    expect(first.statusCode).toBe(200);
-    expect(first.json().file).toBe(join(folder, "Lettre_de_motivation.pdf"));
-    const size1 = (await stat(first.json().file)).size;
-
-    await req("POST", "/api/jobs/j-vue/letter/pdf", { content: `${LETTER}\n\nUn paragraphe de plus pour changer la taille du fichier.` });
-    const size2 = (await stat(first.json().file)).size;
-    expect(size2).not.toBe(size1);
-    expect((await readFile(first.json().file)).subarray(0, 5).toString()).toBe("%PDF-");
+    await req("PUT", "/api/letter-kit", { ...kit, pdfName: "Lettre Alex" });
+    const res = await req("POST", "/api/jobs/j-vue/letter/pdf", { content: LETTER });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toBe("application/pdf");
+    expect(res.headers["content-disposition"]).toBe("attachment; filename*=UTF-8''Lettre%20Alex.pdf");
+    expect(res.rawPayload.subarray(0, 5).toString()).toBe("%PDF-");
+    expect((await req("POST", "/api/jobs/inconnue/letter/pdf", { content: LETTER })).statusCode).toBe(404);
   });
 });

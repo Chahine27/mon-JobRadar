@@ -1,4 +1,4 @@
-import { mkdtempSync, existsSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CvEngine } from "@job-radar/cv-render";
@@ -24,11 +24,10 @@ async function setup() {
   input.titles[1]!.toValidate = true; // une phrase « à valider »
   writeFileSync(seed, stringify(input));
   const engine = fakeEngine();
-  const opened: string[] = [];
-  const t = await createTestApp({ cvSeedPath: seed, cvEngine: engine, openFolder: (d) => void opened.push(d) });
+  const t = await createTestApp({ cvSeedPath: seed, cvEngine: engine });
   const cookies = await login(t.app);
   const req = (method: "GET" | "POST" | "PUT", url: string, payload?: object) => t.app.inject({ method, url, cookies, ...(payload ? { payload } : {}) });
-  return { ...t, req, dir, opened };
+  return { ...t, req, dir };
 }
 
 describe("CV complet", () => {
@@ -103,47 +102,29 @@ describe("CV adapté à une offre", () => {
     expect(again).toMatchObject({ stale: false, cv: { status: "DRAFT", overrides: { remove: ["codenshare"] } } });
   });
 
-  it("PDF : validation obligatoire, dossier Entreprise_date, suffixe _ATS si les deux, « Postulé » mémorise le CV", async () => {
-    const { req, dir, opened } = await setup();
+  it("PDF : validation obligatoire, renvoyé au navigateur, suffixe _ATS si les deux, « Postulé » mémorise le CV", async () => {
+    const { req } = await setup();
     await req("POST", "/api/cv-master/import-seed");
     for (const template of ["une-colonne", "deux-colonnes"]) await req("POST", "/api/jobs/j-vue/cv", { template });
-    expect((await req("POST", "/api/jobs/j-vue/cv/pdf", { templates: ["une-colonne"] })).json().error).toBe("NO_PDF_FOLDER");
-    await req("PUT", "/api/letter-kit", { pdfFolder: dir });
     expect((await req("POST", "/api/jobs/j-vue/cv/pdf", { templates: ["une-colonne"] })).json().error).toBe("NOT_VALIDATED");
 
     for (const template of ["une-colonne", "deux-colonnes"]) await req("PUT", "/api/jobs/j-vue/cv", { template, overrides: {}, validated: true });
     const one = await req("POST", "/api/jobs/j-vue/cv/pdf", { templates: ["une-colonne"] });
     expect(one.statusCode).toBe(200);
-    const folder = one.json().folder as string;
-    expect(folder).toMatch(/Entreprise_test_\d{4}-\d{2}-\d{2}$/);
-    expect(readdirSync(folder)).toEqual(["TESTEUR_CAMILLE.pdf"]);
-    expect(one.json().results[0].checks.every((c: { ok: boolean }) => c.ok)).toBe(true);
+    const [r] = one.json().results;
+    expect(r).toMatchObject({ ok: true, fileName: "TESTEUR_CAMILLE.pdf" });
+    expect(r.checks.every((c: { ok: boolean }) => c.ok)).toBe(true);
+    expect(Buffer.from(r.pdf, "base64").length).toBeGreaterThan(0);
 
-    // L'autre modèle dans le même dossier : le CV ATS (une colonne) prend « _ATS ».
-    await req("POST", "/api/jobs/j-vue/cv/pdf", { templates: ["deux-colonnes"] });
-    expect(readdirSync(folder).sort()).toEqual(["TESTEUR_CAMILLE.pdf", "TESTEUR_CAMILLE_ATS.pdf"]);
-    expect(existsSync(join(folder, "TESTEUR_CAMILLE_ATS.pdf"))).toBe(true);
-
-    expect((await req("POST", "/api/jobs/j-vue/cv/open-folder")).json().folder).toBe(folder);
-    expect(opened).toEqual([folder]);
+    // Les deux ensemble : le CV ATS (une colonne) prend « _ATS ».
+    const both = (await req("POST", "/api/jobs/j-vue/cv/pdf", { templates: ["une-colonne", "deux-colonnes"] })).json();
+    expect(both.results.map((x: { fileName: string }) => x.fileName)).toEqual(["TESTEUR_CAMILLE_ATS.pdf", "TESTEUR_CAMILLE.pdf"]);
 
     await req("POST", "/api/jobs/j-vue/apply");
     const apps = (await req("GET", "/api/applications")).json();
     const cvs = apps.jobs.find((j: { id: string }) => j.id === "j-vue").cvs;
     expect(cvs.map((c: { template: string }) => c.template).sort()).toEqual(["deux-colonnes", "une-colonne"]);
     expect(cvs.every((c: { sentAt: string | null }) => c.sentAt)).toBe(true);
-  });
-
-  it("réglage du point 6 : dossier des CV, sans sous-dossier, garder l'ancien fichier", async () => {
-    const { req, dir } = await setup();
-    await req("POST", "/api/cv-master/import-seed");
-    const cvDir = join(dir, "CV");
-    await req("PUT", "/api/letter-kit", { pdfFolder: join(dir, "lettres"), cvFolder: `"${cvDir}"`, cvSubfolder: false, cvReplace: false });
-    await req("POST", "/api/jobs/j-vue/cv", { template: "une-colonne" });
-    await req("PUT", "/api/jobs/j-vue/cv", { template: "une-colonne", overrides: {}, validated: true });
-    expect((await req("POST", "/api/jobs/j-vue/cv/pdf", { templates: ["une-colonne"] })).json().folder).toBe(cvDir);
-    await req("POST", "/api/jobs/j-vue/cv/pdf", { templates: ["une-colonne"] });
-    expect(readdirSync(cvDir).sort()).toEqual(["TESTEUR_CAMILLE.pdf", "TESTEUR_CAMILLE_2.pdf"]);
   });
 
   it("nom du fichier : NOM_PRÉNOM sans accents", () => {

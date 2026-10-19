@@ -35,6 +35,48 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return data as T;
 }
 
+/** Fait télécharger un fichier par le navigateur (dossier Téléchargements). */
+export function downloadFile(data: Blob, name: string) {
+  const url = URL.createObjectURL(data);
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/** Nom du fichier donné par le serveur (Content-Disposition: …; filename*=UTF-8''…). */
+const fileNameOf = (res: Response, fallback: string) => {
+  const m = /filename\*=UTF-8''([^;]+)/i.exec(res.headers.get("content-disposition") ?? "");
+  return m ? decodeURIComponent(m[1]!) : fallback;
+};
+
+/** Requête dont la réponse est un fichier : téléchargé par le navigateur, renvoie son nom. */
+async function download(method: string, url: string, body: unknown, fallback: string): Promise<string> {
+  const res = await fetch(url, { method, credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) onUnauthorized();
+    const err = new ApiError(res.status, data.error ?? "ERREUR");
+    if (typeof data.message === "string") err.message = data.message;
+    throw err;
+  }
+  const name = fileNameOf(res, fallback);
+  downloadFile(await res.blob(), name);
+  return name;
+}
+
+/** CV PDF envoyé tel quel (corps binaire), gardé par le serveur pour les candidatures spontanées. */
+async function uploadPdf(url: string, file: File): Promise<{ cvPdfName: string }> {
+  const res = await fetch(`${url}?name=${encodeURIComponent(file.name)}`, { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/pdf" }, body: file });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401) onUnauthorized();
+    const err = new ApiError(res.status, data.error ?? "ERREUR");
+    err.message = typeof data.message === "string" ? data.message : res.status === 413 ? "PDF trop lourd (5 Mo au plus)." : "Envoi du PDF impossible.";
+    throw err;
+  }
+  return data;
+}
+
 export type JobQuery = {
   minScore?: number;
   status?: JobStatus | "active" | "all";
@@ -64,7 +106,6 @@ export const api = {
   login: (email: string, password: string) =>
     request<{ user: { email: string } }>("POST", "/api/auth/login", { email, password }),
   logout: () => request<{ ok: true }>("POST", "/api/auth/logout"),
-  stopApp: () => request<{ status: "stopping" }>("POST", "/api/system/stop"),
   me: () => request<{ user: { email: string } }>("GET", "/api/auth/me"),
 
   getProfile: () => request<ProfileRecord>("GET", "/api/profile"),
@@ -179,15 +220,16 @@ export const api = {
     request<CvState>("PUT", `/api/jobs/${encodeURIComponent(id)}/cv`, { template, overrides, validated }),
   jobCvPreviewUrl: (id: string, template: TemplateId) => `/api/jobs/${encodeURIComponent(id)}/cv/preview?template=${template}`,
   exportJobCv: (id: string, templates: TemplateId[]) => request<CvPdfResult>("POST", `/api/jobs/${encodeURIComponent(id)}/cv/pdf`, { templates }),
-  openJobCvFolder: (id: string) => request<{ folder: string }>("POST", `/api/jobs/${encodeURIComponent(id)}/cv/open-folder`),
 
-  getLetterKit: () => request<{ kit: LetterKit; ready: boolean }>("GET", "/api/letter-kit"),
+  getLetterKit: () => request<{ kit: LetterKit; ready: boolean; cvPdfName: string | null }>("GET", "/api/letter-kit"),
+  uploadCvPdf: (file: File) => uploadPdf("/api/letter-kit/cv-pdf", file),
+  deleteCvPdf: () => request<{ cvPdfName: null }>("DELETE", "/api/letter-kit/cv-pdf"),
+  cvPdfUrl: "/api/letter-kit/cv-pdf",
   saveLetterKit: (kit: LetterKit) => request<{ kit: LetterKit; ready: boolean }>("PUT", "/api/letter-kit", kit),
   getLetter: (id: string) => request<LetterState>("GET", `/api/jobs/${encodeURIComponent(id)}/letter`),
   writeLetter: (id: string, force = false) =>
     request<LetterState>("POST", `/api/jobs/${encodeURIComponent(id)}/letter${force ? "?force=true" : ""}`),
-  saveLetterPdf: (id: string, content: string) =>
-    request<{ file: string }>("POST", `/api/jobs/${encodeURIComponent(id)}/letter/pdf`, { content }),
+  downloadLetterPdf: (id: string, content: string) => download("POST", `/api/jobs/${encodeURIComponent(id)}/letter/pdf`, { content }, "Lettre_de_motivation.pdf"),
   editLetter: (id: string, content: string) =>
     request<LetterState>("PUT", `/api/jobs/${encodeURIComponent(id)}/letter`, { content }),
   findAbridged: (page: { url?: string; title?: string; company?: string }) =>

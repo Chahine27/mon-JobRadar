@@ -5,6 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CI=true pnpm install --frozen-lockfile
+# Client Prisma : pnpm ne relance pas « postinstall » quand rien n'a changé dans les paquets, même si le schéma a changé.
+pnpm --filter @job-radar/db generate
 pnpm --filter @job-radar/web build
 sudo systemctl restart jobradar-api jobradar-web
 

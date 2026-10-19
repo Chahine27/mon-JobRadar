@@ -62,14 +62,14 @@ watch(box, () => nextTick(fit));
 
 const dirty = computed(() => !!state.value?.application && letter.value !== state.value.application.letter);
 const emailOk = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.value.trim()));
-const cvName = computed(() => state.value?.cvPdf.path.split(/[\\/]/).pop() ?? "");
+const cvName = computed(() => state.value?.cvPdf.name ?? "");
 const checks = computed(() => {
   const s = state.value;
   if (!s) return [];
   return [
     { ok: !!letter.value.trim(), text: "Lettre écrite et relue" },
     { ok: emailOk.value, text: "Email de contact de l'entreprise" },
-    { ok: s.cvPdf.found, text: s.cvPdf.found ? `CV joint : ${cvName.value}` : "CV PDF : indique son chemin dans « CV & lettre »" },
+    { ok: s.cvPdf.found, text: s.cvPdf.found ? `CV joint : ${cvName.value}` : "CV PDF : envoie-le dans « CV & lettre »" },
     { ok: s.mail.configured, text: s.mail.configured ? `Envoi depuis ${s.mail.from}` : "Envoi d'email : SMTP à remplir dans .env" },
   ];
 });
@@ -168,7 +168,7 @@ async function send() {
 
       <div v-else-if="running" class="waiting">
         <Icon name="refresh" :size="18" class="spin" />
-        <span>L'IA écrit ta lettre sur ton PC… <span class="num">{{ seconds }} s</span></span>
+        <span>L'IA écrit ta lettre… <span class="num">{{ seconds }} s</span></span>
       </div>
 
       <div v-else-if="!state.application" class="empty">

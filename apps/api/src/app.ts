@@ -2,7 +2,7 @@ import cookie from "@fastify/cookie";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyServerOptions, LogController } from "fastify";
-import { SESSION_COOKIE, requireAuth, resolveSession } from "./auth";
+import { SESSION_COOKIE, resolveSession } from "./auth";
 import { createJobService } from "./jobs/service";
 import { type AiService, type AutoFeed, aiRoutes } from "./routes/ai";
 import { authRoutes } from "./routes/auth";
@@ -53,14 +53,10 @@ export type AppOptions = {
   autoFeed?: AutoFeed;
   /** Envoi des candidatures spontanées par email (compte SMTP de .env). */
   mailer?: Mailer;
-  /** Bouton « Arrêter Job Radar » : demande au lanceur de tout arrêter. Absent (lancé avec « pnpm dev ») → 404. */
-  stopApp?: () => void;
   /** CV adapté : navigateur pour l'ajustement à une page et le PDF (absent → pas de PDF). */
   cvEngine?: CvEngine;
   /** Fichier de départ du CV complet (défaut : data/cv/cv-master.seed.yaml à la racine). */
   cvSeedPath?: string;
-  /** Bouton « Ouvrir le dossier » des CV exportés. */
-  openFolder?: (dir: string) => void;
 };
 
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -107,14 +103,6 @@ export async function buildApp(opts: AppOptions) {
 
   app.get("/api/health", async () => ({ status: "ok" }));
 
-  if (opts.stopApp) {
-    const stopApp = opts.stopApp;
-    app.post("/api/system/stop", { preHandler: requireAuth }, async (_request, reply) => {
-      stopApp();
-      return reply.code(202).send({ status: "stopping" });
-    });
-  }
-
   await app.register(authRoutes, { stores: opts.stores, secureCookie: opts.secureCookie });
   await app.register(profileRoutes, { stores: opts.stores, ...(opts.geocoder ? { geocoder: opts.geocoder } : {}) });
   // Un seul service : le cache des scores est partagé, et l'avis de l'IA corrige les scores trop optimistes.
@@ -132,7 +120,6 @@ export async function buildApp(opts: AppOptions) {
     seedPath: opts.cvSeedPath ?? path.resolve(import.meta.dirname, "../../../data/cv/cv-master.seed.yaml"),
     aiModel: opts.ai?.model,
     engine: opts.cvEngine,
-    openFolder: opts.openFolder,
   });
   if (opts.cvEngine) {
     const engine = opts.cvEngine;

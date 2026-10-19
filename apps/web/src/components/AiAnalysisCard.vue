@@ -4,7 +4,7 @@ import { ApiError, api, errorMessage } from "../api";
 import type { StoredAiAnalysis } from "../types";
 import Icon from "./Icon.vue";
 
-/** Carte « Analyse IA » d'une offre : l'IA tourne sur le PC (Ollama), rien ne part sur Internet. */
+/** Carte « Analyse IA » d'une offre. */
 const props = defineProps<{ jobId: string }>();
 /** Nouvelle analyse faite : le score de l'offre a pu changer (l'IA baisse un score trop optimiste). */
 const emit = defineEmits<{ analyzed: [] }>();
@@ -99,7 +99,7 @@ const when = computed(() =>
 
     <div v-else-if="running" class="waiting">
       <Icon name="refresh" :size="18" class="spin" />
-      <span>L'IA lit l'annonce sur ton PC… <span class="num">{{ seconds }} s</span></span>
+      <span>L'IA lit l'annonce… <span class="num">{{ seconds }} s</span></span>
       <span class="muted small">Ça prend en général entre 15 secondes et 1 minute.</span>
     </div>
 
@@ -108,14 +108,14 @@ const when = computed(() =>
         <Icon name="alert" :size="16" />
         <span>
           {{ error }}
-          <template v-if="offline"><br />Ouvre l'appli Ollama (icône en bas à droite de Windows), puis réessaie.</template>
+          <template v-if="offline"><br />L'IA ne répond pas pour l'instant : réessaie dans un moment.</template>
         </span>
       </div>
 
       <div v-if="!a" class="empty">
         <p class="muted small">
           L'IA lit l'annonce pour toi : ce qu'on attend vraiment, les compétences exigées et les « plus »,
-          les pièges (ESN, niveau caché…). Tout se passe sur ton PC, rien n'est envoyé sur Internet.
+          les pièges (ESN, niveau caché…).
         </p>
         <button type="button" class="primary" @click="run(false)"><Icon name="sparkle" :size="16" />Analyser avec l'IA</button>
       </div>
@@ -171,7 +171,7 @@ const when = computed(() =>
         </div>
 
         <p class="muted small foot">
-          Fait le {{ when }} par {{ stored!.model }} (sur ton PC)<template v-if="lastDuration !== null"> en {{ lastDuration }} s</template>.
+          Fait le {{ when }} par {{ stored!.model }}<template v-if="lastDuration !== null"> en {{ lastDuration }} s</template>.
           L'IA peut se tromper : vérifie sur l'annonce.
         </p>
       </div>

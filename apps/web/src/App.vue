@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ApiError, api } from "./api";
+import { api } from "./api";
 import Icon, { type IconName } from "./components/Icon.vue";
 import { resyncPush } from "./push";
 import { currentEmail, setLoggedOut } from "./session";
@@ -58,23 +58,6 @@ watch(() => route.path, ping);
 // Notifications navigateur : réabonne ce navigateur s'il a perdu son abonnement (sans redemander la permission).
 watch(currentEmail, (email) => email && void resyncPush(api).catch(() => {}), { immediate: true });
 
-// Bouton « Arrêter Job Radar » : le lanceur (caché) arrête le serveur et le site.
-const stopped = ref(false);
-async function stopApp() {
-  const question = "Arrêter Job Radar ?\n\nLa collecte des offres et les alertes s'arrêtent jusqu'au prochain lancement (raccourci « Job Radar »).";
-  if (!window.confirm(question)) return;
-  try {
-    await api.stopApp();
-    stopped.value = true;
-  } catch (e) {
-    window.alert(
-      e instanceof ApiError && e.status === 404
-        ? "Job Radar a été lancé avec « pnpm dev » : arrête-le dans son terminal (Ctrl + C)."
-        : "Arrêt impossible : le serveur ne répond pas.",
-    );
-  }
-}
-
 async function logout() {
   await api.logout().catch(() => {});
   setLoggedOut();
@@ -117,7 +100,6 @@ async function logout() {
             <Icon :name="t.icon" :size="14" /> {{ t.label }}
           </button>
         </div>
-        <button type="button" class="stop-btn" @click="stopApp"><Icon name="power" :size="16" />Arrêter Job Radar</button>
         <div class="user-row">
           <span class="avatar">{{ initial }}</span>
           <span class="email" :title="currentEmail">{{ currentEmail }}</span>
@@ -150,13 +132,7 @@ async function logout() {
       </nav>
     </div>
   </div>
-  <div v-if="stopped" class="stopped" role="alertdialog" aria-labelledby="stopped-title">
-    <div class="card">
-      <h2 id="stopped-title"><Icon name="power" :size="18" />Job Radar est arrêté</h2>
-      <p class="muted">Tu peux fermer cet onglet. Pour le relancer : raccourci « Job Radar » (ou « Lancer Job Radar.cmd »).</p>
-    </div>
-  </div>
-  <main v-else-if="!currentEmail" class="auth-page">
+  <main v-if="!currentEmail" class="auth-page">
     <RouterView />
   </main>
 </template>

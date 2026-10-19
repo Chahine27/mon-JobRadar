@@ -31,6 +31,7 @@ sed -e 's#^\(DATABASE_URL=.*/\)jobradar\b#\1jobradar_sandbox#' \
 grep -q '^DATABASE_URL=.*/jobradar_sandbox' .env || { echo "DATABASE_URL du bac à sable introuvable : arrêt"; exit 1; }
 export PRISMA_HIDE_UPDATE_MESSAGE=1
 CI=true pnpm install --frozen-lockfile --silent >/dev/null
+pnpm --filter @job-radar/db generate >/dev/null
 pnpm --filter @job-radar/db migrate:deploy >/dev/null 2>&1
 if [ $# -eq 0 ]; then pnpm check 2>&1 | grep -E "Test Files|Tests |error" ; else "$@"; fi
 EOF

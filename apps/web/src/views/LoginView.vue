@@ -23,7 +23,7 @@ async function submit() {
   } catch (e) {
     if (e instanceof ApiError && e.status === 429) error.value = "Trop de tentatives. Réessaie dans une minute.";
     else if (e instanceof ApiError && e.status === 401) error.value = "Email ou mot de passe incorrect.";
-    else error.value = "Serveur injoignable. As-tu lancé « pnpm dev » ?";
+    else error.value = "Serveur injoignable : vérifie ta connexion (Tailscale) puis réessaie.";
   } finally {
     loading.value = false;
   }

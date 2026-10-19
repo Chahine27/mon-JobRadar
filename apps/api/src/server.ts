@@ -1,4 +1,3 @@
-import { writeFileSync } from "node:fs";
 import { aiChain, analyzeJobWithAi, readApplicationMailWithAi, readJobWithAi, writeCoverLetter } from "@job-radar/ai";
 import { createPrismaClient } from "@job-radar/db";
 import {
@@ -29,7 +28,6 @@ import {
   LaBonneBoiteClient,
 } from "@job-radar/source-connectors";
 import { buildApp } from "./app";
-import { spawn } from "node:child_process";
 import { createBrowserEngine } from "@job-radar/cv-render";
 import type { AutoFeed } from "./routes/ai";
 import type { MailTracker } from "./routes/applications";
@@ -342,10 +340,7 @@ const app = await buildApp({
   mailer,
   // CV adapté : Edge (ou Chrome) sans fenêtre pour mesurer la page et créer le PDF, lancé à la première demande.
   cvEngine: createBrowserEngine(),
-  openFolder: (dir) => void spawn("explorer.exe", [dir], { detached: true, stdio: "ignore" }).unref(),
   appUrl: env.APP_URL,
-  // Lancé par « Lancer Job Radar.cmd » : ce fichier demande au lanceur (qui surveille) de tout arrêter.
-  ...(e.JOB_RADAR_STOP_FILE ? { stopApp: () => writeFileSync(e.JOB_RADAR_STOP_FILE!, "") } : {}),
   secureCookie: env.NODE_ENV === "production",
   logger:
     env.NODE_ENV === "development"
@@ -366,7 +361,7 @@ process.on("SIGTERM", shutdown);
 
 log = (msg) => app.log.info(msg);
 
-// 127.0.0.1 : accessible uniquement depuis ton PC.
+// 127.0.0.1 : accessible seulement depuis la machine (le site passe par Tailscale serve).
 await app.listen({ host: env.API_HOST, port: env.API_PORT });
 // Règles de normalisation changées depuis (contrat, expérience, compétences, salaire) : réappliquées aux offres déjà
 // en base avant de préchauffer le flux, pour que les scores affichés suivent les règles du code. ~1 s, rien si à jour.

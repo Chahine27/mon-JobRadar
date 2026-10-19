@@ -82,7 +82,7 @@ const test = (channel: "email" | "webpush") =>
         <div class="channel stack">
           <label class="switch"><input v-model="s.emailEnabled" type="checkbox" /><Icon name="mail" :size="16" /> Par email</label>
           <p v-if="!s.emailConfigured" class="small warn-text">
-            Email non configuré : remplis SMTP_HOST, SMTP_USER et SMTP_PASSWORD dans .env, puis relance « pnpm dev ».
+            Email non configuré : remplis SMTP_HOST, SMTP_USER et SMTP_PASSWORD dans le .env du serveur, puis redémarre Job Radar.
           </p>
           <label>Adresse de réception <input v-model="emailTo" type="email" placeholder="Par défaut : NOTIFY_EMAIL_TO du .env" /></label>
         </div>
@@ -90,7 +90,7 @@ const test = (channel: "email" | "webpush") =>
         <div class="channel stack">
           <label class="switch"><input v-model="s.pushEnabled" type="checkbox" /><Icon name="monitor" :size="16" /> Dans le navigateur</label>
           <p v-if="!s.pushConfigured" class="small warn-text">
-            Notifications navigateur non configurées : lance « pnpm setup:push » puis relance « pnpm dev ».
+            Notifications navigateur non configurées : lance « pnpm setup:push » sur le serveur puis redémarre Job Radar.
           </p>
           <p v-else-if="!pushSupported()" class="small warn-text">Ce navigateur ne gère pas les notifications.</p>
           <div v-else class="stack" style="gap: 0.5rem">

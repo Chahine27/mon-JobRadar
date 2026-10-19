@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from "@job-radar/db";
 import { buildManualJob, removeManualJob, saveManualJob } from "@job-radar/pipeline";
 import { contractOfJob, salaryOfJob } from "@job-radar/scoring";
 import type { TailoredCvDraft } from "@job-radar/cv-tailor";
-import { type CvMaster, CvMasterSchema, CvOverridesSchema, EMPTY_OVERRIDES, LetterKitSchema, parseProfile, type TemplateId } from "@job-radar/shared";
+import { type CvMaster, CvMasterSchema, CvOverridesSchema, EMPTY_LETTER_KIT, EMPTY_OVERRIDES, LetterKitSchema, parseProfile, type TemplateId } from "@job-radar/shared";
 import { applyEdits, type FullTextInfo, type HomeLocation, type JobEdits, type JobRow, type ProfileRecord, type Stores } from "./stores";
 
 const jobInclude = {
@@ -239,6 +239,17 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
       async save(userId, kit) {
         await prisma.letterKit.upsert({ where: { userId }, create: { userId, data: kit }, update: { data: kit } });
         return kit;
+      },
+      async cvPdf(userId) {
+        const row = await prisma.letterKit.findUnique({ where: { userId }, select: { cvPdf: true, cvPdfName: true } });
+        return row?.cvPdf && row.cvPdfName ? { name: row.cvPdfName, content: Buffer.from(row.cvPdf) } : null;
+      },
+      async cvPdfName(userId) {
+        return (await prisma.letterKit.findUnique({ where: { userId }, select: { cvPdfName: true } }))?.cvPdfName ?? null;
+      },
+      async setCvPdf(userId, file) {
+        const data = { cvPdf: file ? new Uint8Array(file.content) : null, cvPdfName: file?.name ?? null };
+        await prisma.letterKit.upsert({ where: { userId }, create: { userId, data: EMPTY_LETTER_KIT, ...data }, update: data });
       },
     },
     letters: {

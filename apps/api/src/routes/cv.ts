@@ -1,6 +1,4 @@
-import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { CV_RULES_VERSION, hashOf } from "@job-radar/cv-tailor";
 import { type CvEngine, renderCvHtml, renderPdf } from "@job-radar/cv-render";
 import { countToValidate, type CvMaster, CvMasterSchema, CvOverridesSchema, EMPTY_OVERRIDES, TEMPLATE_IDS, TemplateIdSchema, type TemplateId, validateVariant } from "@job-radar/shared";
@@ -19,8 +17,6 @@ export type CvRoutesOptions = {
   aiModel?: string | undefined;
   /** Navigateur pour l'ajustement à une page et le PDF. Absent → pas de PDF. */
   engine?: CvEngine | undefined;
-  /** Bouton « Ouvrir le dossier » (explorateur Windows). */
-  openFolder?: ((dir: string) => void) | undefined;
 };
 
 const IdParams = z.object({ id: z.string().min(1).max(64) });
@@ -37,9 +33,6 @@ export function cvFileBase(fullName: string): string {
   const last = parts.length > 1 ? parts.at(-1)! : "";
   return [last, parts.slice(0, parts.length > 1 ? -1 : 1).join(" ")].filter(Boolean).map(clean).join("_") || "CV";
 }
-
-const localDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const folderName = (company: string | null, d: Date) => `${(company ?? "Entreprise").replace(/[\\/:*?"<>|.]+/g, " ").replace(/\s+/g, "_").replace(/^_|_$/g, "").slice(0, 60) || "Entreprise"}_${localDate(d)}`;
 
 export async function cvRoutes(app: FastifyInstance, opts: CvRoutesOptions) {
   const { stores } = opts;
@@ -180,10 +173,6 @@ export async function cvRoutes(app: FastifyInstance, opts: CvRoutesOptions) {
     if (!opts.engine) return reply.code(503).send({ error: "NO_BROWSER", message: "Création de PDF indisponible (navigateur non configuré)." });
     const ctx = await context(request, reply);
     if (!ctx) return reply;
-    const kit = await stores.letterKits.get(request.userId!);
-    // Dossier du point 6 de « CV & lettre », sinon celui des lettres (point 5).
-    const root = (kit?.cvFolder || kit?.pdfFolder || "").trim().replace(/^"+|"+$/g, "");
-    if (!kit || !root) return reply.code(400).send({ error: "NO_PDF_FOLDER", message: "Choisis où enregistrer les CV dans « CV & lettre » (point 6, ou le dossier des lettres au point 5)." });
     const templates = [...new Set(body.data.templates)];
     const rows = new Map<TemplateId, TailoredCvRow>();
     for (const t of templates) {
@@ -193,60 +182,22 @@ export async function cvRoutes(app: FastifyInstance, opts: CvRoutesOptions) {
       rows.set(t, row);
     }
 
+    // Le PDF est renvoyé au navigateur, qui le télécharge (le serveur n'a pas accès aux dossiers du PC).
     const now = new Date();
-    const folder = kit.cvSubfolder ? join(root, folderName(ctx.job.company, now)) : root;
     const base = cvFileBase(ctx.master.identity.fullName);
-    const ats = ctx.master.atsTemplate;
-    const email = TEMPLATE_IDS.find((t) => t !== ats)!;
-    const atsRow = rows.get(ats) ?? (await stores.tailoredCvs.get(ctx.job.id, ats));
-    const emailRow = rows.get(email) ?? (await stores.tailoredCvs.get(ctx.job.id, email));
-    const inFolder = (r: TailoredCvRow | null) => !!r?.pdfPath && dirname(r.pdfPath) === folder && existsSync(r.pdfPath);
-    // Suffixe « _ATS » seulement si les deux modèles finissent dans le même dossier.
-    const bothHere = templates.length === 2 || (templates[0] === ats ? inFolder(emailRow) : inFolder(atsRow));
-    const fileOf = (t: TemplateId) => join(folder, `${base}${t === ats && bothHere ? "_ATS" : ""}.pdf`);
-    /** « Garder l'ancien » : nouveau nom libre (_2, _3…) au lieu d'écraser. */
-    const free = (file: string) => {
-      if (kit.cvReplace || !existsSync(file)) return file;
-      let i = 2;
-      while (existsSync(file.replace(/\.pdf$/, `_${i}.pdf`))) i++;
-      return file.replace(/\.pdf$/, `_${i}.pdf`);
-    };
-    const target = new Map(templates.map((t) => [t, free(fileOf(t))]));
-
-    const results: Array<{ template: TemplateId; ok: boolean; path: string | null; checks: TailoredCvRow["draft"]["checks"]; warnings: string[] }> = [];
-    const pdfs = new Map<TemplateId, Buffer>();
+    // Suffixe « _ATS » seulement quand les deux modèles sont téléchargés ensemble.
+    const fileOf = (t: TemplateId) => `${base}${t === ctx.master.atsTemplate && templates.length === 2 ? "_ATS" : ""}.pdf`;
+    const results: Array<{ template: TemplateId; ok: boolean; fileName: string | null; pdf: string | null; checks: TailoredCvRow["draft"]["checks"]; warnings: string[] }> = [];
     for (const t of templates) {
       const row = rows.get(t)!;
       const fitted = await cv.compute(ctx.master, ctx.jobCv, t, row.overrides);
       const { pdf, draft } = await renderPdf(fitted, opts.engine);
       await stores.tailoredCvs.save({ ...row, draft, status: row.status });
       const ok = draft.checks.every((c) => c.ok === true);
-      if (ok) pdfs.set(t, pdf);
-      results.push({ template: t, ok, path: ok ? target.get(t)! : null, checks: draft.checks, warnings: draft.warnings });
+      if (ok) await stores.tailoredCvs.markExported(ctx.job.id, t, fileOf(t), now);
+      results.push({ template: t, ok, fileName: ok ? fileOf(t) : null, pdf: ok ? pdf.toString("base64") : null, checks: draft.checks, warnings: draft.warnings });
     }
-    if (pdfs.size === 0) return reply.code(422).send({ error: "CHECKS_FAILED", message: "Un contrôle bloque l'export : rien n'a été enregistré.", results, folder: null });
-
-    await mkdir(folder, { recursive: true });
-    // Le CV ATS déjà exporté sans suffixe dans ce dossier prend « _ATS » : l'autre modèle ne l'écrase pas.
-    if (!pdfs.has(ats) && kit.cvReplace && atsRow?.pdfPath === join(folder, `${base}.pdf`) && existsSync(atsRow.pdfPath)) {
-      await rename(atsRow.pdfPath, fileOf(ats));
-      await stores.tailoredCvs.markExported(ctx.job.id, ats, fileOf(ats), atsRow.exportedAt ?? now);
-    }
-    for (const [t, pdf] of pdfs) {
-      await writeFile(target.get(t)!, pdf);
-      await stores.tailoredCvs.markExported(ctx.job.id, t, target.get(t)!, now);
-    }
-    return { results, folder };
-  });
-
-  app.post("/api/jobs/:id/cv/open-folder", async (request, reply) => {
-    const params = IdParams.safeParse(request.params);
-    if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
-    const paths = await Promise.all(TEMPLATE_IDS.map((t) => stores.tailoredCvs.get(params.data.id, t)));
-    const path = paths.map((r) => r?.pdfPath).find((p): p is string => !!p && existsSync(p));
-    if (!path) return reply.code(404).send({ error: "NO_PDF", message: "Aucun CV exporté pour cette offre." });
-    if (!opts.openFolder) return reply.code(503).send({ error: "UNAVAILABLE" });
-    opts.openFolder(dirname(path));
-    return { folder: dirname(path) };
+    if (!results.some((r) => r.ok)) return reply.code(422).send({ error: "CHECKS_FAILED", message: "Un contrôle bloque l'export : aucun PDF créé.", results });
+    return { results };
   });
 }
