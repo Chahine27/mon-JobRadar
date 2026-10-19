@@ -58,6 +58,14 @@ describe("barre oblique avec espaces", () => {
   });
 });
 
+describe("compétences IA", () => {
+  it("outils reconnus, prénom « Claude » et curseur ignorés", () => {
+    expect(extractSkills("Vous utilisez Claude Code ou Cursor au quotidien")).toEqual(["agents-ia"]);
+    expect(extractSkills("Intégration de LLM (IA générative) avec garde-fous et human-in-the-loop")).toEqual(["llm-api", "garde-fous-ia"]);
+    expect(extractSkills("Contact : Claude Martin. Déplacer le curseur (cursor).")).toEqual([]);
+  });
+});
+
 describe("pré-filtre rapide : aucune écriture du dictionnaire n'est perdue", () => {
   it.each(SKILLS.map((s) => [s.id, s] as const))("%s", (_, skill) => {
     for (const a of skill.aliases) {
