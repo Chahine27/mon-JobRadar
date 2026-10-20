@@ -144,8 +144,20 @@ const matches = (a: AnyApplication, f: Filter) =>
 /** Candidatures sur offre sans canal d'envoi, CV ou contrat (d'avant la règle) : à compléter. */
 const incomplete = computed(() => jobs.value.filter((a) => !a.applyChannel || !a.applyCv || !a.contractType));
 
-/** Vue d'ensemble : les 8 plus urgentes du filtre ; onglets : toute la liste. */
+/** Recherche : entreprise, poste, lieu, site d'annonce (« hellowork »), objet ou expéditeur des mails ; sans accents ni majuscules. */
+const search = ref("");
+const fold = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+const haystack = (a: AnyApplication) =>
+  fold(
+    [companyOf(a), titleOf(a), a.city, a.department, ...(isJob(a) ? [a.applyChannel, ...a.sources.flatMap((x) => [x.source, x.url])] : [a.sentTo]), ...a.mails.flatMap((m) => [m.subject, m.from])]
+      .filter(Boolean)
+      .join(" "),
+  );
+
+/** Vue d'ensemble : les 8 plus urgentes du filtre ; onglets : toute la liste. Une recherche fouille tout, refusées comprises. */
 const rows = computed(() => {
+  const q = fold(search.value.trim());
+  if (q) return all.value.filter((a) => q.split(/\s+/).every((w) => haystack(a).includes(w))).sort(byLast);
   const list =
     view.value === "offers"
       ? jobs.value
@@ -265,16 +277,17 @@ const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature sponta
           <div class="panel-title">
             <Icon name="clock" :size="20" />
             <div>
-              <h2>{{ view === "overview" ? "À suivre en priorité" : TABS.find((t) => t.id === view)!.label }}</h2>
-              <p class="small muted">{{ view === "overview" ? "Les candidatures qui demandent ton attention" : `${rows.length} candidature${rows.length > 1 ? "s" : ""}` }}</p>
+              <h2>{{ search.trim() ? "Recherche" : view === "overview" ? "À suivre en priorité" : TABS.find((t) => t.id === view)!.label }}</h2>
+              <p class="small muted">{{ view === "overview" && !search.trim() ? "Les candidatures qui demandent ton attention" : `${rows.length} candidature${rows.length > 1 ? "s" : ""}` }}</p>
             </div>
           </div>
+          <input v-model="search" type="search" class="search" placeholder="Rechercher (entreprise, poste, HelloWork…)" aria-label="Rechercher une candidature" />
           <div v-if="view === 'followup' && spontaneousToFollow.length" class="row">
             <button type="button" class="primary" :disabled="batching" @click="followUpBatch">
               <Icon name="send" :size="16" />{{ batching ? "Envoi en cours…" : spontaneousToFollow.length === 1 ? "Relancer la spontanée en attente" : `Relancer les ${Math.min(10, spontaneousToFollow.length)} spontanées les plus anciennes` }}
             </button>
           </div>
-          <div v-if="view === 'overview'" class="seg" role="tablist" aria-label="Étape">
+          <div v-if="view === 'overview' && !search.trim()" class="seg" role="tablist" aria-label="Étape">
             <button v-for="f in FILTERS" :key="f.id" type="button" role="tab" :aria-selected="filter === f.id" :class="{ active: filter === f.id }" @click="filter = f.id">{{ f.label }}</button>
           </div>
         </div>
@@ -294,7 +307,8 @@ const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature sponta
         </div>
         <p v-if="view === 'followup' && batchError" class="small batch-error">{{ batchError }}</p>
         <div v-if="rows.length === 0" class="empty small muted">
-          <template v-if="view === 'offers' || all.length === 0">Sur la page d'une offre, clique sur « Marquer comme postulé » : elle arrivera ici.</template>
+          <template v-if="search.trim()">Aucune candidature ne correspond à « {{ search.trim() }} ».</template>
+          <template v-else-if="view === 'offers' || all.length === 0">Sur la page d'une offre, clique sur « Marquer comme postulé » : elle arrivera ici.</template>
           <template v-else-if="view === 'spontaneous'">Les candidatures spontanées envoyées depuis « Entreprises » arrivent ici.</template>
           <template v-else>Rien dans cette catégorie pour l'instant.</template>
         </div>
@@ -406,6 +420,7 @@ const titleOf = (a: AnyApplication) => (isJob(a) ? a.title : "Candidature sponta
 .seg { display: inline-flex; max-width: 100%; overflow-x: auto; scrollbar-width: none; gap: 0.15rem; padding: 0.2rem; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); }
 .seg button { flex: none; border: 0; background: transparent; padding: 0.3rem 0.6rem; font-size: 0.8rem; color: var(--muted); border-radius: 8px; }
 .seg button.active { background: var(--accent); color: var(--accent-contrast); }
+.search { flex: 1 1 14rem; max-width: 22rem; }
 button.link { display: inline-flex; align-items: center; gap: 0.2rem; color: var(--accent); }
 
 .table { display: flex; flex-direction: column; }
