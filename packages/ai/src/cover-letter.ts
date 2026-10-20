@@ -680,10 +680,34 @@ export async function checkFacts(
   return found;
 }
 
+/**
+ * Les alertes de la relecture qui citent une phrase (« … ») rattachées à cette phrase, pour une correction ciblée.
+ * Les alertes sur toute la lettre (longueur, « J'ai » en série…) restent affichées, sans correction automatique.
+ */
+export function issuesBySentence(draft: LetterBody, issues: string[]): Map<string, string> {
+  const sentences = draft.paragraphes.flatMap(splitSentences);
+  const out = new Map<string, string>();
+  for (const issue of issues) {
+    const quote = issue.match(/« ([^«»]{12,}?)(?:…)? »/u)?.[1]?.trim();
+    if (!quote) continue;
+    const s = sentences.find((x) => x.startsWith(quote) || x.includes(quote));
+    if (s && !out.has(s)) out.set(s, issue);
+  }
+  return out;
+}
+
 /** Défaut d'une phrase que la réécriture ciblée sait corriger (null = phrase correcte). */
-function sentenceDefect(s: string, banned: Array<[RegExp, string]>, invented?: Map<string, string>): { reason: string; bannedWord: boolean } | null {
+function sentenceDefect(
+  s: string,
+  banned: Array<[RegExp, string]>,
+  invented?: Map<string, string>,
+  issues?: Map<string, string>,
+): { reason: string; bannedWord: boolean } | null {
   const why = invented?.get(s);
   if (why) return { reason: `fait non prouvé par ses blocs (${why}) : retire seulement ce fait et garde le reste s'il est vrai`, bannedWord: true };
+  const issue = issues?.get(s);
+  // Erreur de vérité (techno absente, chiffre inventé, mauvais projet) : si la correction échoue, la phrase part.
+  if (issue) return { reason: issue, bannedWord: isFactIssue(issue) };
   const hit = banned.find(([re]) => re.test(s));
   if (hit) return { reason: hit[1], bannedWord: true };
   if (badPunctuation(s)) return { reason: "ponctuation interdite : seulement des virgules et des points", bannedWord: false };
@@ -701,6 +725,7 @@ export async function rewriteFlaggedSentences(
   draft: LetterBody,
   kit: Pick<LetterKit, "bannedWords">,
   invented: Map<string, string> = new Map(),
+  issues: Map<string, string> = new Map(),
 ): Promise<LetterBody> {
   const banned = [...FORBIDDEN, ...ownBanned(kit)];
   const all = draft.paragraphes.flatMap(splitSentences);
@@ -710,7 +735,7 @@ export async function rewriteFlaggedSentences(
   for (const p of draft.paragraphes) {
     const out: string[] = [];
     for (const s of splitSentences(p)) {
-      const defect = sentenceDefect(s, banned, invented);
+      const defect = sentenceDefect(s, banned, invented, issues);
       if (!defect || budget <= 0) {
         if (!(defect?.bannedWord)) out.push(s);
         continue;
@@ -774,8 +799,11 @@ export async function writeCoverLetter(
   kit: LetterKit,
   now: Date = new Date(),
   opts: LetterOptions = {},
-  /** Correcteur des faits (une autre IA que celle qui écrit, par exemple Haiku) ; par défaut, la même. */
-  reviewer: Pick<AiClient, "chatJson"> = client,
+  /**
+   * Assistant (Haiku pour les offres) : choisit l'angle et les blocs, vérifie les faits et corrige les phrases.
+   * La plume (client, Sonnet) n'écrit que la lettre. Par défaut, la même IA fait tout.
+   */
+  helper: Pick<AiClient, "chatJson"> = client,
 ): Promise<{ content: string; model: string; durationMs: number }> {
   const started = Date.now();
   const jobText = `${job.title}\n${job.description}`;
@@ -783,7 +811,7 @@ export async function writeCoverLetter(
   const blocks = letterBlocks(kit, opts);
 
   // Étape 1 : l'angle et les blocs (inutile avec un seul bloc, par exemple le CV seul).
-  const rawPlan = blocks.length > 1 ? await client.chatJson(PLAN_SYSTEM, buildPlanPrompt(job, blocks), PLAN_SCHEMA, { temperature: 0.3, contextTokens: LETTER_CONTEXT }) : null;
+  const rawPlan = blocks.length > 1 ? await helper.chatJson(PLAN_SYSTEM, buildPlanPrompt(job, blocks), PLAN_SCHEMA, { temperature: 0.3, contextTokens: LETTER_CONTEXT }) : null;
   const plan = cleanPlan(rawPlan, blocks, job);
   // L'offre parle de développer avec l'IA : Job Radar (dernier bloc) en fait toujours partie.
   if (opts.aiCoding && !plan.blocs.includes(blocks.length)) plan.blocs = [...plan.blocs.slice(0, 2), blocks.length];
@@ -808,8 +836,8 @@ export async function writeCoverLetter(
   };
 
   // Plusieurs brouillons ; chacun est corrigé tant qu'il s'améliore ; on garde la meilleure lettre.
-  // IA payante (Claude) : une version et une correction au plus.
-  const [maxDrafts, maxFixes] = client.paid ? [1, 1] : [MAX_DRAFTS, MAX_FIXES];
+  // IA payante (Claude) : une seule version ; les défauts sont corrigés phrase par phrase par l'assistant (moins cher).
+  const [maxDrafts, maxFixes] = client.paid ? [1, 0] : [MAX_DRAFTS, MAX_FIXES];
   let best: Candidate | null = null;
   for (let d = 0; d < maxDrafts && Date.now() - started < LETTER_BUDGET_MS && best?.issues.length !== 0; d++) {
     let first: Candidate | null;
@@ -831,7 +859,7 @@ export async function writeCoverLetter(
   if (!best) throw new Error(`Réponse de l'IA hors format : ${lastError}`);
 
   // Vérification des faits par l'IA, puis réécriture ciblée des phrases fautives ou inventées.
-  const invented = await findInventions(reviewer, best.draft, kit, opts, jobText);
-  const draft = await rewriteFlaggedSentences(client, best.draft, kit, invented);
+  const invented = await findInventions(helper, best.draft, kit, opts, jobText);
+  const draft = await rewriteFlaggedSentences(helper, best.draft, kit, invented, issuesBySentence(best.draft, best.issues));
   return { content: fixTypos(assembleLetter(kit, draft, now)), model: client.model, durationMs: Date.now() - started };
 }

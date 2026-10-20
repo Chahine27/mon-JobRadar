@@ -334,7 +334,7 @@ const app = await buildApp({
     model: generalAi.model,
     status: () => generalAi.status(),
     analyze: (job, profile) => analyzeJobWithAi(generalAi, job, profile),
-    // Correcteur des faits : Haiku (chaîne « general ») pour les offres ; IA gratuites pour les candidatures spontanées.
+    // Offres : Sonnet écrit, Haiku (chaîne « general ») choisit l'angle, vérifie les faits et corrige. Spontanées : IA gratuites.
     writeLetter: (job, kit, opts) =>
       opts?.spontaneous
         ? writeCoverLetter(spontaneousLetterAi, job, kit, new Date(), opts, spontaneousLetterAi)

@@ -123,11 +123,15 @@ describe("écriture en deux temps : l'angle et les blocs, puis la lettre", () =>
     expect(content).not.toContain("Kafka");
   });
 
-  it("IA payante : une version et une correction au plus", async () => {
+  it("IA payante : la plume écrit une seule fois ; l'assistant choisit l'angle, vérifie et corrige la phrase fautive", async () => {
     const bad = GOOD.replace("Je serais heureux", "Je maîtrise Kafka. Je serais heureux");
-    const client = fakeClient([bad], { paid: true, phrase: "x" });
-    await writeCoverLetter(client, JOB, KIT);
-    expect(client.calls.filter((c) => c.kind === "lettre")).toHaveLength(2);
+    const pen = fakeClient([bad], { paid: true });
+    const helper = fakeClient([], { phrase: "Je serais ravi d'en parler." });
+    const { content } = await writeCoverLetter(pen, JOB, KIT, new Date(), {}, helper);
+    expect(pen.calls.map((c) => c.kind)).toEqual(["lettre"]);
+    expect(helper.calls.map((c) => c.kind)).toEqual(["plan", "verif", "phrase"]);
+    expect(String(helper.calls[2]!.user)).toMatch(/maîtrise/);
+    expect(content).not.toContain("Kafka");
   });
 
   it("candidature spontanée : objet imposé et pas de « votre offre »", async () => {
