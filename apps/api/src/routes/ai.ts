@@ -1,6 +1,6 @@
 import {
   LETTER_PROMPT_VERSION,
-  analysisWantsAiCoding,
+  offerWantsAiCoding,
   checkLetter,
   letterHash,
   reviewBlock,
@@ -376,8 +376,8 @@ export async function aiRoutes(
   async function letterContext(userId: string, jobId: string) {
     const [job, kit, analysis] = await Promise.all([stores.jobs.get(jobId), stores.letterKits.get(userId), stores.analyses.latest(jobId)]);
     if (!job) return null;
-    // Job Radar (projet perso fait avec des agents IA) n'est cité que si l'analyse IA de l'offre en parle.
-    const opts: LetterOptions = { aiCoding: analysisWantsAiCoding(analysis?.result) };
+    // Job Radar (projet perso fait avec des agents IA) n'est cité que si l'offre parle de développer avec l'IA.
+    const opts: LetterOptions = { aiCoding: offerWantsAiCoding(analysis?.result, `${job.title}\n${job.description}`) };
     const inputHash = kit
       ? createHash("sha256")
           .update(JSON.stringify([job.contentHash, writingKit(kit), ai?.model ?? "", LETTER_PROMPT_VERSION, opts.aiCoding]))

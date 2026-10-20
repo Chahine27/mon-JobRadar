@@ -6,6 +6,9 @@ import {
   buildPlanPrompt,
   buildWritePrompt,
   checkLetter,
+  findInventions,
+  cleanTitle,
+  offerWantsAiCoding,
   cleanPlan,
   cvEntities,
   findLetterIssues,
@@ -59,7 +62,7 @@ const GOOD =
   "\n\nJe serais heureux d'échanger avec vous sur vos projets chez Logistik.";
 
 /** Faux client IA : répond selon la demande (plan, lettre, phrase à réécrire). */
-function fakeClient(letters: string[], opts: { phrase?: string; paid?: boolean } = {}) {
+function fakeClient(letters: string[], opts: { phrase?: string; paid?: boolean; inventions?: Array<{ phrase: string; raison: string }> } = {}) {
   const calls: Array<{ kind: string; user: unknown }> = [];
   let n = 0;
   return {
@@ -68,6 +71,7 @@ function fakeClient(letters: string[], opts: { phrase?: string; paid?: boolean }
     paid: opts.paid ?? false,
     chatJson: async (_system: string, user: unknown, schema: { properties: Record<string, unknown> }) => {
       if ("blocs" in schema.properties) return calls.push({ kind: "plan", user }), { angle: "Vue.js et Java", blocs: [1, 2], accroche: "logiciels de transport" };
+      if ("inventions" in schema.properties) return calls.push({ kind: "verif", user }), { inventions: opts.inventions ?? [] };
       if ("phrase" in schema.properties) return calls.push({ kind: "phrase", user }), { phrase: opts.phrase ?? "" };
       calls.push({ kind: "lettre", user });
       return { lettre: letters[Math.min(n++, letters.length - 1)] };
@@ -101,7 +105,7 @@ describe("écriture en deux temps : l'angle et les blocs, puis la lettre", () =>
   it("lettre correcte : un plan, une lettre, assemblée avec objet, politesse et signature", async () => {
     const client = fakeClient([GOOD]);
     const { content } = await writeCoverLetter(client, JOB, KIT, new Date("2026-09-29T10:00:00Z"));
-    expect(client.calls.map((c) => c.kind)).toEqual(["plan", "lettre"]);
+    expect(client.calls.map((c) => c.kind)).toEqual(["plan", "lettre", "verif"]);
     expect(content.startsWith("Alex Martin\n75011 Paris")).toBe(true);
     expect(content).toContain("À Paris, le 29/09/2026");
     expect(content).toContain("Objet : Candidature au poste de Développeur Vue.js / Java\n\nMadame, Monsieur,\n\nChez Banquo");
@@ -177,6 +181,54 @@ describe("cas emagine (règles 2026-10-20.4)", () => {
     const s = "Pendant ma licence pro, j'ai passé six mois sur Gold Circle, une application de cashback.";
     const out = await rewriteFlaggedSentences({ chatJson: async () => ({ phrase: s }) }, { objet: "x", paragraphes: [s, "Merci."] }, { bannedWords: "" });
     expect(out.paragraphes[0]).toBe("Pendant ma licence pro j'ai passé six mois sur Gold Circle, une application de cashback.");
+  });
+});
+
+describe("objet et détection de l'IA (cas Wake IT UP et Theodo)", () => {
+  it("intitulé nettoyé : version féminine, queue après un tiret, élision", async () => {
+    expect(cleanTitle("Ingénieur conception logiciels/Ingénieure conception logiciels")).toBe("Ingénieur conception logiciels");
+    expect(cleanTitle("Software Engineer Fullstack - CDI Paris - E-commerce - Theodo")).toBe("Software Engineer Fullstack");
+    expect(cleanTitle("Développeur Fullstack Java / React (H/F)")).toBe("Développeur Fullstack Java / React");
+    const { content } = await writeCoverLetter(fakeClient([GOOD]), { ...JOB, title: "Ingénieur logiciel (H/F)" }, KIT);
+    expect(content).toContain("Objet : Candidature au poste d'Ingénieur logiciel\n");
+  });
+  it("développement avec l'IA repéré dans l'annonce même si l'analyse l'a raté", () => {
+    const text = "Environnement : C#, React, Intelligence Artificielle appliquée au développement logiciel : agentic engineering.";
+    expect(offerWantsAiCoding({ competences_obligatoires: ["C#", "React"] }, text)).toBe(true);
+    expect(offerWantsAiCoding({ competences_obligatoires: ["C#"] }, "Environnement : C#, React.")).toBe(false);
+  });
+});
+
+describe("vérification des faits par l'IA, apostrophes, Job Radar (règles 2026-10-20.6)", () => {
+  const invented = "Avec mon binôme nous avons travaillé ensemble pour assurer la cohérence du front.";
+  const letter = GOOD.replace("Je serais heureux", `${invented} Je serais heureux`);
+
+  it("phrase inventée repérée par le vérificateur puis retirée ; phrase absente de la lettre ignorée", async () => {
+    const draft = { objet: "x", paragraphes: toParagraphs(letter, "") };
+    const found = await findInventions({ chatJson: async () => ({ inventions: [{ phrase: invented, raison: "collaboration non prouvée" }, { phrase: "Une phrase qui n'existe pas du tout ici.", raison: "x" }] }) }, draft, KIT);
+    expect([...found.keys()]).toEqual([invented]);
+    const out = await rewriteFlaggedSentences({ chatJson: async () => ({ phrase: "" }) }, draft, { bannedWords: "" }, found);
+    expect(out.paragraphes.join(" ")).not.toContain("nous avons travaillé ensemble");
+    const { content } = await writeCoverLetter(fakeClient([letter], { inventions: [{ phrase: invented, raison: "collaboration non prouvée" }] }), JOB, KIT);
+    expect(content).not.toContain("nous avons travaillé ensemble");
+  });
+
+  it("phrases-commentaires refusées ; une techno déclarée maîtrisée compte comme connue", () => {
+    const all = findLetterIssues("x\nJ'ai fait le back-office, ce qui m'a familiarisé avec les interfaces. Le code est sur GitHub, ce qui montre mon aisance.", { ...KIT, mastered: "Git" }, "Vue.js").join("\n");
+    expect(all).toMatch(/ce qui m'a appris/);
+    expect(all).toMatch(/ce qui montre/);
+    expect(all).not.toMatch(/Git.*n'est pas/);
+  });
+
+  it("apostrophes perdues rétablies, sans toucher au langage C", () => {
+    expect(fixPunctuation("J ai géré l erreur et j ai codé en C avec d autres.")).toBe("J’ai géré l’erreur et j’ai codé en C avec d’autres.");
+  });
+
+  it("offre qui parle de développer avec l'IA : le bloc Job Radar est toujours écrit", async () => {
+    const client = fakeClient([GOOD]);
+    await writeCoverLetter(client, JOB, KIT, new Date(), { aiCoding: true });
+    const write = String(client.calls.find((c) => c.kind === "lettre")!.user);
+    expect(write).toContain("[Job Radar");
   });
 });
 

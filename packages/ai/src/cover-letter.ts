@@ -5,7 +5,7 @@ import type { AiClient } from "./cloud";
 import type { ChatTurn } from "./ollama";
 
 /** Changer ce numéro quand la consigne change : les lettres existantes seront signalées « à refaire ». */
-export const LETTER_PROMPT_VERSION = "2026-10-20.4";
+export const LETTER_PROMPT_VERSION = "2026-10-20.7";
 
 /** Une lettre : l'objet (écrit par le code) et les paragraphes du corps (écrits par l'IA). */
 export type LetterBody = { objet: string; paragraphes: string[] };
@@ -33,6 +33,11 @@ export function analysisWantsAiCoding(result: unknown): boolean {
     .flatMap((k) => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string") : []))
     .join("\n");
   return extractSkills(text).some((id) => AI_CODING.has(id));
+}
+
+/** L'offre valorise-t-elle le développement avec l'IA ? Selon l'analyse IA, ou le texte de l'annonce si l'analyse l'a raté. */
+export function offerWantsAiCoding(analysisResult: unknown, jobText: string): boolean {
+  return analysisWantsAiCoding(analysisResult) || extractSkills(jobText).some((id) => AI_CODING.has(id));
 }
 
 const JOB_RADAR_BLOCK: LetterBlock = {
@@ -93,8 +98,8 @@ export type LetterPlan = { angle: string; blocs: number[]; accroche: string };
 const PLAN_SYSTEM = `Tu prépares une lettre de motivation pour un développeur junior qui sort d'alternance. Tu ne l'écris pas encore. Tu réponds UNIQUEMENT avec le JSON demandé.
 - angle : une phrase qui dit ce que l'employeur cherche le plus et ce que le candidat a de plus proche.
 - blocs : les numéros des 2 ou 3 blocs qui le prouvent le mieux, du plus fort au moins fort. Un bloc ne sert que si sa ligne « Sert pour » ou son texte répond vraiment à l'annonce. Ne prends pas un bloc juste pour remplir.
-- L'expérience en entreprise passe avant les projets d'école : au moins un bloc d'entreprise, et au plus UN projet d'école, seulement s'il prouve une techno centrale de l'annonce que l'entreprise ne prouve pas. Une techno proche compte (Vue.js en entreprise vaut mieux que React en projet pour un poste React). Poste full stack : un bloc serveur et un bloc interface.
-- accroche : un fait concret de l'annonce (produit, clients, secteur, projet) à citer dans l'ouverture. Vide si l'annonce n'en donne aucun. Candidature spontanée : vide.`;
+- L'expérience en entreprise passe avant les projets d'école : au moins un bloc d'entreprise, et au plus UN projet d'école, seulement s'il prouve une techno centrale de l'annonce que l'entreprise ne prouve pas. Une techno proche compte (Vue.js en entreprise vaut mieux que React en projet pour un poste React). Poste full stack : un bloc serveur et un bloc interface. La plus longue expérience en entreprise qui touche le poste doit en faire partie.
+- accroche : un fait concret de l'annonce (produit, clients, secteur, projet) à citer dans l'ouverture. Vide si l'annonce n'en donne aucun. Candidature spontanée : vide. Un projet donné en EXEMPLE par l'annonce (cabinet, ESN) reste un exemple : « des projets comme … », jamais « le projet X » comme si c'était le poste.`;
 const PLAN_SCHEMA = {
   type: "object",
   properties: { angle: { type: "string" }, blocs: { type: "array", items: { type: "integer" } }, accroche: { type: "string" } },
@@ -154,6 +159,8 @@ VÉRITÉ
 - Jamais « je maîtrise », « expert » ni « parfaitement », sauf pour les technos maîtrisées listées.
 - Ne parle pas de ce qui lui manque, sauf une techno écrite dans l'intitulé du poste, en une phrase.
 - Nomme l'entreprise d'alternance quand tu parles de son expérience.
+- Un projet donné en exemple par l'annonce reste un exemple (« des projets comme … »), jamais le projet du poste.
+- Ne relie pas deux faits qui n'ont pas eu lieu ensemble (projet, période, personnes) : chaque bloc garde son contexte.
 
 FORME
 - 3 ou 4 paragraphes, 220 à 300 mots. Pas de « Madame, Monsieur », pas de formule de politesse, pas de signature.
@@ -164,7 +171,7 @@ FORME
 PONCTUATION (vérifiée par le code)
 - Seulement des virgules et des points. Aucun deux-points, point-virgule, tiret, parenthèse, guillemet, point d'exclamation, point d'interrogation ni points de suspension.
 - Une virgule au plus par phrase. Pour une énumération, écris « A et B ».
-- Ne coupe jamais une idée en deux phrases courtes pour éviter une virgule. Relie-la avec « qui », « où », « et », « pendant que », « parce que » ou « donc » (« Gold Circle était une application de cashback où j'ai intégré… » plutôt que « C'était une application de cashback. J'y ai intégré… »).
+- Ne coupe jamais une idée en deux phrases courtes pour éviter une virgule. Relie-la avec « qui », « où », « et », « parce que » ou « donc », seulement quand le lien est vrai (« Gold Circle était une application de cashback où j'ai intégré… » plutôt que « C'était une application de cashback. J'y ai intégré… »).
 
 STYLE
 - Phrases simples et liées entre elles, comme on parle à un recruteur. Une phrase de moins de 8 mots doit rester rare.
@@ -198,11 +205,20 @@ ${jobSection(job)}`;
 const OPENING = /^(madame|monsieur|bonjour)\b[^.]{0,40},?$/i;
 const SIGN_OFF = /je vous prie d.agr|veuillez agr|salutations distingu|^(bien |tr[eè]s )?cordialement[.,!]?$|^bien à vous[.,!]?$/i;
 
-export const cleanTitle = (title: string) =>
-  title
-    .replace(/\s*[(\[]?\b[HF]\s*\/\s*[HF]\b[)\]]?/gi, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
+/**
+ * Intitulé propre pour l'objet : sans « H/F », sans la version féminine répétée (« Ingénieur …/Ingénieure … »)
+ * ni ce que les sites collent après un tiret (« - CDI Paris - E-commerce - Theodo »).
+ */
+export function cleanTitle(title: string): string {
+  let t = title.replace(/\s*[(\[]?\b[HF]\s*\/\s*[HF]\b[)\]]?/gi, "").replace(/\s{2,}/g, " ").trim();
+  t = t.split(/\s[-–—|]\s/)[0]!.trim();
+  const [a, b] = t.split(/\s*\/\s*/);
+  if (a && b && a.length > 12 && b.toLowerCase().startsWith(a.toLowerCase().slice(0, 6))) t = a.trim();
+  return t;
+}
+
+/** « Candidature au poste de Développeur… », « … d'Ingénieur… ». */
+const posteDe = (title: string) => (/^[aeiouyhéèêâîôû]/i.test(title) ? `d'${title}` : `de ${title}`);
 
 /** Le texte de l'IA en paragraphes, sans « Madame, Monsieur », politesse, signature ni numéros. */
 export function toParagraphs(text: string, signature: string): string[] {
@@ -278,6 +294,8 @@ const capitalizeAfterDot = (t: string) => t.replace(/([.]\s+)(\p{Ll})/gu, (_, a:
 export function fixPunctuation(text: string): string {
   return capitalizeAfterDot(
     text
+      // Apostrophes perdues par certains modèles (« j ai », « d actifs ») ; pas « C » seul (le langage).
+      .replace(/(?<![\p{L}'’])([jldnsmtc]|qu|jusqu|lorsqu|puisqu|J|L|D|N|S|Qu) (?=[aeiouyhàâéèêîôûAEIOUYHÉÈ])/gu, "$1’")
       .replace(/\s*(\.{3}|…)/g, ".")
       .replace(/\s*[;:!?]\s*/g, ". ")
       .replace(/\s[—–-]\s/g, ". ")
@@ -337,6 +355,8 @@ const FORBIDDEN: Array<[RegExp, string]> = [
   [word("ma capacit[ée] (?:à|de)"), "« ma capacité à » (importance annoncée sans preuve : dis ce que tu as fait)"],
   [word("(?:confirme|d[ée]montre|prouve)(?:nt)? (?:ma|mon|mes|la|l['’]|que)"), "« confirme / démontre ma… » (dis le fait, sans le commenter)"],
   [word("ce qui me (?:donne|familiarise|rend|place)"), "« ce qui me donne / familiarise » (faux lien de cause)"],
+  [word("ce qui m['’](?:a|ont) (?:fait|familiaris|appris|donn|habitu|apport)\\p{L}*"), "« ce qui m'a appris / familiarisé… » (commentaire : le fait suffit)"],
+  [word("ce qui (?:montre|prouve|illustre|d[ée]montre)"), "« ce qui montre… » (commentaire : le fait suffit)"],
   [word("m['’](?:a|ont) permis de"), "« m'a permis de » (faux lien de cause : décris ce qu'il a fait)"],
   [word("rigoureux,? curieux"), "« rigoureux, curieux… » (qualités sans preuve)"],
   [word("(?:est|c['’]est) (?:celui|celle|ce|exactement ce) que vous (?:demandez|recherchez|cherchez|attendez)"), "« c'est ce que vous demandez » (phrase-formule : le fait suffit)"],
@@ -447,8 +467,8 @@ const truthText = (kit: Pick<LetterKit, "cvText" | "blocks" | "rules">) =>
   [kit.cvText, ...(kit.blocks ?? []).map((b) => b.text), kit.rules ?? ""].join("\n");
 
 /** Technos que le candidat a vraiment pratiquées (CV, blocs, et agents IA si Job Radar est autorisé). */
-function knownSkills(kit: Pick<LetterKit, "cvText" | "blocks" | "rules">, opts: LetterOptions): Set<string> {
-  const ids = new Set(extractSkills(`${kit.cvText}\n${(kit.blocks ?? []).map((b) => b.text).join("\n")}`));
+function knownSkills(kit: Pick<LetterKit, "cvText" | "blocks" | "rules" | "mastered">, opts: LetterOptions): Set<string> {
+  const ids = new Set(extractSkills(`${kit.cvText}\n${(kit.blocks ?? []).map((b) => b.text).join("\n")}\n${kit.mastered ?? ""}`));
   if (opts.aiCoding) for (const id of AI_CODING) ids.add(id);
   return ids;
 }
@@ -604,8 +624,45 @@ const MAX_REWRITES = 6;
 
 const splitSentences = (p: string) => p.split(/(?<=[.!?])\s+/).filter(Boolean);
 
+const VERIFY_SYSTEM = `Tu vérifies une lettre de motivation, phrase par phrase, contre les FAITS du candidat. Tu réponds UNIQUEMENT avec le JSON demandé.
+Une phrase est « inventée » si elle affirme sur le candidat quelque chose que les FAITS et les RÈGLES ne disent pas : une tâche, une collaboration, un résultat, un lieu, une techno, ou un fait attribué au mauvais projet, à la mauvaise personne ou à la mauvaise période (exemple : le travail en binôme avec le tuteur était sur Webtango, pas sur Gold Circle).
+Ne signale pas : l'envie de rejoindre l'entreprise, ce que dit l'annonce, une reformulation fidèle d'un fait.
+- phrase : recopie EXACTEMENT la phrase de la lettre.
+- raison : ce qui n'est pas prouvé, en quelques mots.
+Liste vide si tout est prouvé. N'invente pas de problème.`;
+const VERIFY_SCHEMA = {
+  type: "object",
+  properties: { inventions: { type: "array", items: { type: "object", properties: { phrase: { type: "string" }, raison: { type: "string" } }, required: ["phrase", "raison"] } } },
+  required: ["inventions"],
+} as const;
+
+const flat = (s: string) => s.toLowerCase().replace(/[’]/g, "'").replace(/\s+/g, " ").trim();
+
+/**
+ * Vérification des faits par l'IA : les phrases qui affirment sur le candidat ce que ses blocs, ses règles et son CV
+ * ne disent pas (« nous avons travaillé ensemble pour… »). Le code ne voit que les technos et les chiffres ; ceci voit le sens.
+ * Rend phrase de la lettre → raison. IA injoignable ou réponse hors format : rien (la relecture humaine reste).
+ */
+export async function findInventions(client: Pick<AiClient, "chatJson">, draft: LetterBody, kit: Pick<LetterKit, "blocks" | "rules" | "cvText">, opts: LetterOptions = {}): Promise<Map<string, string>> {
+  const facts = letterBlocks(kit, opts).map((b) => `[${b.title}] ${b.text}`).join("\n");
+  const user = `FAITS\n${facts}\n\nRÈGLES\n${kit.rules ?? ""}\n\nLETTRE\n${draft.paragraphes.join("\n\n")}`;
+  const raw = (await client.chatJson(VERIFY_SYSTEM, user, VERIFY_SCHEMA, { temperature: 0, contextTokens: LETTER_CONTEXT }).catch(() => null)) as { inventions?: unknown } | null;
+  const found = new Map<string, string>();
+  const sentences = draft.paragraphes.flatMap(splitSentences);
+  for (const x of Array.isArray(raw?.inventions) ? raw.inventions : []) {
+    const { phrase, raison } = (x ?? {}) as { phrase?: unknown; raison?: unknown };
+    if (typeof phrase !== "string" || phrase.trim().length < 10) continue;
+    // Une « phrase » qui n'est pas dans la lettre est inventée par le vérificateur : ignorée.
+    const s = sentences.find((t) => flat(t).includes(flat(phrase)) || flat(phrase).includes(flat(t)));
+    if (s) found.set(s, typeof raison === "string" ? raison.trim().slice(0, 200) : "fait non prouvé");
+  }
+  return found;
+}
+
 /** Défaut d'une phrase que la réécriture ciblée sait corriger (null = phrase correcte). */
-function sentenceDefect(s: string, banned: Array<[RegExp, string]>): { reason: string; bannedWord: boolean } | null {
+function sentenceDefect(s: string, banned: Array<[RegExp, string]>, invented?: Map<string, string>): { reason: string; bannedWord: boolean } | null {
+  const why = invented?.get(s);
+  if (why) return { reason: `fait non prouvé par ses blocs (${why}) : retire seulement ce fait et garde le reste s'il est vrai`, bannedWord: true };
   const hit = banned.find(([re]) => re.test(s));
   if (hit) return { reason: hit[1], bannedWord: true };
   if (badPunctuation(s)) return { reason: "ponctuation interdite : seulement des virgules et des points", bannedWord: false };
@@ -618,7 +675,12 @@ function sentenceDefect(s: string, banned: Array<[RegExp, string]>): { reason: s
  * voisines pour le contexte) au lieu d'être supprimée. Une réécriture qui ajoute une techno ou un chiffre est refusée.
  * Ce qui résiste : mot interdit → phrase retirée ; ponctuation → remplacée par le code.
  */
-export async function rewriteFlaggedSentences(client: Pick<AiClient, "chatJson">, draft: LetterBody, kit: Pick<LetterKit, "bannedWords">): Promise<LetterBody> {
+export async function rewriteFlaggedSentences(
+  client: Pick<AiClient, "chatJson">,
+  draft: LetterBody,
+  kit: Pick<LetterKit, "bannedWords">,
+  invented: Map<string, string> = new Map(),
+): Promise<LetterBody> {
   const banned = [...FORBIDDEN, ...ownBanned(kit)];
   const all = draft.paragraphes.flatMap(splitSentences);
   let budget = MAX_REWRITES;
@@ -627,7 +689,7 @@ export async function rewriteFlaggedSentences(client: Pick<AiClient, "chatJson">
   for (const p of draft.paragraphes) {
     const out: string[] = [];
     for (const s of splitSentences(p)) {
-      const defect = sentenceDefect(s, banned);
+      const defect = sentenceDefect(s, banned, invented);
       if (!defect || budget <= 0) {
         if (!(defect?.bannedWord)) out.push(s);
         continue;
@@ -694,12 +756,14 @@ export async function writeCoverLetter(
 ): Promise<{ content: string; model: string; durationMs: number }> {
   const started = Date.now();
   const jobText = `${job.title}\n${job.description}`;
-  const objet = opts.spontaneous ? `Candidature spontanée – ${cleanTitle(job.title)}` : `Candidature au poste de ${cleanTitle(job.title)}`;
+  const objet = opts.spontaneous ? `Candidature spontanée – ${cleanTitle(job.title)}` : `Candidature au poste ${posteDe(cleanTitle(job.title))}`;
   const blocks = letterBlocks(kit, opts);
 
   // Étape 1 : l'angle et les blocs (inutile avec un seul bloc, par exemple le CV seul).
   const rawPlan = blocks.length > 1 ? await client.chatJson(PLAN_SYSTEM, buildPlanPrompt(job, blocks), PLAN_SCHEMA, { temperature: 0.3, contextTokens: LETTER_CONTEXT }) : null;
   const plan = cleanPlan(rawPlan, blocks, job);
+  // L'offre parle de développer avec l'IA : Job Radar (dernier bloc) en fait toujours partie.
+  if (opts.aiCoding && !plan.blocs.includes(blocks.length)) plan.blocs = [...plan.blocs.slice(0, 2), blocks.length];
   const prompt = buildWritePrompt(job, kit, plan, blocks, opts);
   let lastError = "";
 
@@ -743,6 +807,8 @@ export async function writeCoverLetter(
   }
   if (!best) throw new Error(`Réponse de l'IA hors format : ${lastError}`);
 
-  const draft = await rewriteFlaggedSentences(client, best.draft, kit);
+  // Vérification des faits par l'IA, puis réécriture ciblée des phrases fautives ou inventées.
+  const invented = await findInventions(client, best.draft, kit, opts);
+  const draft = await rewriteFlaggedSentences(client, best.draft, kit, invented);
   return { content: fixTypos(assembleLetter(kit, draft, now)), model: client.model, durationMs: Date.now() - started };
 }
