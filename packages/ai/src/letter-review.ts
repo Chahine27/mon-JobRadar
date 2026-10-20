@@ -60,6 +60,8 @@ export async function languageToolProblems(text: string, known: string, fetchFn:
     const bad = text.slice(m.offset, m.offset + m.length);
     // « … est ce que je peux vous apporter. » : phrase affirmative, pas de trait d'union (LanguageTool croit à une question).
     if (/^est ce$/i.test(bad) && !sentenceAround(text, m.offset, m.length).includes("?")) continue;
+    // « que j'apporterais » : le conditionnel est correct, LanguageTool suggère seulement le futur (choix de style).
+    if (/futur semble plus adapté/i.test(m.message)) continue;
     if (m.rule.issueType === "misspelling") {
       if (/[\p{Lu}\d]/u.test(bad) || knownLower.includes(bad.toLowerCase())) continue;
     } else if (!/GRAMMAIRE|GRAMMAR|AGREEMENT|CONFUSED|TYPOS/i.test(m.rule.category.id)) continue;

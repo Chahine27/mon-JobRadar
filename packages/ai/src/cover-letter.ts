@@ -5,7 +5,7 @@ import type { AiClient } from "./cloud";
 import type { ChatTurn } from "./ollama";
 
 /** Changer ce numéro quand la consigne change : les lettres existantes seront signalées « à refaire ». */
-export const LETTER_PROMPT_VERSION = "2026-10-20.3";
+export const LETTER_PROMPT_VERSION = "2026-10-20.4";
 
 /** Une lettre : l'objet (écrit par le code) et les paragraphes du corps (écrits par l'IA). */
 export type LetterBody = { objet: string; paragraphes: string[] };
@@ -158,7 +158,7 @@ VÉRITÉ
 FORME
 - 3 ou 4 paragraphes, 220 à 300 mots. Pas de « Madame, Monsieur », pas de formule de politesse, pas de signature.
 - Ouverture : pourquoi CE poste l'intéresse, en partant de l'accroche (le projet, le produit ou les clients décrits), puis en une phrase ce qu'il apporte. Pas de phrase de présentation toute faite du genre diplôme plus années d'expérience, pas de résumé de l'annonce.
-- Ensuite un paragraphe par bloc choisi, dans l'ordre donné. Les blocs sont ta MATIÈRE, pas un texte à recopier : garde seulement les 2 ou 3 faits qui servent l'angle et laisse le reste (contexte du projet, détails sans rapport avec le poste, travail des autres). Termine le paragraphe en reliant ce fait au poste, avec ce que dit l'annonce et sans inventer de besoin.
+- Ensuite un paragraphe par bloc choisi, dans l'ordre donné. Les blocs sont ta MATIÈRE, pas un texte à recopier : garde seulement les 2 ou 3 faits qui servent l'angle et laisse le reste (contexte du projet, détails sans rapport avec le poste, travail des autres). Le lien avec le poste se voit dans le choix du fait et en quelques mots glissés dans la phrase, jamais par une phrase-formule ajoutée à la fin (« c'est ce que vous demandez », « ce qui sert votre annonce » sont interdits).
 - Fin : une seule phrase simple qui propose un échange, avec le nom de l'entreprise s'il est connu.
 
 PONCTUATION (vérifiée par le code)
@@ -292,6 +292,15 @@ export function fixPunctuation(text: string): string {
   );
 }
 
+/**
+ * Dernier recours pour une phrase à plusieurs virgules : la virgule après une courte introduction
+ * (« Pendant ma licence pro, j'ai… ») peut tomber sans faute.
+ */
+export function trimIntroComma(sentence: string): string {
+  const i = sentence.indexOf(",");
+  return tooManyCommas(sentence) && i > 0 && sentence.slice(0, i).split(/\s+/).length <= 5 ? sentence.slice(0, i) + sentence.slice(i + 1) : sentence;
+}
+
 // ───── Relecture : vérité et style ─────
 
 // Bornes de mots compatibles avec les accents (\b ne connaît pas « é »).
@@ -330,6 +339,9 @@ const FORBIDDEN: Array<[RegExp, string]> = [
   [word("ce qui me (?:donne|familiarise|rend|place)"), "« ce qui me donne / familiarise » (faux lien de cause)"],
   [word("m['’](?:a|ont) permis de"), "« m'a permis de » (faux lien de cause : décris ce qu'il a fait)"],
   [word("rigoureux,? curieux"), "« rigoureux, curieux… » (qualités sans preuve)"],
+  [word("(?:est|c['’]est) (?:celui|celle|ce|exactement ce) que vous (?:demandez|recherchez|cherchez|attendez)"), "« c'est ce que vous demandez » (phrase-formule : le fait suffit)"],
+  [word("ce qui sert|qui sert (?:la|le|les|votre|vos)"), "« ce qui sert … » (phrase-formule : le fait suffit)"],
+  [word("de votre annonce|dans votre annonce"), "« de votre annonce » (phrase-formule : dis-le simplement)"],
 ];
 /** Mots utiles une fois, mais qui sonnent « robot » quand ils reviennent. */
 const ONCE = ["particulièrement", "notamment", "également", "aussi"];
@@ -390,15 +402,17 @@ const normWords = (t: string) =>
 /** Passage d'au moins 6 mots recopié de l'annonce (hors intitulé du poste). */
 export function copiedFromJob(body: string, jobText: string, jobTitle = ""): string[] {
   const job = normWords(jobText);
-  const title = normWords(jobTitle).join(" ");
+  // Reprendre l'intitulé du poste (« le poste de développeur fullstack Java ») n'est pas recopier l'annonce.
+  const titleWords = new Set(normWords(jobTitle));
+  const isTitle = (g: string[]) => g.filter((x) => titleWords.has(x)).length >= 3;
   const grams = new Set<string>();
   for (let i = 0; i + 6 <= job.length; i++) grams.add(job.slice(i, i + 6).join(" "));
   const found: string[] = [];
   for (const s of body.split(/(?<=[.!?])\s+|\n+/)) {
     const w = normWords(s);
     for (let i = 0; i + 6 <= w.length; i++) {
-      const g = w.slice(i, i + 6).join(" ");
-      if (grams.has(g) && !(title && title.includes(g))) {
+      const g = w.slice(i, i + 6);
+      if (grams.has(g.join(" ")) && !isTitle(g)) {
         found.push(s.trim().slice(0, 90));
         break;
       }
@@ -638,7 +652,7 @@ export async function rewriteFlaggedSentences(client: Pick<AiClient, "chatJson">
   }
   // Une lettre vidée par les retraits garde sa version d'origine (rare : la relecture la signalera).
   const kept = paragraphes.length >= 2 ? paragraphes : draft.paragraphes;
-  return { ...draft, paragraphes: kept.map(fixPunctuation) };
+  return { ...draft, paragraphes: kept.map((p) => splitSentences(fixPunctuation(p)).map(trimIntroComma).join(" ")) };
 }
 
 // ───── Écriture complète ─────

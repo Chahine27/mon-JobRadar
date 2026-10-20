@@ -163,6 +163,23 @@ describe("ponctuation : seulement des virgules et des points", () => {
   });
 });
 
+describe("cas emagine (règles 2026-10-20.4)", () => {
+  it("reprendre l'intitulé du poste n'est pas recopier l'annonce", () => {
+    const job = "Développeur Fullstack Java / React\nemagine recrute pour le poste de développeur fullstack Java React chez un client bancaire.";
+    expect(findLetterIssues("x\nChez emagine le poste de développeur fullstack Java et React m'intéresse.", KIT, job).join("\n")).not.toMatch(/recopiée/);
+  });
+  it("phrases-formules de liaison refusées", () => {
+    const all = findLetterIssues("x\nCe travail sur des API est celui que vous demandez. J'ai migré une interface, ce qui sert la maintenance de votre annonce.", KIT, jobText).join("\n");
+    expect(all).toMatch(/c'est ce que vous demandez/);
+    expect(all).toMatch(/ce qui sert/);
+  });
+  it("virgule d'introduction retirée en dernier recours", async () => {
+    const s = "Pendant ma licence pro, j'ai passé six mois sur Gold Circle, une application de cashback.";
+    const out = await rewriteFlaggedSentences({ chatJson: async () => ({ phrase: s }) }, { objet: "x", paragraphes: [s, "Merci."] }, { bannedWords: "" });
+    expect(out.paragraphes[0]).toBe("Pendant ma licence pro j'ai passé six mois sur Gold Circle, une application de cashback.");
+  });
+});
+
 describe("style haché", () => {
   it("plus de deux phrases très courtes dans le corps : signalé", () => {
     const choppy = "Objet\nChez Banquo j'ai travaillé sur Gold Circle. C'était une application. Nous étions deux. J'ai codé l'API. Elle marchait bien.";
