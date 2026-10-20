@@ -14,7 +14,8 @@ job-radar.stop
 data/
 
 # Réglages locaux de Claude Code
-.claude/
+.claude/*
+!.claude/settings.json
 
 # Rangement (14/10/2026) : notes et transmissions (rapports pour l'agent de la version publique, résumé du projet,
 # sorties de Claude), archives (brouillons de débogage, anciens journaux, tests de CV), journaux de l'appli
