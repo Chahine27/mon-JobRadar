@@ -163,6 +163,13 @@ describe("ponctuation : seulement des virgules et des points", () => {
   });
 });
 
+describe("style haché", () => {
+  it("plus de deux phrases très courtes dans le corps : signalé", () => {
+    const choppy = "Objet\nChez Banquo j'ai travaillé sur Gold Circle. C'était une application. Nous étions deux. J'ai codé l'API. Elle marchait bien.";
+    expect(findLetterIssues(choppy, KIT, jobText).join("\n")).toMatch(/Trop de phrases très courtes/);
+  });
+});
+
 describe("réécriture ciblée d'une phrase", () => {
   const d = { objet: "x", paragraphes: ["Chez Banquo j'ai développé des API. Je suis convaincu de ma motivation. Elles tournent sur PostgreSQL.", "Je serais ravi d'échanger."] };
 

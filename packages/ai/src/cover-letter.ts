@@ -5,7 +5,7 @@ import type { AiClient } from "./cloud";
 import type { ChatTurn } from "./ollama";
 
 /** Changer ce numéro quand la consigne change : les lettres existantes seront signalées « à refaire ». */
-export const LETTER_PROMPT_VERSION = "2026-10-20.2";
+export const LETTER_PROMPT_VERSION = "2026-10-20.3";
 
 /** Une lettre : l'objet (écrit par le code) et les paragraphes du corps (écrits par l'IA). */
 export type LetterBody = { objet: string; paragraphes: string[] };
@@ -93,6 +93,7 @@ export type LetterPlan = { angle: string; blocs: number[]; accroche: string };
 const PLAN_SYSTEM = `Tu prépares une lettre de motivation pour un développeur junior qui sort d'alternance. Tu ne l'écris pas encore. Tu réponds UNIQUEMENT avec le JSON demandé.
 - angle : une phrase qui dit ce que l'employeur cherche le plus et ce que le candidat a de plus proche.
 - blocs : les numéros des 2 ou 3 blocs qui le prouvent le mieux, du plus fort au moins fort. Un bloc ne sert que si sa ligne « Sert pour » ou son texte répond vraiment à l'annonce. Ne prends pas un bloc juste pour remplir.
+- L'expérience en entreprise passe avant les projets d'école : au moins un bloc d'entreprise, et au plus UN projet d'école, seulement s'il prouve une techno centrale de l'annonce que l'entreprise ne prouve pas. Une techno proche compte (Vue.js en entreprise vaut mieux que React en projet pour un poste React). Poste full stack : un bloc serveur et un bloc interface.
 - accroche : un fait concret de l'annonce (produit, clients, secteur, projet) à citer dans l'ouverture. Vide si l'annonce n'en donne aucun. Candidature spontanée : vide.`;
 const PLAN_SCHEMA = {
   type: "object",
@@ -156,16 +157,17 @@ VÉRITÉ
 
 FORME
 - 3 ou 4 paragraphes, 220 à 300 mots. Pas de « Madame, Monsieur », pas de formule de politesse, pas de signature.
-- Ouverture : l'angle, relié à l'accroche. Pas de phrase de présentation toute faite du genre diplôme plus années d'expérience.
-- Ensuite les blocs choisis, dans l'ordre donné. Reprends-les au plus près de leur texte et garde leur simplicité. Relie-les par une courte transition.
-- Fin : une seule phrase qui propose un échange, avec le nom de l'entreprise s'il est connu.
+- Ouverture : pourquoi CE poste l'intéresse, en partant de l'accroche (le projet, le produit ou les clients décrits), puis en une phrase ce qu'il apporte. Pas de phrase de présentation toute faite du genre diplôme plus années d'expérience, pas de résumé de l'annonce.
+- Ensuite un paragraphe par bloc choisi, dans l'ordre donné. Les blocs sont ta MATIÈRE, pas un texte à recopier : garde seulement les 2 ou 3 faits qui servent l'angle et laisse le reste (contexte du projet, détails sans rapport avec le poste, travail des autres). Termine le paragraphe en reliant ce fait au poste, avec ce que dit l'annonce et sans inventer de besoin.
+- Fin : une seule phrase simple qui propose un échange, avec le nom de l'entreprise s'il est connu.
 
 PONCTUATION (vérifiée par le code)
 - Seulement des virgules et des points. Aucun deux-points, point-virgule, tiret, parenthèse, guillemet, point d'exclamation, point d'interrogation ni points de suspension.
 - Une virgule au plus par phrase. Pour une énumération, écris « A et B ».
+- Ne coupe jamais une idée en deux phrases courtes pour éviter une virgule. Relie-la avec « qui », « où », « et », « pendant que », « parce que » ou « donc » (« Gold Circle était une application de cashback où j'ai intégré… » plutôt que « C'était une application de cashback. J'y ai intégré… »).
 
 STYLE
-- Phrases simples, comme on parle à un recruteur. Varie leur longueur.
+- Phrases simples et liées entre elles, comme on parle à un recruteur. Une phrase de moins de 8 mots doit rester rare.
 - Ce qu'il a fait se dit à la première personne, jamais au passif. Pas trois phrases de suite qui commencent par « J'ai ».
 - Pas de formules creuses ni de qualités sans preuve.`;
 const WRITE_SCHEMA = { type: "object", properties: { lettre: { type: "string" } }, required: ["lettre"] } as const;
@@ -470,7 +472,10 @@ export function findLetterIssues(body: string, kit: LetterKit, jobText: string, 
   const punct = bodySentences.filter(badPunctuation);
   if (punct.length) issues.push(`Ponctuation : seulement des virgules et des points, pas de deux-points, point-virgule, tiret, parenthèse ni guillemet (« ${punct[0]!.slice(0, 80)}… »).`);
   const commas = bodySentences.filter(tooManyCommas);
-  if (commas.length) issues.push(`Trop de virgules : une au plus par phrase, coupe ou écris « A et B » (« ${commas[0]!.slice(0, 80)}… »).`);
+  if (commas.length) issues.push(`Trop de virgules : une au plus par phrase, relie avec « qui », « où » ou « et » (« ${commas[0]!.slice(0, 80)}… »).`);
+  // Style haché : des phrases très courtes à la suite (« C'était une application de cashback. Nous l'avons fait à deux. »).
+  const short = bodySentences.filter((s) => s.split(/\s+/).length < 8);
+  if (short.length > 2) issues.push(`Trop de phrases très courtes (« ${short.slice(0, 2).join(" » et « ")} ») : relie-les à la phrase voisine avec « qui », « où », « et » ou « parce que ».`);
   for (const m of body.matchAll(/(?:apprendre|découvrir|me former (?:à|sur))\s+(?:le |la |l'|les )?([^.,;\n]{2,60})/gi)) {
     for (const id of extractSkills(m[1]!)) if (inCv.has(id)) issues.push(`${label(id)} est dans le CV : ne dis pas vouloir l'apprendre, dis qu'il l'a pratiqué.`);
   }
@@ -575,7 +580,7 @@ export function checkLetter(letter: string, kit: LetterKit, jobText: string, job
 // ───── Corrections ─────
 
 const REWRITE_SYSTEM = `Tu corriges UNE phrase d'une lettre de motivation en français. Tu réponds UNIQUEMENT avec le JSON demandé.
-- Réécris seulement la PHRASE pour retirer le défaut indiqué, en gardant son sens et ses faits. Tu peux la couper en deux phrases.
+- Réécris seulement la PHRASE pour retirer le défaut indiqué, en gardant son sens et ses faits. Pour enlever une virgule, relie avec « qui », « où » ou « et » plutôt que de couper en phrases courtes.
 - N'ajoute aucun fait, aucune technologie, aucun chiffre. Première personne pour ce que le candidat a fait (pas de passif).
 - Seulement des virgules et des points, une virgule au plus par phrase.
 - Elle doit s'enchaîner naturellement avec la phrase d'avant et celle d'après (ne commence pas par un pronom qui ne renvoie à rien).
