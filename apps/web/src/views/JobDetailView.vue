@@ -104,6 +104,18 @@ async function reloadJob() {
   if (fresh) job.value = fresh;
 }
 
+/** Toute l'offre (id, sources, description, score détaillé, avis IA) en JSON, à coller à Claude pour signaler un souci. */
+const copiedAll = ref(false);
+async function copyAll() {
+  await act(async () => {
+    const { analysis, upToDate } = await api.getJobAnalysis(props.id).catch(() => ({ analysis: null, upToDate: false }));
+    const dump = { job: job.value, aiAnalysis: analysis, aiAnalysisUpToDate: upToDate, page: location.href, copiedAt: new Date().toISOString() };
+    await navigator.clipboard.writeText(JSON.stringify(dump, null, 2));
+    copiedAll.value = true;
+    setTimeout(() => (copiedAll.value = false), 2000);
+  });
+}
+
 // ───── Annonce complète (Adzuna / Jooble ne donnent qu'un extrait) ─────
 const completing = ref(false);
 const fullText = ref("");
@@ -367,6 +379,9 @@ const ruleLabel = (r: ScoreRule) =>
       <button type="button" :disabled="busy || job.status === 'APPLIED'" @click="applying = true"><Icon name="send" :size="16" />Marquer comme postulé</button>
       <button type="button" class="danger" :disabled="busy || job.status === 'IGNORED'" @click="openNotForMe"><Icon name="eyeOff" :size="16" />Pas pour moi</button>
       <button v-if="job.status !== 'SEEN'" type="button" class="ghost" :disabled="busy" @click="setStatus('SEEN')"><Icon name="undo" :size="16" />Remettre à « vue »</button>
+      <button type="button" class="ghost" :disabled="busy" title="Copie tout (id, description, score, avis IA) pour signaler un souci à Claude" @click="copyAll">
+        <Icon :name="copiedAll ? 'check' : 'file'" :size="16" />{{ copiedAll ? "Copiée !" : "Copier l'offre" }}
+      </button>
     </section>
 
     <section v-if="applying && job.status !== 'APPLIED'" class="card apply">
