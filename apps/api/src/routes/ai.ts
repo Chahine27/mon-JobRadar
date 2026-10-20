@@ -1,5 +1,6 @@
 import {
   LETTER_PROMPT_VERSION,
+  analysisWantsAiCoding,
   checkLetter,
   letterHash,
   reviewBlock,
@@ -373,20 +374,22 @@ export async function aiRoutes(
   const writingKit = ({ pdfName: _, ...kit }: LetterKit) => kit;
 
   async function letterContext(userId: string, jobId: string) {
-    const [job, kit] = await Promise.all([stores.jobs.get(jobId), stores.letterKits.get(userId)]);
+    const [job, kit, analysis] = await Promise.all([stores.jobs.get(jobId), stores.letterKits.get(userId), stores.analyses.latest(jobId)]);
     if (!job) return null;
+    // Job Radar (projet perso fait avec des agents IA) n'est cité que si l'analyse IA de l'offre en parle.
+    const opts: LetterOptions = { aiCoding: analysisWantsAiCoding(analysis?.result) };
     const inputHash = kit
       ? createHash("sha256")
-          .update(JSON.stringify([job.contentHash, writingKit(kit), ai?.model ?? "", LETTER_PROMPT_VERSION]))
+          .update(JSON.stringify([job.contentHash, writingKit(kit), ai?.model ?? "", LETTER_PROMPT_VERSION, opts.aiCoding]))
           .digest("hex")
           .slice(0, 32)
       : "";
     const jobText = [job.title, job.company ?? "", job.description].join("\n");
-    return { job, kit, inputHash, jobText, abridged: isAbridged(job) };
+    return { job, kit, inputHash, jobText, abridged: isAbridged(job), opts };
   }
 
-  function letterReply(letter: StoredLetter | null, ctx: { job: JobRow; kit: LetterKit | null; inputHash: string; jobText: string; abridged: boolean }) {
-    const warnings = letter && ctx.kit ? checkLetter(letter.content, ctx.kit, ctx.jobText, ctx.job.title) : [];
+  function letterReply(letter: StoredLetter | null, ctx: { job: JobRow; kit: LetterKit | null; inputHash: string; jobText: string; abridged: boolean; opts: LetterOptions }) {
+    const warnings = letter && ctx.kit ? checkLetter(letter.content, ctx.kit, ctx.jobText, ctx.job.title, ctx.opts) : [];
     if (letter && ctx.abridged) {
       warnings.unshift("L'annonce n'est qu'un extrait : colle l'annonce complète (bouton « Compléter l'annonce ») puis réécris la lettre, elle sera plus précise.");
     }
@@ -430,7 +433,7 @@ export async function aiRoutes(
     if (existing && existing.inputHash === ctx.inputHash && !force) return { ...letterReply(existing, ctx), cached: true };
 
     try {
-      const { content, model, durationMs } = await withLock(() => ai.writeLetter(toJobInput(ctx.job), ctx.kit!));
+      const { content, model, durationMs } = await withLock(() => ai.writeLetter(toJobInput(ctx.job), ctx.kit!, ctx.opts));
       const saved = await reviewJobLetter(await stores.letters.save(params.data.id, { inputHash: ctx.inputHash, model, content }), params.data.id, ctx);
       request.log.info({ jobId: params.data.id, durationMs, model, problems: saved.review?.problems.length }, "lettre IA écrite et relue");
       notifyLetter(reply, request.userId!, {

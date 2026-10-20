@@ -6,7 +6,7 @@ import type { AiClient } from "./cloud";
 import type { ChatTurn } from "./ollama";
 
 /** Changer ce numéro quand la consigne change : les lettres existantes seront signalées « à refaire ». */
-export const LETTER_PROMPT_VERSION = "2026-10-15.3";
+export const LETTER_PROMPT_VERSION = "2026-10-20.1";
 
 /** Ce que l'IA écrit : l'objet et le corps. L'en-tête, « Madame, Monsieur » et la politesse sont ajoutés par le code. */
 export const LetterDraftSchema = z.object({
@@ -52,7 +52,8 @@ export const LETTER_JSON_SCHEMA = {
 const MAX_JOB = 5_000;
 const MAX_CV = 5_000;
 const MAX_EXAMPLE = 4_000;
-const MAX_RULES = 8_000;
+// Autant que le champ « règles » du kit (15 000) : coupées plus tôt, la fin (preuves, selon le poste…) était perdue.
+const MAX_RULES = 15_000;
 
 export const LETTER_SYSTEM_PROMPT = `Tu écris une lettre de motivation en français pour un candidat JUNIOR (sorti d'alternance), à partir de SON CV et d'une annonce.
 Tu réponds UNIQUEMENT avec le JSON demandé.
@@ -68,7 +69,7 @@ Tu réponds UNIQUEMENT avec le JSON demandé.
 
 2. NIVEAU : ni trop, ni trop peu
 - Jamais « je maîtrise », « maîtriser », « expert », « expertise », « parfaitement » : il est junior (SEULE exception : les technos listées dans « TECHNOS QU'IL MAÎTRISE », si la liste est fournie). Écris « j'ai développé », « j'ai utilisé », « j'ai pratiqué », « j'ai travaillé avec ».
-- Technologie de l'annonce ABSENTE du CV : jamais « approfondir », « consolider », « renforcer », « ma connaissance de », « j'ai de l'expérience en » pour elle. Ne LISTE JAMAIS les technologies qui lui manquent. Au plus UN manque dans toute la lettre, et seulement s'il est central dans l'annonce (dans le titre ou parmi les premières exigences) : « … que je souhaite approfondir en m'appuyant sur … (une techno PROCHE du CV) ». Sinon, n'en parle pas.
+- Technologie de l'annonce ABSENTE du CV : jamais « approfondir », « consolider », « renforcer », « ma connaissance de », « j'ai de l'expérience en » pour elle. Ne LISTE JAMAIS les technologies qui lui manquent. Par défaut, n'en parle pas du tout. SEULE exception : une techno écrite dans l'INTITULÉ du poste, en une phrase : « … que je souhaite approfondir en m'appuyant sur … (une techno PROCHE du CV) ».
 - Technologie PRÉSENTE dans le CV (même dans « Autres » ou « Outils ») : jamais « je souhaite l'apprendre » ; dis qu'il l'a déjà pratiquée.
 
 3. PERTINENCE (le plus important)
@@ -79,16 +80,15 @@ Tu réponds UNIQUEMENT avec le JSON demandé.
 - Le paragraphe sur les projets d'école n'existe que s'il répond à une exigence de CETTE annonce.
 
 4. STYLE : une lettre écrite par une personne, pas par un robot
-- Première personne, vouvoiement du recruteur, phrases courtes (25 mots maximum), un fait par phrase.
+- Première personne, vouvoiement du recruteur. Alterne phrases courtes et plus longues, et relie les idées entre elles (cause, conséquence, opposition) au lieu d'empiler un fait par phrase.
 - Écris comme il parlerait à un recruteur à l'oral : simple, précis, sans jargon RH. Relis chaque phrase : si elle pourrait figurer dans n'importe quelle lettre, remplace-la par un fait précis.
-- Varie les débuts de phrase : jamais plus de deux phrases de suite qui commencent par « J'ai », et « J'ai » dans une phrase sur trois au plus. Alterne avec le contexte (« Chez LUSIS, … », « Sur CodeNShare, … », « Côté interfaces, … »).
+- Varie les débuts de phrase : jamais plus de deux phrases de suite qui commencent par « J'ai ». Alterne avec le contexte (« Chez LUSIS, … », « Sur CodeNShare, … »). Mais ce qu'il a fait se dit TOUJOURS à la première personne : jamais de passif pour éviter « J'ai » (« le module a été migré », « les API étaient intégrées » sont interdits quand c'est lui qui l'a fait).
 - Pas de récitation chronologique du CV : chaque fait cité est relié en quelques mots à un besoin de l'annonce (« … , ce qui correspond à votre besoin de … » est interdit : dis-le simplement, par exemple « C'est ce type d'API que vous exposez en GraphQL. »).
 - Ne répète pas une même technologie plus de deux fois, ni le même verbe dans un paragraphe (« développé » trois fois).
 - Ne prétends jamais que l'offre « correspond à mon parcours » si des technologies principales lui manquent : dis ce qui est transférable.
 - Clichés interdits : « bases solides », « m'ont exposé », « je vise », « correspond à mon parcours », « je serais intéressé », « mettre à profit », « au sein de votre structure », « environnement stimulant », « je suis convaincu », « motivé », « sérieux », « applications métier complexes ».
 - Pas de faux liens de cause : n'écris pas « ce qui m'a permis de », « ce qui me permet de » ni « comme en témoigne » ; décris simplement ce qu'il a fait.
 - Nomme l'entreprise d'alternance (ex. « chez LUSIS ») et le projet : « une expérience sur des applications web métier » ne dit rien.
-- Verbes simples à la première personne (« j'ai développé », « j'ai créé », « j'ai migré ») : c'est bien, mais pas plus de deux phrases de suite qui commencent par « J'ai ».
 - « particulièrement », « notamment », « également », « aussi » : une fois au plus chacun. Pas de tiret long (—), pas de liste à puces, pas de gras.
 - Chaque phrase apporte un fait. Pas d'importance annoncée sans preuve (« ce qui souligne », « joue un rôle clé », « ma démarche structurée ») ; pas de formule du type « Plus qu'un poste, c'est… » ; pas de listes de trois éléments par réflexe.
 - Varie la longueur des phrases : une courte quand elle suffit, une plus longue quand deux idées sont liées.
@@ -103,11 +103,10 @@ Tu réponds UNIQUEMENT avec le JSON demandé.
 
 5. CONTENU
 - objet : « Candidature au poste de » + l'intitulé du poste (sans « H/F »), orthographe corrigée.
-- paragraphes : 3 à 5 paragraphes, 250 à 350 mots en tout (une page) :
-  1. qui il est (diplôme, alternance chez l'entreprise nommée) et le poste visé, avec UN élément concret de l'annonce qui l'attire ;
-  2. (et 3. si utile) les preuves des correspondances, avec des faits concrets du CV ;
-  4. les éventuels manques (une phrase franche) et ce qu'il apportera ;
-  5. une phrase de conclusion qui propose un échange (avec le nom de l'entreprise s'il est connu).
+- paragraphes : 3 à 5 paragraphes, 250 à 330 mots en tout (une page). Pas de plan type ni d'ordre chronologique :
+  - l'ouverture dit ce qui, dans son parcours, répond le mieux à CETTE offre (pas de phrase de présentation toute faite) ;
+  - puis 2 ou 3 preuves choisies, développées (contexte, ce qu'il a fait, ce que ça montre pour ce poste) : mieux vaut deux faits racontés que six faits cités ; ignore les détails qu'un recruteur ne retiendrait pas ;
+  - une phrase de fin qui propose un échange (avec le nom de l'entreprise s'il est connu), sans liste de qualités.
 - N'écris PAS « Madame, Monsieur », ni la formule de politesse finale, ni la signature : elles sont ajoutées automatiquement.`;
 
 /**
@@ -138,7 +137,28 @@ export function strengthsAndGaps(jobText: string, cvText: string): { strengths: 
 }
 
 /** Options d'écriture : candidature spontanée (pas d'offre publiée). */
-export type LetterOptions = { spontaneous?: boolean };
+export type LetterOptions = {
+  spontaneous?: boolean;
+  /** L'analyse IA de l'offre parle de développer avec des agents IA : Job Radar (projet perso) peut être cité. */
+  aiCoding?: boolean;
+};
+
+const JOB_RADAR = /job\s?radar/i;
+/** Compétences « développer avec l'IA » du dictionnaire. */
+const AI_CODING = new Set(["agents-ia", "multi-agents", "llm-api"]);
+
+/** L'analyse IA de l'offre (compétences exigées, bonus, missions) parle-t-elle de développer avec des agents IA ? */
+export function analysisWantsAiCoding(result: unknown): boolean {
+  const r = (result ?? {}) as Record<string, unknown>;
+  const text = ["competences_obligatoires", "competences_bonus", "missions"]
+    .flatMap((k) => (Array.isArray(r[k]) ? (r[k] as unknown[]).filter((x): x is string => typeof x === "string") : []))
+    .join("\n");
+  return extractSkills(text).some((id) => AI_CODING.has(id));
+}
+
+const JOB_RADAR_FACT = `PROJET PERSO AUTORISÉ (l'analyse de l'offre parle de développement avec des agents IA ; une ou deux phrases, seulement si ça sert la lettre)
+- Job Radar : application perso qui récupère les offres d'emploi, les note et aide à postuler (lettre écrite par l'IA, CV adapté en PDF, suivi des réponses), en TypeScript, Vue 3, Fastify et PostgreSQL, code public sur GitHub. Je l'ai construite avec Claude Code : je fixe l'objectif et je vérifie chaque fonctionnalité. Ne dis jamais que j'en ai écrit tout le code à la main.
+`;
 
 /** Entreprise visée par une candidature spontanée (La Bonne Boîte). */
 export type SpontaneousCompany = {
@@ -217,7 +237,7 @@ ${kit.rules.trim().slice(0, MAX_RULES)}
     : "";
   // Les mêmes listes que la relecture automatique (findLetterIssues) : l'IA les connaît avant d'écrire.
   const banned = `MOTS ET FORMULES INTERDITS (la lettre est relue automatiquement : chacun est refusé) : ${[...FORBIDDEN, ...ownBanned(kit)].map(([, name]) => name).join(", ")}\n`;
-  return `${opts.spontaneous ? SPONTANEOUS_RULES : ""}${own}${mastered}${closing}${banned}${table}${fullStack}${missing}
+  return `${opts.spontaneous ? SPONTANEOUS_RULES : ""}${own}${opts.aiCoding ? JOB_RADAR_FACT : ""}${mastered}${closing}${banned}${table}${fullStack}${missing}
 CV DU CANDIDAT
 """
 ${kit.cvText.slice(0, MAX_CV)}
@@ -312,6 +332,7 @@ export function assembleLetter(kit: LetterKit, draft: LetterBody, date: Date): s
 export function checkLetter(letter: string, kit: LetterKit, jobText: string, jobTitle = "", opts: LetterOptions = {}): string[] {
   const warnings: string[] = [];
   const inCv = new Set(extractSkills(kit.cvText));
+  if (opts.aiCoding) for (const id of AI_CODING) inCv.add(id);
   // Le titre du poste recopié (objet, 1re phrase) n'est pas une affirmation de maîtrise.
   const title = jobTitle.replace(/\s*[(\[]?\b[HF]\s*\/\s*[HF]\b[)\]]?/gi, "").trim();
   const claims = title ? letter.split(title).join(" ") : letter;
@@ -541,6 +562,8 @@ export function inventedNeeds(body: string, jobText: string): string[] {
 export function findLetterIssues(body: string, kit: LetterKit, jobText: string, opts: LetterOptions = {}): string[] {
   const issues: string[] = [];
   const inCv = new Set(extractSkills(kit.cvText));
+  // Job Radar autorisé : le développement avec des agents IA est un fait (même absent du CV).
+  if (opts.aiCoding) for (const id of AI_CODING) inCv.add(id);
   const inJob = new Set(extractSkills(jobText));
   const sentences = body.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
   const label = (id: string) => getSkill(id)?.label ?? id;
@@ -573,7 +596,7 @@ export function findLetterIssues(body: string, kit: LetterKit, jobText: string, 
   for (const s of sentences) {
     run = /^j['’]ai\b/i.test(s) ? run + 1 : 0;
     if (run === 3) {
-      issues.push("Trois phrases de suite commencent par « J'ai » : varie les débuts (« Chez LUSIS, … », « Sur CodeNShare, … »).");
+      issues.push("Trois phrases de suite commencent par « J'ai » : varie les débuts (« Chez LUSIS, … », « Sur CodeNShare, … »), sans passer au passif.");
       break;
     }
   }
@@ -601,11 +624,12 @@ export function findLetterIssues(body: string, kit: LetterKit, jobText: string, 
   if (opts.spontaneous && /votre (offre|annonce)|l['’](offre|annonce)|le poste que vous (proposez|recherchez)/i.test(body)) {
     issues.push("Candidature spontanée : il n'y a pas d'offre, n'écris pas « votre offre » ; parle de l'envie de rejoindre l'entreprise.");
   }
-  // Manques listés : au plus un.
+  // Manques : on n'en parle que pour une techno de l'intitulé du poste.
   const title = jobText.split("\n")[0] ?? "";
   const inTitle = new Set(extractSkills(title));
   const gapsCited = [...new Set(extractSkills(body))].filter((id) => !inCv.has(id) && inJob.has(id) && !inTitle.has(id));
-  if (gapsCited.length >= 2) issues.push(`Ne liste pas tes manques (${gapsCited.map(label).join(", ")}) : au plus un, seulement s'il est central dans l'annonce.`);
+  if (gapsCited.length) issues.push(`Ne liste pas tes manques (${gapsCited.map(label).join(", ")}) : n'en parle pas, ce n'est pas dans l'intitulé du poste.`);
+  if (!opts.aiCoding && JOB_RADAR.test(body)) issues.push("Supprime Job Radar : l'analyse de l'offre ne parle pas de développement avec des agents IA.");
   // Chiffres inventés.
   const sources = `${kit.cvText}\n${kit.rules ?? ""}\n${jobText}\n${kit.closing ?? ""}\n${kit.header}`;
   // On ignore les versions (« Vue 3 », « .NET 8 », « OAuth2 ») et les dates.
@@ -625,10 +649,6 @@ export function findLetterIssues(body: string, kit: LetterKit, jobText: string, 
   if (employers.length && !employers.some((e) => body.toLowerCase().includes(e.name.toLowerCase()))) {
     issues.push(`Nomme l'entreprise d'alternance (${employers.map((e) => e.name).join(", ")}) : « une expérience en alternance » seule ne dit rien.`);
   }
-  const jai = body.match(/(?<![\p{L}])j['’]ai(?![\p{L}])/giu)?.length ?? 0;
-  // 5 pour une lettre courte, environ un par phrase sur trois au-delà (lettre de 330 mots → 10).
-  const maxJai = Math.max(5, Math.round(body.split(/\s+/).length / 33));
-  if (jai > maxJai) issues.push(`« J'ai » revient ${jai} fois : ${maxJai} au maximum. Varie (« Chez LUSIS, je développais… », « Sur CodeNShare, l'authentification reposait sur… »).`);
   for (const w of ONCE) {
     const n = body.match(new RegExp(word(w).source, "giu"))?.length ?? 0;
     if (n > 1) issues.push(`Supprime un « ${w} » : ${n} fois, une seule suffit.`);
@@ -661,6 +681,58 @@ export function dropFlaggedSentences(draft: LetterBody, kit: Pick<LetterKit, "ba
     .map((p) => p.split(/(?<=[.!?])\s+/).filter((s) => !banned.some((re) => re.test(s))).join(" "))
     .filter(Boolean);
   return paragraphes.length >= 2 ? { ...draft, paragraphes } : draft;
+}
+
+const REWRITE_SYSTEM = `Tu corriges UNE phrase d'une lettre de motivation en français. Tu réponds UNIQUEMENT avec le JSON demandé.
+- Réécris seulement la PHRASE pour retirer le défaut indiqué, en gardant son sens et ses faits.
+- N'ajoute aucun fait, aucune technologie, aucun chiffre. Première personne pour ce que le candidat a fait (pas de passif).
+- La phrase doit s'enchaîner naturellement avec la phrase d'avant et celle d'après (ne commence pas par un pronom qui ne renvoie à rien).
+- Si la phrase n'apporte aucun fait, renvoie une phrase vide.`;
+const REWRITE_SCHEMA = { type: "object", properties: { phrase: { type: "string" } }, required: ["phrase"] } as const;
+const MAX_REWRITES = 4;
+
+/**
+ * Dernier filet, en mieux : une phrase qui contient encore un mot interdit est réécrite seule (avec ses voisines pour
+ * le contexte) au lieu d'être supprimée, ce qui cassait les enchaînements (« Elle demande… » qui ne renvoie plus à rien).
+ * La réécriture est refusée si elle ajoute une techno ou un chiffre ; ce qui reste fautif est retiré par dropFlaggedSentences.
+ */
+export async function rewriteFlaggedSentences(
+  client: Pick<AiClient, "chatJson">,
+  draft: LetterBody,
+  kit: Pick<LetterKit, "bannedWords">,
+): Promise<LetterBody> {
+  const banned = [...FORBIDDEN, ...ownBanned(kit)];
+  const split = (p: string) => p.split(/(?<=[.!?])\s+/);
+  const all = draft.paragraphes.flatMap(split);
+  let budget = MAX_REWRITES;
+  const paragraphes: string[] = [];
+  for (const p of draft.paragraphes) {
+    const out: string[] = [];
+    for (const s of split(p)) {
+      const hit = banned.find(([re]) => re.test(s));
+      if (!hit || budget <= 0) {
+        out.push(s);
+        continue;
+      }
+      budget--;
+      const i = all.indexOf(s);
+      const user = `PHRASE D'AVANT : ${all[i - 1] ?? "(début)"}\nPHRASE : ${s}\nPHRASE D'APRÈS : ${all[i + 1] ?? "(fin)"}\nDÉFAUT : ${hit[1]}`;
+      const raw = (await client.chatJson(REWRITE_SYSTEM, user, REWRITE_SCHEMA, { temperature: 0.3 }).catch(() => null)) as { phrase?: unknown } | null;
+      const fixed = typeof raw?.phrase === "string" ? raw.phrase.trim() : "";
+      const before = new Set(extractSkills(s));
+      const numbers = (t: string): string[] => t.match(/\d+/g) ?? [];
+      const safe =
+        fixed &&
+        !banned.some(([re]) => re.test(fixed)) &&
+        extractSkills(fixed).every((id) => before.has(id)) &&
+        numbers(fixed).every((n) => numbers(s).includes(n));
+      // Réponse vide = phrase sans fait : on la retire ; réécriture douteuse : gardée telle quelle, retirée plus bas.
+      if (safe) out.push(fixed);
+      else if (typeof raw?.phrase !== "string" || fixed) out.push(s);
+    }
+    if (out.length) paragraphes.push(out.join(" "));
+  }
+  return dropFlaggedSentences({ ...draft, paragraphes }, kit);
 }
 
 /**
@@ -768,7 +840,7 @@ export async function writeCoverLetter(
   }
   if (!best) throw new Error(`Réponse de l'IA hors format : ${lastError}`);
 
-  const clean = dropFlaggedSentences(best.draft, kit);
+  const clean = await rewriteFlaggedSentences(client, best.draft, kit);
   let draft = withClosing(opts.spontaneous ? clean : dropOffTopicSentences(clean, kit, jobText), kit, job.company);
   if (opts.spontaneous) draft = { ...draft, objet: `Candidature spontanée – ${job.title}` };
   return { content: fixTypos(assembleLetter(kit, draft, now)), model: client.model, durationMs: Date.now() - started };

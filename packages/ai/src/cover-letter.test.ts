@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LetterDraftSchema, assembleLetter, buildLetterPrompt, checkLetter, cleanDraft, cvEntities, dropFlaggedSentences, inventedNeeds, dropOffTopicSentences, findLetterIssues, spontaneousJobInput, strengthsAndGaps, writeCoverLetter } from "./cover-letter";
+import { LetterDraftSchema, assembleLetter, buildLetterPrompt, checkLetter, cleanDraft, cvEntities, dropFlaggedSentences, rewriteFlaggedSentences, analysisWantsAiCoding, inventedNeeds, dropOffTopicSentences, findLetterIssues, spontaneousJobInput, strengthsAndGaps, writeCoverLetter } from "./cover-letter";
 import { OllamaClient } from "./ollama";
 
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "content-type": "application/json" } });
@@ -41,7 +41,7 @@ const DRAFT = {
     "Madame, Monsieur,",
     "1. Diplômé d'un Mastère Architecture Logicielle, je candidate au poste de développeur Vue.js / Java chez Logistik.",
     "Chez Banquo, j'ai développé des interfaces en Vue.js et TypeScript et des API REST en Java Spring Boot. " + FILLER,
-    "Votre activité dans le transport m'attire, et je souhaite découvrir Kafka.",
+    "Votre activité dans le transport m'attire.",
     "Je serais heureux d'échanger avec vous.",
     "Je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.",
     "Alex MARTIN",
@@ -226,12 +226,12 @@ describe("relecture automatique (cas C-Clerc : Go / gRPC / NestJS)", () => {
     expect(content).not.toContain("opportunité");
   });
 
-  it("IA payante : une version et une correction au plus, même si la lettre reste fautive", async () => {
+  it("IA payante : une version, une correction et la réécriture de la phrase interdite restante, pas plus", async () => {
     let calls = 0;
     const BAD = { correspondances: [], objet: "Candidature au poste de Développeur", paragraphes: ["Je maîtrise Java et Go (Golang).", "Cette opportunité me motive.", "Je serais heureux d'échanger avec vous."] };
     const client = { model: "claude", paid: true, chatJson: async () => (calls++, BAD) };
     await writeCoverLetter(client, { ...JOB, description: job }, kit);
-    expect(calls).toBe(2);
+    expect(calls).toBe(3);
   });
 
   it("lettre correcte → un seul appel à l'IA", async () => {
@@ -322,10 +322,10 @@ describe("vérité projet ↔ techno, entreprise nommée, « j'ai » (cas C-Cler
     expect(issues.join("\n")).not.toMatch(/pas écrit pour CodeNShare/);
   });
 
-  it("compte les « j'ai » de toute la lettre et les nouvelles phrases creuses", () => {
+  it("ne compte plus les « j'ai » (ça poussait au passif) ; repère les phrases creuses", () => {
     const body = "Chez LUSIS, j'ai fait A. Puis j'ai fait B. Ensuite j'ai fait C, et j'ai fait D. Enfin j'ai fait E et j'ai fait F. Ma démarche structurée, ce qui me permet d'avancer.";
     const all = findLetterIssues(body, kit, job).join("\n");
-    expect(all).toMatch(/« J'ai » revient 6 fois/);
+    expect(all).not.toMatch(/« J'ai » revient/);
     expect(all).toMatch(/démarche structurée/);
     expect(all).toMatch(/ce qui me permet/);
   });
@@ -512,4 +512,37 @@ it("un plan « correspondances » trop long est coupé, pas rejeté", () => {
   });
   expect(r.correspondances).toHaveLength(8);
   expect(r.correspondances[0]!.exigence).toHaveLength(200);
+});
+
+describe("réécriture ciblée, manques, Job Radar (règles 2026-10-20)", () => {
+  const d = { objet: "x", paragraphes: ["Chez Banquo, j'ai développé des API. Je suis convaincu de ma motivation. Elles tournent sur PostgreSQL.", "Je serais ravi d'échanger."] };
+  it("réécrit la phrase interdite au lieu de la supprimer, avec ses voisines pour le contexte", async () => {
+    const seen: string[] = [];
+    const client = { chatJson: async (_s: string, u: unknown) => (seen.push(String(u)), { phrase: "Ce travail m'a plu." }) };
+    const out = await rewriteFlaggedSentences(client, d, { bannedWords: "" });
+    expect(out.paragraphes[0]).toBe("Chez Banquo, j'ai développé des API. Ce travail m'a plu. Elles tournent sur PostgreSQL.");
+    expect(seen[0]).toMatch(/PHRASE D'AVANT : Chez Banquo/);
+    expect(seen[0]).toMatch(/PHRASE D'APRÈS : Elles tournent/);
+  });
+  it("refuse une réécriture qui ajoute une techno ou un chiffre : la phrase est alors retirée", async () => {
+    for (const phrase of ["J'ai aussi utilisé Kafka.", "J'ai créé 12 écrans."]) {
+      const out = await rewriteFlaggedSentences({ chatJson: async () => ({ phrase }) }, d, { bannedWords: "" });
+      expect(out.paragraphes[0]).toBe("Chez Banquo, j'ai développé des API. Elles tournent sur PostgreSQL.");
+    }
+  });
+  it("un seul manque hors intitulé du poste est signalé ; dans l'intitulé, il est permis", () => {
+    const job = "Développeur Vue.js / Java\nStack : Vue.js, Java Spring Boot, Kafka.";
+    expect(findLetterIssues("Je n'ai pas encore utilisé Kafka.", KIT, job).join("\n")).toMatch(/Ne liste pas tes manques \(Kafka\)/);
+    expect(findLetterIssues("Je n'ai pas encore utilisé Kafka.", KIT, "Développeur Java / Kafka\nStack : Java.").join("\n")).not.toMatch(/manques/);
+  });
+  it("Job Radar : cité seulement si l'analyse IA de l'offre parle de développement avec des agents IA", () => {
+    expect(analysisWantsAiCoding({ competences_obligatoires: ["Vue.js"], competences_bonus: ["Claude Code ou Cursor"] })).toBe(true);
+    expect(analysisWantsAiCoding({ competences_obligatoires: ["Vue.js"], missions: ["Développer des écrans"] })).toBe(false);
+    expect(analysisWantsAiCoding(null)).toBe(false);
+    const letter = "Sur Job Radar, mon projet perso, j'ai travaillé avec Claude Code.";
+    expect(findLetterIssues(letter, KIT, "Vue.js").join("\n")).toMatch(/Supprime Job Radar/);
+    expect(findLetterIssues(letter, KIT, "Vue.js", { aiCoding: true }).join("\n")).not.toMatch(/Job Radar/);
+    expect(buildLetterPrompt(JOB, KIT, { aiCoding: true })).toContain("PROJET PERSO AUTORISÉ");
+    expect(buildLetterPrompt(JOB, KIT)).not.toContain("Job Radar");
+  });
 });
