@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { AiClient } from "./cloud";
-import { copiedFromJob } from "./cover-letter";
+import type { LetterKit } from "@job-radar/shared";
+import { checkFacts, copiedFromJob, type LetterOptions } from "./cover-letter";
 
 /**
  * Relecture d'une lettre déjà écrite, avant envoi : ce qu'un recruteur verrait tout de suite.
@@ -11,7 +12,7 @@ import { copiedFromJob } from "./cover-letter";
  * - faute : orthographe, accord, grammaire.
  * Trois relecteurs : le code (bouts de l'annonce), LanguageTool (fautes) et une IA gratuite (le reste).
  */
-export type ReviewKind = "sujet" | "fragment" | "repetition" | "faute";
+export type ReviewKind = "sujet" | "fragment" | "repetition" | "faute" | "fait";
 export type ReviewProblem = { kind: ReviewKind; excerpt: string; detail: string };
 export type LetterReview = {
   /** empreinte du texte relu : une autre version de la lettre n'est pas couverte par cette relecture */
@@ -130,7 +131,12 @@ export async function aiReviewProblems(client: Pick<AiClient, "chatJson">, text:
 
 // ───── Relecture complète ─────
 
-export type ReviewDeps = { ai?: Pick<AiClient, "chatJson"> | null; fetch?: typeof fetch };
+export type ReviewDeps = {
+  ai?: Pick<AiClient, "chatJson"> | null;
+  /** Correcteur des faits (Haiku pour les offres) : chaque phrase comparée au profil et à l'annonce. */
+  factAi?: Pick<AiClient, "chatJson"> | null;
+  fetch?: typeof fetch;
+};
 
 /**
  * Relit la lettre avec les trois relecteurs. Un relecteur en panne n'empêche pas les autres : son absence est notée
@@ -138,7 +144,7 @@ export type ReviewDeps = { ai?: Pick<AiClient, "chatJson"> | null; fetch?: typeo
  */
 export async function reviewLetter(
   text: string,
-  ctx: { cvText: string; jobText: string; jobTitle?: string; spontaneous?: boolean },
+  ctx: { cvText: string; jobText: string; jobTitle?: string; spontaneous?: boolean; facts?: Pick<LetterKit, "blocks" | "rules" | "cvText">; aiCoding?: boolean },
   deps: ReviewDeps,
 ): Promise<LetterReview> {
   const errors: string[] = [];
@@ -147,7 +153,18 @@ export async function reviewLetter(
   const fromCode: ReviewProblem[] = ctx.spontaneous
     ? []
     : copiedFromJob(body.replace(/^Objet\s*:.*$/im, ""), ctx.jobText, ctx.jobTitle ?? "").map((s) => ({ kind: "fragment" as const, excerpt: s, detail: "Passage recopié de l'annonce : dis-le avec tes mots." }));
-  const [lt, ai] = await Promise.all([
+  // Correcteur des faits : chaque phrase du corps comparée au profil (blocs, règles, CV) et à l'annonce.
+  const paragraphes = body.split(/\n\s*\n/).map((b) => b.trim()).filter((b) => b && !/^(Objet\s*:|Madame|Monsieur)/i.test(b));
+  const facts: Promise<ReviewProblem[]> =
+    deps.factAi && ctx.facts
+      ? checkFacts(deps.factAi, { objet: "", paragraphes }, ctx.facts, { aiCoding: ctx.aiCoding, spontaneous: ctx.spontaneous } satisfies LetterOptions, ctx.jobText)
+          .then((m) => [...m].map(([excerpt, why]) => ({ kind: "fait" as const, excerpt, detail: `Pas dans ton profil ni dans l'annonce : ${why}. Corrige la phrase ou retire-la.` })))
+          .catch((e: unknown) => {
+            errors.push(`Faits non vérifiés (correcteur injoignable : ${e instanceof Error ? e.message : String(e)}).`);
+            return [];
+          })
+      : Promise.resolve([]);
+  const [lt, ai, fact] = await Promise.all([
     languageToolProblems(body, `${ctx.cvText}\n${ctx.jobText}`, deps.fetch).catch((e: unknown) => {
       errors.push(`Fautes non vérifiées (LanguageTool injoignable : ${e instanceof Error ? e.message : String(e)}).`);
       return [];
@@ -158,11 +175,12 @@ export async function reviewLetter(
           return [];
         })
       : (errors.push("Sens des phrases non vérifié (aucune IA gratuite configurée)."), []),
+    facts,
   ]);
   // Un même passage signalé deux fois pour la même raison (LanguageTool et l'IA) : gardé une fois.
   const flat = (s: string) => s.toLowerCase().replace(/[’]/g, "'").replace(/\s+/g, " ").trim();
   const problems: ReviewProblem[] = [];
-  for (const p of [...fromCode, ...lt, ...ai]) {
+  for (const p of [...fact, ...fromCode, ...lt, ...ai]) {
     const same = (q: ReviewProblem) => q.kind === p.kind && (flat(q.excerpt).includes(flat(p.excerpt)) || flat(p.excerpt).includes(flat(q.excerpt)));
     if (!problems.some(same)) problems.push(p);
   }

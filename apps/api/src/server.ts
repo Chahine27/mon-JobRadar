@@ -334,10 +334,14 @@ const app = await buildApp({
     model: generalAi.model,
     status: () => generalAi.status(),
     analyze: (job, profile) => analyzeJobWithAi(generalAi, job, profile),
-    writeLetter: (job, kit, opts) => writeCoverLetter(opts?.spontaneous ? spontaneousLetterAi : letterAi, job, kit, new Date(), opts),
+    // Correcteur des faits : Haiku (chaîne « general ») pour les offres ; IA gratuites pour les candidatures spontanées.
+    writeLetter: (job, kit, opts) =>
+      opts?.spontaneous
+        ? writeCoverLetter(spontaneousLetterAi, job, kit, new Date(), opts, spontaneousLetterAi)
+        : writeCoverLetter(letterAi, job, kit, new Date(), opts, generalAi),
     readJob: (text, hints) => readJobWithAi(generalAi, text, hints),
     // Relecture avant envoi : LanguageTool (gratuit) + IA gratuite seulement (comme la lecture des mails).
-    reviewLetter: (text, ctx) => reviewLetter(text, ctx, { ai: mailAi }),
+    reviewLetter: (text, ctx) => reviewLetter(text, ctx, { ai: mailAi, factAi: ctx.spontaneous ? mailAi : generalAi }),
   },
   mailer,
   // CV adapté : Edge (ou Chrome) sans fenêtre pour mesurer la page et créer le PDF, lancé à la première demande.

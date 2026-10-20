@@ -301,7 +301,7 @@ export type LetterKit = {
 /** Relecture automatique d'une lettre avant envoi (null = pas encore relue). */
 export type LetterReview = {
   hash: string;
-  problems: Array<{ kind: "sujet" | "fragment" | "repetition" | "faute"; excerpt: string; detail: string }>;
+  problems: Array<{ kind: "sujet" | "fragment" | "repetition" | "faute" | "fait"; excerpt: string; detail: string }>;
   errors: string[];
   validated: boolean;
   at: string;

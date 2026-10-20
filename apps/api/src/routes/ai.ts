@@ -36,7 +36,7 @@ export type AiService = {
   /** Relecture avant envoi (LanguageTool + IA gratuite). Absente → la lettre devra être validée à la main. */
   reviewLetter?(text: string, ctx: ReviewContext): Promise<LetterReview>;
 };
-type ReviewContext = { cvText: string; jobText: string; jobTitle?: string; spontaneous?: boolean };
+type ReviewContext = { cvText: string; jobText: string; jobTitle?: string; spontaneous?: boolean; facts?: Pick<LetterKit, "blocks" | "rules" | "cvText">; aiCoding?: boolean };
 
 const LetterBody = z.object({ content: z.string().trim().min(1).max(20_000) });
 const IdParams = z.object({ id: z.string().min(1).max(64) });
@@ -404,10 +404,10 @@ export async function aiRoutes(
   }
 
   /** Relit la lettre enregistrée d'une offre et garde le résultat. */
-  async function reviewJobLetter(letter: StoredLetter, jobId: string, ctx: { job: JobRow; kit: LetterKit | null }): Promise<StoredLetter> {
+  async function reviewJobLetter(letter: StoredLetter, jobId: string, ctx: { job: JobRow; kit: LetterKit | null; opts?: LetterOptions }): Promise<StoredLetter> {
     // Nom de l'entreprise compris : sinon « emagine » (minuscule) passe pour une faute de frappe.
     const jobText = `${ctx.job.company ?? ""}\n${ctx.job.description}`;
-    const review = await runReview(letter.content, { cvText: ctx.kit?.cvText ?? "", jobText, jobTitle: ctx.job.title });
+    const review = await runReview(letter.content, { cvText: ctx.kit?.cvText ?? "", jobText, jobTitle: ctx.job.title, ...(ctx.kit ? { facts: ctx.kit } : {}), aiCoding: ctx.opts?.aiCoding });
     await stores.letters.setReview(jobId, review);
     return { ...letter, review };
   }
@@ -548,7 +548,7 @@ export async function aiRoutes(
 
   /** Relit la lettre spontanée enregistrée et garde le résultat. */
   async function reviewApplication(application: StoredApplication, leadId: string, ctx: { kit: LetterKit | null; job: AnalysisJobInput }): Promise<StoredApplication> {
-    const review = await runReview(application.letter, { cvText: ctx.kit?.cvText ?? "", jobText: ctx.job.description, spontaneous: true });
+    const review = await runReview(application.letter, { cvText: ctx.kit?.cvText ?? "", jobText: ctx.job.description, spontaneous: true, ...(ctx.kit ? { facts: ctx.kit } : {}) });
     await stores.applications.setReview(leadId, review);
     return { ...application, review };
   }

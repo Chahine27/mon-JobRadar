@@ -624,9 +624,12 @@ const MAX_REWRITES = 6;
 
 const splitSentences = (p: string) => p.split(/(?<=[.!?])\s+/).filter(Boolean);
 
-const VERIFY_SYSTEM = `Tu vérifies une lettre de motivation, phrase par phrase, contre les FAITS du candidat. Tu réponds UNIQUEMENT avec le JSON demandé.
-Une phrase est « inventée » si elle affirme sur le candidat quelque chose que les FAITS et les RÈGLES ne disent pas : une tâche, une collaboration, un résultat, un lieu, une techno, ou un fait attribué au mauvais projet, à la mauvaise personne ou à la mauvaise période (exemple : le travail en binôme avec le tuteur était sur Webtango, pas sur Gold Circle).
-Ne signale pas : l'envie de rejoindre l'entreprise, ce que dit l'annonce, une reformulation fidèle d'un fait.
+const VERIFY_SYSTEM = `Tu es le correcteur d'une lettre de motivation. Tu la vérifies phrase par phrase contre le PROFIL du candidat et l'ANNONCE. Tu réponds UNIQUEMENT avec le JSON demandé.
+Une phrase est « inventée » si :
+- elle affirme sur le candidat quelque chose que le PROFIL (faits, règles, CV) ne dit pas : une tâche, une collaboration, un résultat, un lieu, une techno, une durée ;
+- ou elle attribue un fait vrai au mauvais projet, à la mauvaise personne, à la mauvaise entreprise ou à la mauvaise période (exemples : une mission qui n'a pas duré toute l'alternance, un éditeur de logiciels présenté comme une banque) ;
+- ou elle affirme sur l'entreprise ou le poste quelque chose que l'ANNONCE ne dit pas.
+Ne signale pas : l'envie de rejoindre l'entreprise, une reformulation fidèle d'un fait, une opinion du candidat.
 - phrase : recopie EXACTEMENT la phrase de la lettre.
 - raison : ce qui n'est pas prouvé, en quelques mots.
 Liste vide si tout est prouvé. N'invente pas de problème.`;
@@ -643,13 +646,31 @@ const flat = (s: string) => s.toLowerCase().replace(/[’]/g, "'").replace(/\s+/
  * ne disent pas (« nous avons travaillé ensemble pour… »). Le code ne voit que les technos et les chiffres ; ceci voit le sens.
  * Rend phrase de la lettre → raison. IA injoignable ou réponse hors format : rien (la relecture humaine reste).
  */
-export async function findInventions(client: Pick<AiClient, "chatJson">, draft: LetterBody, kit: Pick<LetterKit, "blocks" | "rules" | "cvText">, opts: LetterOptions = {}): Promise<Map<string, string>> {
+export async function findInventions(
+  client: Pick<AiClient, "chatJson">,
+  draft: LetterBody,
+  kit: Pick<LetterKit, "blocks" | "rules" | "cvText">,
+  opts: LetterOptions = {},
+  jobText = "",
+): Promise<Map<string, string>> {
+  return checkFacts(client, draft, kit, opts, jobText).catch(() => new Map());
+}
+
+/** Comme findInventions, mais une IA injoignable ou une réponse hors format lève une erreur (la relecture la signale). */
+export async function checkFacts(
+  client: Pick<AiClient, "chatJson">,
+  draft: LetterBody,
+  kit: Pick<LetterKit, "blocks" | "rules" | "cvText">,
+  opts: LetterOptions = {},
+  jobText = "",
+): Promise<Map<string, string>> {
   const facts = letterBlocks(kit, opts).map((b) => `[${b.title}] ${b.text}`).join("\n");
-  const user = `FAITS\n${facts}\n\nRÈGLES\n${kit.rules ?? ""}\n\nLETTRE\n${draft.paragraphes.join("\n\n")}`;
-  const raw = (await client.chatJson(VERIFY_SYSTEM, user, VERIFY_SCHEMA, { temperature: 0, contextTokens: LETTER_CONTEXT }).catch(() => null)) as { inventions?: unknown } | null;
+  const user = `PROFIL : FAITS\n${facts}\n\nPROFIL : RÈGLES\n${kit.rules ?? ""}\n\nPROFIL : CV\n${kit.cvText.slice(0, MAX_CV)}\n\nANNONCE\n${jobText.slice(0, MAX_JOB) || "aucune"}\n\nLETTRE\n${draft.paragraphes.join("\n\n")}`;
+  const raw = (await client.chatJson(VERIFY_SYSTEM, user, VERIFY_SCHEMA, { temperature: 0, contextTokens: LETTER_CONTEXT })) as { inventions?: unknown } | null;
+  if (!Array.isArray(raw?.inventions)) throw new Error("Réponse du correcteur hors format");
   const found = new Map<string, string>();
   const sentences = draft.paragraphes.flatMap(splitSentences);
-  for (const x of Array.isArray(raw?.inventions) ? raw.inventions : []) {
+  for (const x of raw!.inventions as unknown[]) {
     const { phrase, raison } = (x ?? {}) as { phrase?: unknown; raison?: unknown };
     if (typeof phrase !== "string" || phrase.trim().length < 10) continue;
     // Une « phrase » qui n'est pas dans la lettre est inventée par le vérificateur : ignorée.
@@ -753,6 +774,8 @@ export async function writeCoverLetter(
   kit: LetterKit,
   now: Date = new Date(),
   opts: LetterOptions = {},
+  /** Correcteur des faits (une autre IA que celle qui écrit, par exemple Haiku) ; par défaut, la même. */
+  reviewer: Pick<AiClient, "chatJson"> = client,
 ): Promise<{ content: string; model: string; durationMs: number }> {
   const started = Date.now();
   const jobText = `${job.title}\n${job.description}`;
@@ -808,7 +831,7 @@ export async function writeCoverLetter(
   if (!best) throw new Error(`Réponse de l'IA hors format : ${lastError}`);
 
   // Vérification des faits par l'IA, puis réécriture ciblée des phrases fautives ou inventées.
-  const invented = await findInventions(client, best.draft, kit, opts);
+  const invented = await findInventions(reviewer, best.draft, kit, opts, jobText);
   const draft = await rewriteFlaggedSentences(client, best.draft, kit, invented);
   return { content: fixTypos(assembleLetter(kit, draft, now)), model: client.model, durationMs: Date.now() - started };
 }

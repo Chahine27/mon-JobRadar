@@ -14,6 +14,7 @@ const KIND: Record<LetterReview["problems"][number]["kind"], string> = {
   fragment: "Bout de phrase ou de l'annonce",
   repetition: "Répétition",
   faute: "Faute",
+  fait: "Fait non prouvé",
 };
 </script>
 

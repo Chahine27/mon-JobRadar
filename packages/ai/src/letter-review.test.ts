@@ -88,6 +88,18 @@ describe("relecture des lettres", () => {
     expect(r.problems).toEqual([]);
   });
 
+  it("correcteur des faits : phrase non prouvée signalée (et bloque l'envoi) ; correcteur injoignable noté", async () => {
+    const text = "Objet : Candidature\n\nMadame, Monsieur,\n\nChez LUSIS j'ai travaillé en banque pendant deux ans. J'ai migré un module vers Vue 3.";
+    const noLt = (async () => new Response(JSON.stringify({ matches: [] }))) as unknown as typeof fetch;
+    const facts = { cvText: "Vue.js", blocks: [{ title: "Vue 3", text: "J'ai migré un module vers Vue 3.", useFor: "" }], rules: "LUSIS n'est pas une banque." };
+    const factAi = { chatJson: async () => ({ inventions: [{ phrase: "Chez LUSIS j'ai travaillé en banque pendant deux ans.", raison: "LUSIS n'est pas une banque" }] }) };
+    const r = await reviewLetter(text, { cvText: "", jobText: "", facts }, { ai: { chatJson: async () => ({ problemes: [] }) }, factAi, fetch: noLt });
+    expect(r.problems).toMatchObject([{ kind: "fait", excerpt: "Chez LUSIS j'ai travaillé en banque pendant deux ans." }]);
+    expect(reviewBlock(r, text)).toContain("1 problème");
+    const down = await reviewLetter(text, { cvText: "", jobText: "", facts }, { ai: { chatJson: async () => ({ problemes: [] }) }, factAi: { chatJson: async () => { throw new Error("hors ligne"); } }, fetch: noLt });
+    expect(down.errors.join(" ")).toMatch(/Faits non vérifiés/);
+  });
+
   it("blocage : rien à signaler = libre ; problème = bloqué sauf validé ; autre texte = à relire", () => {
     const base = { hash: letterHash(LETTER), problems: [], errors: [], validated: false, at: "" };
     expect(reviewBlock(base, LETTER)).toBeNull();
