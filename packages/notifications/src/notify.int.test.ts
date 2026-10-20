@@ -24,4 +24,18 @@ describe("anti double notification (base réelle)", () => {
     expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).notifiedAt).not.toBeNull();
     expect(await repo.candidates(new Date(0))).toEqual([]);
   });
+
+  it("offre LinkedIn sans description : attend la lecture de sa page avant tout mail", async () => {
+    const job = await prisma.job.create({
+      data: { fingerprint: "f2", contentHash: "h", title: "Dev Angular", description: "", technologies: [] },
+    });
+    const link = await prisma.jobSourceLink.create({
+      data: { jobId: job.id, source: "jobscraper:linkedin", sourceJobId: "1", sourceUrl: "https://x", rawData: {} },
+    });
+    const repo = createPrismaNotifyRepo(prisma);
+    expect(await repo.candidates(new Date(0))).toEqual([]);
+    // Page lue sans succès : là, « à compléter » est le bon mail.
+    await prisma.jobSourceLink.update({ where: { id: link.id }, data: { rawData: { detailTriedAt: new Date().toISOString() } } });
+    expect((await repo.candidates(new Date(0))).map((j) => [j.id, j.sources])).toEqual([[job.id, [{ source: "jobscraper:linkedin" }]]]);
+  });
 });

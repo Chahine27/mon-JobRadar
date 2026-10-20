@@ -172,11 +172,24 @@ export function createPrismaNotifyRepo(prisma: PrismaClient): NotifyRepo {
           department: true,
           remoteType: true,
           fullTextAt: true,
-          sources: { select: { source: true } },
+          sources: { select: { source: true, rawData: true } },
           travel: { select: { minutes: true, mode: true } },
         },
       });
-      return rows.map(({ travel, ...j }) => ({ ...j, travelMinutes: travel?.minutes ?? null, travelMode: travel?.mode ?? null }));
+      // Offre JobScraper (LinkedIn, HelloWork) arrivée sans description et dont la page n'a pas encore été lue :
+      // elle attend completeJobScraperDescriptions, sinon « à compléter » partirait avant que le texte arrive.
+      // « detailTriedAt » = DETAIL_TRIED_AT de @job-radar/pipeline : lecture ratée, là le mail « à compléter » est juste.
+      const awaitingPage = (j: (typeof rows)[number]) =>
+        !j.description.trim() &&
+        j.sources.some((s) => s.source.startsWith("jobscraper:") && !(s.rawData as Record<string, unknown> | null)?.detailTriedAt);
+      return rows
+        .filter((j) => !awaitingPage(j))
+        .map(({ travel, sources, ...j }) => ({
+          ...j,
+          sources: sources.map(({ source }) => ({ source })),
+          travelMinutes: travel?.minutes ?? null,
+          travelMode: travel?.mode ?? null,
+        }));
     },
     async claim(jobId, channel, kind) {
       try {
