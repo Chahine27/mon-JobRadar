@@ -1,16 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { LetterDraftSchema, assembleLetter, buildLetterPrompt, checkLetter, cleanDraft, cvEntities, dropFlaggedSentences, rewriteFlaggedSentences, analysisWantsAiCoding, inventedNeeds, dropOffTopicSentences, findLetterIssues, spontaneousJobInput, strengthsAndGaps, writeCoverLetter } from "./cover-letter";
-import { OllamaClient } from "./ollama";
-
-const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "content-type": "application/json" } });
+import {
+  analysisWantsAiCoding,
+  assembleLetter,
+  badPunctuation,
+  buildPlanPrompt,
+  buildWritePrompt,
+  checkLetter,
+  cleanPlan,
+  cvEntities,
+  findLetterIssues,
+  fixPunctuation,
+  inventedNeeds,
+  letterBlocks,
+  rewriteFlaggedSentences,
+  spontaneousJobInput,
+  toParagraphs,
+  tooManyCommas,
+  writeCoverLetter,
+} from "./cover-letter";
 
 // Candidat et entreprises fictifs.
 const KIT = {
-  rules: "",
-  mastered: "",
-  closing: "",
-  bannedWords: "",
-  pdfName: "",
   header: "Alex Martin\n75011 Paris\n06 00 00 00 00\nalex.martin@example.com",
   city: "Paris",
   signature: "Alex MARTIN",
@@ -18,9 +28,15 @@ const KIT = {
     "Alex Martin — Développeur Full Stack. Mastère Architecture Logicielle. 2 ans d'alternance chez Banquo : " +
     "interfaces Vue.js et TypeScript, API REST en Java Spring Boot, base PostgreSQL. Projet de fin d'études : " +
     "application .NET 8 avec Docker et Keycloak. Git, GitLab, CI/CD. ".repeat(2),
-  letterExample:
-    "Votre offre de Développeur Full Stack a retenu mon attention. Ce qui m'attire chez Alarmex, c'est la sécurité. " +
-    "L'accompagnement par votre CTO me plaît. Je vous prie d'agréer, Madame, Monsieur, mes salutations distinguées.",
+  blocks: [
+    { title: "Écrans de supervision", useFor: "frontend, Vue.js", text: "Chez Banquo j'ai créé six écrans de supervision en Vue.js. Ma collègue du backend écrivait les fonctions serveur pendant que je branchais les écrans." },
+    { title: "API Java", useFor: "backend, Java, API", text: "Chez Banquo j'ai aussi développé des API REST en Java Spring Boot. Je testais chaque appel avant de le brancher." },
+    { title: "Hackathon", useFor: "initiative", text: "Au hackathon de mon école notre équipe a fini troisième." },
+  ],
+  rules: "Pas de Scrum chez Banquo.",
+  mastered: "",
+  bannedWords: "",
+  pdfName: "",
 };
 const JOB = {
   title: "Développeur Vue.js / Java (H/F)",
@@ -33,516 +49,222 @@ const JOB = {
   salaryMax: null,
   description: "Logistik, éditeur de logiciels de transport, recrute un développeur Vue.js / Java Spring Boot. Kafka apprécié.",
 };
-// Les lettres doivent faire au moins 200 mots : un paragraphe neutre complète les brouillons de test.
-const FILLER = "L'équipe travaille en binôme sur chaque sujet. Les revues se font à l'oral, autour d'un écran. ".repeat(12);
-const DRAFT = {
-  objet: "Candidature au poste de Développeur Vue.js / Java (H/F)",
-  paragraphes: [
-    "Madame, Monsieur,",
-    "1. Diplômé d'un Mastère Architecture Logicielle, je candidate au poste de développeur Vue.js / Java chez Logistik.",
-    "Chez Banquo, j'ai développé des interfaces en Vue.js et TypeScript et des API REST en Java Spring Boot. " + FILLER,
-    "Votre activité dans le transport m'attire.",
-    "Je serais heureux d'échanger avec vous.",
-    "Je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.",
-    "Alex MARTIN",
-  ],
-};
+const jobText = `${JOB.title}\n${JOB.description}`;
+const GOOD =
+  "Chez Banquo j'ai travaillé sur des interfaces Vue.js et sur des API Java. C'est ce double profil que je vous propose pour vos logiciels de transport.\n\n" +
+  "J'ai créé six écrans de supervision en Vue.js chez Banquo. Ma collègue du backend écrivait les fonctions serveur pendant que je branchais les écrans. " +
+  "Ce travail en parallèle demandait de bien se parler chaque jour. ".repeat(6) +
+  "\n\nJ'ai aussi développé des API REST en Java Spring Boot. Je testais chaque appel avant de le brancher. " +
+  "Les équipes métier utilisaient ces écrans tous les jours pour suivre leur activité. ".repeat(4) +
+  "\n\nJe serais heureux d'échanger avec vous sur vos projets chez Logistik.";
 
-describe("lettre de motivation (IA locale)", () => {
-  it("consigne : CV, lettre exemple marquée « style uniquement », annonce", () => {
-    const p = buildLetterPrompt(JOB, KIT);
-    expect(p).toContain("CV DU CANDIDAT");
-    expect(p).toContain("Banquo");
-    expect(p).toContain("pour le style uniquement");
-    expect(p).toContain("Entreprise : Logistik");
-    expect(buildLetterPrompt(JOB, { ...KIT, letterExample: "" })).toContain('"""\naucune\n"""');
-  });
-
-  it("nettoyage : retire « Madame, Monsieur », la politesse, la signature, les numéros et « H/F »", () => {
-    const d = cleanDraft(DRAFT, KIT.signature);
-    expect(d.objet).toBe("Candidature au poste de Développeur Vue.js / Java");
-    expect(d.paragraphes).toHaveLength(4);
-    expect(d.paragraphes[0]).toMatch(/^Diplômé/);
-  });
-
-  it("lettre complète : en-tête, lieu et date (heure de Paris), objet, politesse, signature", () => {
-    const text = assembleLetter(KIT, cleanDraft(DRAFT, KIT.signature), new Date("2026-09-29T23:30:00Z"));
-    expect(text.startsWith("Alex Martin\n75011 Paris")).toBe(true);
-    expect(text).toContain("À Paris, le 30/09/2026");
-    expect(text).toContain("Objet : Candidature au poste de Développeur Vue.js / Java\n\nMadame, Monsieur,\n\nDiplômé");
-    expect(text.endsWith("salutations distinguées.\n\nAlex MARTIN")).toBe(true);
-    expect(text.match(/Madame, Monsieur,\n/g)).toHaveLength(1);
-  });
-
-  it("politesse et signature jamais en double (collées à un long paragraphe, ou dans le dernier paragraphe fixe)", () => {
-    const glued = { objet: "Candidature", paragraphes: ["Je candidate chez Logistik.", `${FILLER} Je serais heureux d'échanger avec vous. Je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.\nAlex MARTIN`] };
-    const closing = { objet: "Candidature", paragraphes: ["Je candidate chez Logistik.", "Je reste à votre disposition pour un entretien.\n\nJe vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées."] };
-    for (const d of [glued, closing]) {
-      const text = assembleLetter(KIT, d, new Date("2026-09-29T10:00:00Z"));
-      expect(text.match(/salutations distinguées/g)).toHaveLength(1);
-      expect(text.match(/Alex MARTIN/g)).toHaveLength(1);
-      expect(text.endsWith("salutations distinguées.\n\nAlex MARTIN")).toBe(true);
-    }
-    expect(assembleLetter(KIT, closing, new Date())).toContain("Je reste à votre disposition pour un entretien.");
-  });
-
-  it("relecture : techno absente du CV et nom venant de la lettre exemple sont signalés", () => {
-    const letter = "Je maîtrise Kafka. Ce qui m'attire chez Alarmex, c'est votre CTO. J'ai utilisé Vue.js et Docker.";
-    const w = checkLetter(letter, KIT, JOB.description);
-    expect(w.some((x) => x.includes("Kafka") && x.includes("pas dans ton CV"))).toBe(true);
-    expect(w.some((x) => x.includes("« Alarmex » vient de ta lettre exemple"))).toBe(true);
-    expect(w.some((x) => x.includes("« CTO »"))).toBe(true);
-    expect(w.some((x) => x.includes("Vue") || x.includes("Docker"))).toBe(false);
-    expect(checkLetter("Chez Banquo, j'ai utilisé Vue.js.", KIT, JOB.description)).toEqual([]);
-  });
-
-  it("appel à Ollama : température plus haute pour écrire, lettre assemblée", async () => {
-    let body: any;
-    const client = new OllamaClient({
-      fetch: async (_u, init) => {
-        body = JSON.parse(String(init?.body));
-        return json({ message: { content: JSON.stringify(DRAFT) } });
-      },
-    });
-    const { content, model } = await writeCoverLetter(client, JOB, KIT, new Date("2026-09-29T10:00:00Z"));
-    expect(body.options.temperature).toBe(0.5);
-    expect(body.format.required).toEqual(["correspondances", "objet", "paragraphes"]);
-    expect(model).toBe("gemma4:e4b");
-    expect(content).toContain("À Paris, le 29/09/2026");
-    expect(content).toContain("Chez Banquo");
-  });
-
-  it("réponse hors format : redemandée (3 brouillons), puis erreur claire", async () => {
-    let calls = 0;
-    const client = new OllamaClient({ fetch: async () => (calls++, json({ message: { content: '{"objet":"x"}' } })) });
-    await expect(writeCoverLetter(client, JOB, KIT)).rejects.toThrow(/hors format/);
-    expect(calls).toBe(3);
-  });
-});
-
-describe("relecture : CV mis en page", () => {
-  it("« CI / CD » dans le CV compte comme CI/CD (pas de fausse alerte)", () => {
-    const kit = { ...KIT, cvText: `${KIT.cvText} DevOps : Git · Docker · CI / CD`, letterExample: "" };
-    expect(checkLetter("J'ai appliqué les principes de CI/CD.", kit, JOB.description)).toEqual([]);
-  });
-});
-
-describe("en-tête recopié d'une ancienne lettre", () => {
-  it("son « Objet » et sa date sont retirés (un seul objet, celui de cette offre)", () => {
-    const kit = { ...KIT, header: "Alex Martin\n\n75011 Paris\nObjet : Candidature au poste de Développeur Full Stack\nÀ Paris, le 28/09/2026" };
-    const text = assembleLetter(kit, cleanDraft(DRAFT, KIT.signature), new Date("2026-09-29T10:00:00Z"));
-    expect(text.startsWith("Alex Martin\n75011 Paris\n\nÀ Paris, le 29/09/2026")).toBe(true);
-    expect(text.match(/Objet :/g)).toHaveLength(1);
-  });
-});
-
-describe("relecture : titre du poste", () => {
-  it("une techno qui n'apparaît que dans le titre recopié n'est pas signalée", () => {
-    const letter = "Objet : Candidature au poste de Développeur Vue.js / Java Kafka\n\nJe candidate au poste de Développeur Vue.js / Java Kafka.";
-    expect(checkLetter(letter, { ...KIT, letterExample: "" }, JOB.description, "Développeur Vue.js / Java Kafka (H/F)")).toEqual([]);
-    const w = checkLetter(`${letter} Je maîtrise Kafka.`, { ...KIT, letterExample: "" }, JOB.description, "Développeur Vue.js / Java Kafka (H/F)");
-    expect(w.some((x) => x.includes("« Kafka » n'est pas dans ton CV"))).toBe(true);
-  });
-});
-
-describe("relecture : cas Worldgrid (lettre envoyée sans relecture)", () => {
-  it("« apprendre Python » alors que Python est dans le CV → signalé ; « Vu.js » corrigé", async () => {
-    const kit = { ...KIT, cvText: `${KIT.cvText} Autres : Python`, letterExample: "" };
-    const w = checkLetter("Je souhaite apprendre Python pour concevoir des applications.", kit, "Développeur Python/Vu.js");
-    expect(w.some((x) => x.includes("apprendre « Python »"))).toBe(true);
-    const client = new OllamaClient({
-      fetch: async () => json({ message: { content: JSON.stringify({ ...DRAFT, objet: "Candidature au poste de Développeur Python/Vu.js" }) } }),
-    });
-    const { content } = await writeCoverLetter(client, JOB, KIT);
-    expect(content).toContain("Développeur Python/Vue.js");
-    expect(content).not.toContain("Vu.js");
-  });
-});
-
-describe("pertinence (cas Worldgrid : paragraphe hors sujet)", () => {
-  it("technos du CV absentes de l'annonce citées dans la lettre → signalées", () => {
-    const kit = { ...KIT, cvText: "Vue.js, TypeScript, Java Spring Boot, React, .NET, Flutter, Docker, PostgreSQL. ".repeat(4), letterExample: "" };
-    const job = "Développeur Web Python / Vue.js : API REST, SQL, Agile.";
-    const w = checkLetter("Pour Doc Chez Vous, j'ai utilisé React et .NET 8 ; pour le parking, Flutter.", kit, job, "Développeur Python / Vu.js");
-    expect(w.some((x) => x.includes(".NET") && x.includes("Flutter") && x.includes("absents de l'annonce"))).toBe(true);
-    expect(checkLetter("J'ai migré un module Vue 2 vers Vue 3 en TypeScript.", kit, job + " TypeScript")).toEqual([]);
-  });
-
-  it("le plan (correspondances) est demandé AVANT la lettre, et n'apparaît pas dans la lettre", async () => {
-    let body: any;
-    const client = new OllamaClient({
-      fetch: async (_u, init) => {
-        body = JSON.parse(String(init?.body));
-        return json({ message: { content: JSON.stringify({ correspondances: [{ exigence: "Vue.js", preuve: "migration Vue 2 → 3" }], ...DRAFT }) } });
-      },
-    });
-    const { content } = await writeCoverLetter(client, JOB, KIT);
-    expect(Object.keys(body.format.properties)[0]).toBe("correspondances");
-    expect(body.messages[0].content).toMatch(/Pas de catalogue du CV/);
-    expect(content).not.toContain("migration Vue 2 → 3");
-  });
-});
-
-describe("relecture automatique (cas C-Clerc : Go / gRPC / NestJS)", () => {
-  const kit = { ...KIT, cvText: "Java Spring Boot, API REST, Vue.js, TypeScript, React, Node JS, PostgreSQL, Docker, Microservices, Auth0 / JWT. ".repeat(3), letterExample: "" };
-  const job = "Microservices en Go (Golang), gRPC / Protocol Buffers, NestJS, GraphQL, React / Next.js, PostgreSQL, Docker, Kubernetes.";
-
-  it("repère « approfondir » une techno absente, « maîtrise », faux liens de cause, mots creux", () => {
-    const bad = [
-      "Bien que je maîtrise les principes de microservices, je souhaite approfondir ma connaissance de Go (Golang) et de gRPC.",
-      "J'ai développé un serveur Spring Boot, ce qui m'a permis d'intégrer des API REST.",
-      "Je suis rigoureux, comme en témoigne ma capacité à mettre en accessibilité des interfaces.",
-      "Cette opportunité me motive.",
-    ].join(" ");
-    const issues = findLetterIssues(bad, kit, job);
-    expect(issues.some((i) => i.startsWith("Pas de « maîtrise »"))).toBe(true);
-    expect(issues.some((i) => /Go.*n'est pas dans le CV/.test(i))).toBe(true);
-    expect(issues.some((i) => i.includes("ce qui m'a permis"))).toBe(true);
-    expect(issues.some((i) => i.includes("comme en témoigne"))).toBe(true);
-    expect(issues.some((i) => i.includes("opportunité"))).toBe(true);
-    expect(findLetterIssues("J'ai développé des API REST en Java Spring Boot, en microservices, avec React et PostgreSQL. Je n'ai pas encore utilisé Go.", kit, job)).toEqual([]);
-  });
-
-  it("lettre fautive → corrigée par l'IA avec la liste des problèmes ; la meilleure version est gardée", async () => {
-    const bodies: any[] = [];
-    const BAD = { correspondances: [], objet: "Candidature au poste de Développeur", paragraphes: ["Je maîtrise Java et je souhaite approfondir Go (Golang).", "Cette opportunité me motive.", "Je serais heureux d'échanger avec vous."] };
-    const GOOD2 = { correspondances: [], objet: "Candidature au poste de Développeur", paragraphes: ["J'ai développé des API REST en Java Spring Boot chez Banquo.", "Je n'ai pas encore utilisé Go ; je compte m'y former.", "Je serais heureux d'échanger avec vous."] };
-    const client = new OllamaClient({
-      fetch: async (_u, init) => {
-        const b = JSON.parse(String(init?.body));
-        bodies.push(b);
-        return json({ message: { content: JSON.stringify(bodies.length === 1 ? BAD : GOOD2) } });
-      },
-    });
-    const { content } = await writeCoverLetter(client, { ...JOB, description: job }, kit);
-    expect(bodies.length).toBeGreaterThanOrEqual(2);
-    // Correction en conversation : même demande qu'au premier appel (cache), la première version, puis les problèmes.
-    const fix = bodies[1].messages;
-    expect(fix.map((m: { role: string }) => m.role)).toEqual(["system", "user", "assistant", "user"]);
-    expect(fix[1].content).toBe(bodies[0].messages[1].content);
-    expect(fix[3].content).toMatch(/PROBLÈMES À CORRIGER/);
-    expect(fix[3].content).toMatch(/maîtrise/);
-    expect(content).toContain("Je n'ai pas encore utilisé Go");
-    expect(content).not.toContain("opportunité");
-  });
-
-  it("IA payante : une version, une correction et la réécriture de la phrase interdite restante, pas plus", async () => {
-    let calls = 0;
-    const BAD = { correspondances: [], objet: "Candidature au poste de Développeur", paragraphes: ["Je maîtrise Java et Go (Golang).", "Cette opportunité me motive.", "Je serais heureux d'échanger avec vous."] };
-    const client = { model: "claude", paid: true, chatJson: async () => (calls++, BAD) };
-    await writeCoverLetter(client, { ...JOB, description: job }, kit);
-    expect(calls).toBe(3);
-  });
-
-  it("lettre correcte → un seul appel à l'IA", async () => {
-    let calls = 0;
-    const client = new OllamaClient({ fetch: async () => (calls++, json({ message: { content: JSON.stringify({ correspondances: [], ...DRAFT }) } })) });
-    await writeCoverLetter(client, JOB, KIT);
-    expect(calls).toBe(1);
-  });
-});
-
-describe("atouts / manques et formulation humaine (cas C-Clerc n°2)", () => {
-  const cv = [
-    "Compétences : Java, Spring Boot, Vue.js, React, Node.js, PostgreSQL, Docker, JWT",
-    "CodeNShare : plateforme de partage de code en React et Node.js, authentification JWT avec Auth0, base PostgreSQL, déploiement Docker Compose",
-    "LUSIS : API REST en Java Spring Boot, microservices",
-  ].join("\n");
-  const job = "Microservices en Go (Golang), gRPC, Node.js, React, PostgreSQL, authentification OAuth2 / JWT, Docker, Kubernetes.";
-
-  it("calcule les atouts (avec la ligne concrète du CV) et les manques, dans l'ordre de l'annonce", () => {
-    const { strengths, gaps } = strengthsAndGaps(job, cv);
-    const auth = strengths.find((x) => x.id === "auth");
-    expect(auth?.proof).toMatch(/^CodeNShare/);
-    expect(strengths.map((x) => x.id)).toEqual(expect.arrayContaining(["microservices", "react", "postgresql", "docker"]));
-    expect(strengths[0]?.id).toBe("microservices");
-    expect(gaps).toEqual(expect.arrayContaining(["Go", "gRPC"]));
-    expect(gaps.join()).not.toMatch(/React|PostgreSQL/);
-  });
-
-  it("le prompt contient le tableau ATOUTS VÉRIFIÉS et MANQUES avant le CV", () => {
-    const prompt = buildLetterPrompt({ ...JOB, description: job }, { ...KIT, cvText: cv });
-    expect(prompt.indexOf("ATOUTS VÉRIFIÉS")).toBeGreaterThanOrEqual(0);
-    expect(prompt.indexOf("MANQUES")).toBeLessThan(prompt.indexOf("CV DU CANDIDAT"));
-    expect(prompt).toMatch(/JWT \/ OAuth ← CV : « CodeNShare/);
-  });
-
-  it("repère les « J'ai » en série, les clichés, la techno répétée et les atouts oubliés", () => {
-    const bad = [
-      "Cette offre correspond à mon parcours.",
-      "J'ai des bases solides en Java.",
-      "J'ai utilisé Docker Compose sur un projet.",
-      "J'ai aussi utilisé Docker Compose pour un autre projet.",
-      "Docker me sert tous les jours.",
-      "Ces expériences m'ont exposé à des applications métier complexes et je serais intéressé par ce poste.",
-    ].join(" ");
-    const issues = findLetterIssues(bad, { ...KIT, cvText: cv }, "Java, Kotlin.");
-    const all = issues.join("\n");
-    expect(all).toMatch(/Trois phrases de suite commencent par « J'ai »/);
-    expect(all).toMatch(/correspond à mon parcours/);
-    expect(all).toMatch(/bases solides/);
-    expect(all).toMatch(/Docker.*cité 3 fois/);
-    const forgot = findLetterIssues("Chez LUSIS, j'ai conçu des API en microservices.", { ...KIT, cvText: cv }, job).join("\n");
-    expect(forgot).toMatch(/absents de la lettre.*React/);
-  });
-});
-
-describe("vérité projet ↔ techno, entreprise nommée, « j'ai » (cas C-Clerc n°3)", () => {
-  const cv = [
-    "09/2023 – 09/2025 : Développeur Frontend — Alternance · LUSIS",
-    "- Développement d'interfaces web en Vue.js pour un logiciel de supervision bancaire",
-    "03/2023 – 09/2023 : Développeur Backend — Alternance · LUSIS",
-    "- Développement et maintenance d'un serveur backend Java Spring Boot",
-    "- Tests des services via Postman et vérification des données en base PostgreSQL",
-    "",
-    "PROJETS",
-    "- CodeNShare — Projet de fin d'études : réseau social de partage de code. React, Node JS, PostgreSQL, Auth0 / JWT.",
-    "- Réservation de parking — Projet d'architecture logicielle : Java / Spring Boot, Flutter, Docker Compose.",
-    "",
-    "COMPÉTENCES",
-    "- Architecture : API REST, Clean Architecture, Microservices",
-  ].join("\n");
-  const kit = { ...KIT, cvText: cv };
-  const job = "Microservices, Java, React, PostgreSQL.";
-
-  it("lit les projets et les entreprises du CV", () => {
-    const e = cvEntities(cv);
-    const lusis = e.find((x) => x.name === "LUSIS");
-    const parking = e.find((x) => x.name === "Réservation de parking");
-    expect(e.filter((x) => x.name === "LUSIS")).toHaveLength(1);
-    expect([...(lusis?.skills ?? [])]).toEqual(expect.arrayContaining(["vue", "spring", "postgresql"]));
-    expect(parking?.skills.has("microservices")).toBe(false);
-    expect(parking?.skills.has("docker")).toBe(true);
-  });
-
-  it("repère « microservices … projet de réservation de parking » et une entreprise non nommée", () => {
-    const issues = findLetterIssues("J'ai pratiqué les concepts de Microservices, comme lors du projet de réservation de parking. Sur CodeNShare, l'authentification reposait sur JWT et PostgreSQL.", kit, job);
-    expect(issues[0]).toMatch(/Microservices n'est pas écrit pour Réservation de parking/);
-    expect(issues.join("\n")).toMatch(/Nomme l'entreprise d'alternance \(LUSIS\)/);
-    expect(issues.join("\n")).not.toMatch(/pas écrit pour CodeNShare/);
-  });
-
-  it("ne compte plus les « j'ai » (ça poussait au passif) ; repère les phrases creuses", () => {
-    const body = "Chez LUSIS, j'ai fait A. Puis j'ai fait B. Ensuite j'ai fait C, et j'ai fait D. Enfin j'ai fait E et j'ai fait F. Ma démarche structurée, ce qui me permet d'avancer.";
-    const all = findLetterIssues(body, kit, job).join("\n");
-    expect(all).not.toMatch(/« J'ai » revient/);
-    expect(all).toMatch(/démarche structurée/);
-    expect(all).toMatch(/ce qui me permet/);
-  });
-});
-
-describe("pas de fausse alerte", () => {
-  const cv = "09/2023 – 09/2025 : Développeur — Alternance · LUSIS\n- Interfaces en Vue.js, données en base PostgreSQL\n\n- CodeNShare — Projet : React, Node JS.\n- Doc Chez Vous — Projet : .NET 8, SQL Server.";
-  const kit = { ...KIT, cvText: cv };
-  it("deux faits dans une phrase, chacun à sa place ; manque avoué franchement", () => {
-    const all = findLetterIssues("Chez LUSIS, j'ai développé des écrans en Vue.js et j'ai utilisé React sur CodeNShare. J'ai vérifié des données en base PostgreSQL et j'ai utilisé SQL sur Doc Chez Vous. Je n'ai pas encore utilisé Go (Golang) ; mes connaissances en Java m'aideront.", kit, "Vue.js, React, Go (Golang).").join("\n");
-    expect(all).not.toMatch(/n'est pas écrit pour/);
-    expect(all).not.toMatch(/Go.*n'est pas dans le CV/);
-  });
-});
-
-describe("règles du candidat (cas Koncrete)", () => {
-  const cv = [
-    "09/2023 – 09/2025 : Développeur Frontend — Alternance · LUSIS",
-    "- Création de 6 écrans de gestion de la fraude en Vue.js, migration Vue 3 en TypeScript",
-    "",
-    "- CodeNShare — Projet : React, Node JS, PostgreSQL.",
-    "- Doc Chez Vous — Projet : Flutter, Docker.",
-  ].join("\n");
-  const kit = {
-    ...KIT,
-    cvText: cv,
-    rules: "Paragraphe 2 : toujours LUSIS. Seuls chiffres autorisés : deux ans et demi, 6 écrans.",
-    mastered: "Vue.js, TypeScript, Java Spring Boot, API REST",
-    closing: "Rigoureux, curieux et impliqué, je serais heureux d'échanger avec vous pour rejoindre {entreprise}.",
-    bannedWords: "je candidate, De plus, Concernant",
+/** Faux client IA : répond selon la demande (plan, lettre, phrase à réécrire). */
+function fakeClient(letters: string[], opts: { phrase?: string; paid?: boolean } = {}) {
+  const calls: Array<{ kind: string; user: unknown }> = [];
+  let n = 0;
+  return {
+    calls,
+    model: "fake",
+    paid: opts.paid ?? false,
+    chatJson: async (_system: string, user: unknown, schema: { properties: Record<string, unknown> }) => {
+      if ("blocs" in schema.properties) return calls.push({ kind: "plan", user }), { angle: "Vue.js et Java", blocs: [1, 2], accroche: "logiciels de transport" };
+      if ("phrase" in schema.properties) return calls.push({ kind: "phrase", user }), { phrase: opts.phrase ?? "" };
+      calls.push({ kind: "lettre", user });
+      return { lettre: letters[Math.min(n++, letters.length - 1)] };
+    },
   };
-  const job = "Développeur Fullstack\nKoncrete\nUne équipe qui construit des choses concrètes, avec un impact direct et mesurable sur le terrain. Stack : React / TypeScript, Tailwind, Node.js / Express, PostgreSQL, Redis, Flutter, Google Cloud.";
+}
 
-  it("le prompt contient les règles du candidat, ses technos maîtrisées et annonce la fin automatique", () => {
-    const p = buildLetterPrompt({ ...JOB, company: "Koncrete", description: job }, kit);
-    expect(p.indexOf("RÈGLES DU CANDIDAT")).toBe(0);
-    expect(p).toContain("toujours LUSIS");
-    expect(p).toMatch(/TECHNOS QU'IL MAÎTRISE.*Vue\.js/);
-    expect(p).toMatch(/N'écris PAS de conclusion/);
-    expect(p).toMatch(/NE LES LISTE PAS/);
+describe("écriture en deux temps : l'angle et les blocs, puis la lettre", () => {
+  it("le plan reçoit les blocs numérotés et l'annonce ; la lettre ne reçoit que les blocs choisis", () => {
+    const blocks = letterBlocks(KIT);
+    expect(buildPlanPrompt(JOB, blocks)).toMatch(/1\. Écrans de supervision\nSert pour : frontend, Vue\.js/);
+    const p = buildWritePrompt(JOB, KIT, { angle: "Vue.js et Java", blocs: [2], accroche: "" }, blocks);
+    expect(p).toContain("[API Java]");
+    expect(p).not.toContain("Écrans de supervision");
+    expect(p).toContain("RÈGLES D'HONNÊTETÉ");
+    expect(p).toContain("Entreprise : Logistik");
   });
 
-  it("« maîtrise » accepté seulement pour les technos déclarées ; manques listés, mots interdits perso, chiffres inventés, phrase recopiée", () => {
-    const issues = findLetterIssues(
-      [
-        "Je maîtrise Vue.js et TypeScript.",
-        "Maîtriser la stack React et Node.js est au cœur de mon parcours.",
-        "Je candidate car Koncrete construit des outils avec un impact direct et mesurable sur le terrain.",
-        "De plus, j'ai créé 12 écrans chez LUSIS.",
-        "Je n'ai pas encore utilisé Tailwind, Express ou Redis.",
-      ].join(" "),
-      kit,
-      job,
-    ).join("\n");
-    expect(issues).not.toMatch(/« Je maîtrise Vue\.js/);
-    expect(issues).toMatch(/Pas de « maîtrise ».*Maîtriser la stack React/);
-    const windev = findLetterIssues("Je souhaite approfondir ma maîtrise de l'environnement Windev en m'appuyant sur ma pratique de Java Spring Boot.", kit, job).join("\n");
-    expect(windev).toMatch(/Pas de « maîtrise »/);
-    expect(issues).toMatch(/Ne liste pas tes manques \((?=.*Tailwind)(?=.*Express)(?=.*Redis)/);
-    expect(issues).toMatch(/Supprime « je candidate »/);
-    expect(issues).toMatch(/Supprime « De plus »/);
-    expect(issues).toMatch(/chiffre « 12 »/);
-    expect(issues).not.toMatch(/chiffre « 6 »/);
-    expect(issues).toMatch(/Phrase recopiée de l'annonce/);
+  it("plan douteux : blocs inconnus ou en double ignorés ; plan vide → les blocs qui recoupent l'annonce", () => {
+    const blocks = letterBlocks(KIT);
+    expect(cleanPlan({ angle: "a", blocs: [2, 2, 9, 0], accroche: "" }, blocks, JOB).blocs).toEqual([2]);
+    expect(cleanPlan(null, blocks, JOB).blocs.slice(0, 2).sort()).toEqual([1, 2]);
   });
 
-  it("la conclusion de l'IA est remplacée par le dernier paragraphe fixe, avec le nom de l'entreprise", async () => {
-    const draft = { correspondances: [], objet: "Candidature au poste de Développeur Fullstack", paragraphes: ["Chez LUSIS, j'ai créé 6 écrans en Vue.js.", "Sur CodeNShare, j'ai travaillé avec React et Node JS, et PostgreSQL.", "Je serais ravi de vous rencontrer en entretien."] };
-    const client = new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify(draft) } }) });
-    const { content } = await writeCoverLetter(client, { ...JOB, company: "Koncrete", description: job }, kit);
-    expect(content).not.toContain("vous rencontrer en entretien");
-    expect(content).toContain("impliqué, je serais heureux d'échanger avec vous pour rejoindre Koncrete.");
-    expect(content.indexOf("rejoindre Koncrete")).toBeLessThan(content.indexOf("Je vous prie d'agréer"));
+  it("sans bloc, le CV sert de seule source ; Job Radar ajouté seulement si autorisé", () => {
+    expect(letterBlocks({ ...KIT, blocks: [] })).toMatchObject([{ title: "CV" }]);
+    expect(letterBlocks(KIT, { aiCoding: true }).at(-1)!.title).toMatch(/Job Radar/);
+    expect(letterBlocks(KIT).some((b) => /Job Radar/.test(b.title))).toBe(false);
   });
-});
 
-describe("candidature spontanée (pas d'offre)", () => {
-  const company = { name: "ALPHA LOGICIELS", sector: "Programmation informatique", city: "Creil", department: "60", headcountMin: 10, headcountMax: 19 };
-  const job = spontaneousJobInput(company, "Développeur full stack");
+  it("lettre correcte : un plan, une lettre, assemblée avec objet, politesse et signature", async () => {
+    const client = fakeClient([GOOD]);
+    const { content } = await writeCoverLetter(client, JOB, KIT, new Date("2026-09-29T10:00:00Z"));
+    expect(client.calls.map((c) => c.kind)).toEqual(["plan", "lettre"]);
+    expect(content.startsWith("Alex Martin\n75011 Paris")).toBe(true);
+    expect(content).toContain("À Paris, le 29/09/2026");
+    expect(content).toContain("Objet : Candidature au poste de Développeur Vue.js / Java\n\nMadame, Monsieur,\n\nChez Banquo");
+    expect(content.endsWith("salutations distinguées.\n\nAlex MARTIN")).toBe(true);
+  });
 
-  it("décrit seulement ce qu'on sait de l'entreprise, et le prompt interdit « votre offre »", () => {
+  it("lettre fautive → corrigée en conversation avec la liste des problèmes ; la meilleure version est gardée", async () => {
+    const bad = GOOD.replace("Je serais heureux", "Je maîtrise Kafka. Je serais heureux");
+    const client = fakeClient([bad, GOOD]);
+    const { content } = await writeCoverLetter(client, JOB, KIT);
+    const fix = client.calls[2]!.user as Array<{ role: string; content: string }>;
+    expect(fix.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(fix[2]!.content).toMatch(/PROBLÈMES À CORRIGER/);
+    expect(fix[2]!.content).toMatch(/maîtrise/);
+    expect(content).not.toContain("Kafka");
+  });
+
+  it("IA payante : une version et une correction au plus", async () => {
+    const bad = GOOD.replace("Je serais heureux", "Je maîtrise Kafka. Je serais heureux");
+    const client = fakeClient([bad], { paid: true, phrase: "x" });
+    await writeCoverLetter(client, JOB, KIT);
+    expect(client.calls.filter((c) => c.kind === "lettre")).toHaveLength(2);
+  });
+
+  it("candidature spontanée : objet imposé et pas de « votre offre »", async () => {
+    const company = { name: "ALPHA LOGICIELS", sector: "Programmation informatique", city: "Creil", department: "60", headcountMin: 10, headcountMax: 19 };
+    const job = spontaneousJobInput(company, "Développeur full stack");
     expect(job.description).toContain("AUCUNE offre");
-    expect(job.description).toContain("Secteur d'activité : Programmation informatique");
-    expect(job.description).toContain("10 à 19 salariés");
-    const p = buildLetterPrompt(job, KIT, { spontaneous: true });
-    expect(p.startsWith("CANDIDATURE SPONTANÉE")).toBe(true);
-    expect(p).toMatch(/N'invente RIEN sur l'entreprise/);
-    expect(buildLetterPrompt(job, KIT)).not.toMatch(/CANDIDATURE SPONTANÉE \(priorité/);
-  });
-
-  it("« votre offre » signalé ; objet imposé « Candidature spontanée – … »", async () => {
-    const issues = findLetterIssues("Votre offre a retenu mon attention.", KIT, job.description, { spontaneous: true }).join("\n");
-    expect(issues).toMatch(/il n'y a pas d'offre/);
-    const draft = { correspondances: [], objet: "Candidature au poste de Développeur", paragraphes: ["Chez Banquo, j'ai créé des écrans en Vue.js.", "Sur mon projet, j'ai utilisé Docker.", "Je serais heureux d'échanger avec vous."] };
-    const client = new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify(draft) } }) });
-    const { content } = await writeCoverLetter(client, job, KIT, new Date(), { spontaneous: true });
+    expect(buildWritePrompt(job, KIT, { angle: "", blocs: [1], accroche: "" }, letterBlocks(KIT), { spontaneous: true })).toMatch(/^CANDIDATURE SPONTANÉE/);
+    expect(findLetterIssues("x\nVotre offre a retenu mon attention.", KIT, job.description, { spontaneous: true }).join("\n")).toMatch(/il n'y a pas d'offre/);
+    const { content } = await writeCoverLetter(fakeClient([GOOD.replace(/Logistik/g, "ALPHA LOGICIELS")]), job, KIT, new Date(), { spontaneous: true });
     expect(content).toContain("Objet : Candidature spontanée – Développeur full stack");
   });
+});
 
-  it("pas d'annonce : les technos du CV ne sont ni signalées « hors sujet » ni retirées", () => {
-    const letter = "Chez Banquo, j'ai créé des écrans en Vue.js. Sur mon projet, j'ai utilisé Docker et PostgreSQL.";
-    expect(checkLetter(letter, KIT, job.description, job.title, { spontaneous: true }).join("\n")).not.toMatch(/absents de l'annonce/);
-    expect(findLetterIssues(letter, KIT, job.description, { spontaneous: true }).join("\n")).not.toMatch(/Retire|recopiée/);
+describe("ponctuation : seulement des virgules et des points", () => {
+  it("repère deux-points, point-virgule, tirets, parenthèses, guillemets, « ! », « ? » ; laisse CI/CD, C#, Vue.js et .NET", () => {
+    for (const s of ["Mon rôle : créer des écrans.", "J'ai créé des écrans ; ils marchent.", "J'ai créé — en Vue.js — des écrans.", "J'ai créé des écrans (six).", "J'ai créé l'écran « Pipelines ».", "Pourquoi pas ?", "React + Vite"]) {
+      expect(badPunctuation(s)).toBe(true);
+    }
+    expect(badPunctuation("J'ai mis en place la CI/CD en C# et en .NET avec Vue.js et du full-stack.")).toBe(false);
+  });
+
+  it("une virgule au plus par phrase", () => {
+    expect(tooManyCommas("Chez Banquo, j'ai créé des écrans.")).toBe(false);
+    expect(tooManyCommas("Chez Banquo, j'ai créé des écrans, des API, des tests.")).toBe(true);
+  });
+
+  it("dernier recours : la ponctuation interdite est remplacée par le code", () => {
+    expect(fixPunctuation("Mon rôle : créer des écrans ; ils marchent (bien).")).toBe("Mon rôle. Créer des écrans. Ils marchent bien.");
+    expect(fixPunctuation("J'ai utilisé React + Vite et l'écran « Pipelines » en .NET.")).toBe("J'ai utilisé React et Vite et l'écran Pipelines en .NET.");
+  });
+
+  it("signalée par la relecture dans le corps seulement (l'objet garde ses deux-points)", () => {
+    const issues = findLetterIssues("Objet : Candidature\nMon rôle : créer des écrans chez Banquo, en Vue.js, avec TypeScript.", KIT, jobText).join("\n");
+    expect(issues).toMatch(/^Ponctuation/m);
+    expect(issues).toMatch(/Trop de virgules/);
+    expect(findLetterIssues("Objet : Candidature\nChez Banquo j'ai créé des écrans en Vue.js.", KIT, jobText).join("\n")).not.toMatch(/Ponctuation|virgules/);
   });
 });
 
-describe("dernier filet : phrases interdites retirées", () => {
-  it("retire la phrase au cliché, garde le reste ; ne vide jamais la lettre", () => {
-    const d = { objet: "x", paragraphes: ["Chez Banquo, j'ai développé des API. Je suis convaincu de ma motivation. Elles tournent sur PostgreSQL.", "Cette opportunité me motive.", "Je serais ravi d'échanger."] };
-    expect(dropFlaggedSentences(d, { bannedWords: "" }).paragraphes).toEqual(["Chez Banquo, j'ai développé des API. Elles tournent sur PostgreSQL.", "Je serais ravi d'échanger."]);
-    const only = { objet: "x", paragraphes: ["Cette opportunité me motive.", "Je suis convaincu."] };
-    expect(dropFlaggedSentences(only, { bannedWords: "" })).toBe(only);
-  });
-});
+describe("réécriture ciblée d'une phrase", () => {
+  const d = { objet: "x", paragraphes: ["Chez Banquo j'ai développé des API. Je suis convaincu de ma motivation. Elles tournent sur PostgreSQL.", "Je serais ravi d'échanger."] };
 
-describe("dernier filet : phrases hors sujet retirées", () => {
-  const kit = { cvText: "Vue.js, TypeScript, Vitest, .NET 8, Docker" };
-  const long = "Chez Banquo, j'ai développé des interfaces de supervision pour des analystes qui suivent les flux chaque jour. ".repeat(10);
-  it("retire la phrase qui ne cite que des technos hors annonce, garde les autres", () => {
-    const d = { objet: "x", paragraphes: [`${long}Les tests tournent avec Vitest.`, "J'ai écrit des interfaces Vue.js."] };
-    const out = dropOffTopicSentences(d, kit, "Développeur Vue.js. Interfaces web.");
-    expect(out.paragraphes.join(" ")).not.toContain("Vitest");
-    expect(out.paragraphes.join(" ")).toContain("Vue.js");
-  });
-  it("garde la phrase qui mêle une techno de l'annonce (ou de sa famille) à une techno hors sujet", () => {
-    const cv = { cvText: "React, Node.js, Auth0, PostgreSQL, Vitest" };
-    const d = { objet: "x", paragraphes: [`${long}Sur CodeNShare, j'ai développé le front React et l'authentification Auth0. Le projet utilisait Node.js et PostgreSQL. Les tests tournaient avec Vitest.`, "Je serais ravi d'échanger."] };
-    const out = dropOffTopicSentences(d, cv, "Développeur JavaScript Full-Stack.").paragraphes.join(" ");
-    expect(out).toContain("front React et l'authentification Auth0");
-    expect(out).toContain("Node.js et PostgreSQL");
-    expect(out).not.toContain("Vitest");
-  });
-  it("poste full stack : l'expérience serveur reste, même dans un autre langage que l'annonce", () => {
-    const cv = { cvText: "Vue.js, Java, Spring Boot, PostgreSQL" };
-    const d = { objet: "x", paragraphes: [`${long}Chez Banquo, j'ai développé un serveur Java Spring Boot.`, "Je serais ravi d'échanger."] };
-    expect(dropOffTopicSentences(d, cv, "Développeur JS Full-Stack. Vue.js.").paragraphes.join(" ")).toContain("Spring Boot");
-    expect(dropOffTopicSentences(d, cv, "Développeur Vue.js. Interfaces web.").paragraphes.join(" ")).not.toContain("Spring Boot");
-  });
-  it("ne raccourcit pas une lettre déjà courte", () => {
-    const d = { objet: "x", paragraphes: ["Les tests tournent avec Vitest.", "J'ai écrit des interfaces Vue.js."] };
-    expect(dropOffTopicSentences(d, kit, "Développeur Vue.js.")).toBe(d);
-  });
-});
-
-describe("besoins inventés", () => {
-  const job = "Altéa Conseil recrute pour ses clients grands comptes des développeurs .NET / Angular. Intégration continue Azure DevOps.";
-  it("repère un besoin que l'annonce n'écrit pas", () => {
-    expect(inventedNeeds("Mon expérience Keycloak répond au besoin de sécurisation que vous décrivez.", job)).toHaveLength(1);
-  });
-  it("accepte un besoin écrit dans l'annonce", () => {
-    expect(inventedNeeds("Cela correspond à votre besoin d'intégration continue sous Azure DevOps.", job)).toEqual([]);
-  });
-});
-
-describe("règles longues du candidat et style « j'ai »", () => {
-  it("envoie des règles longues en entier à l'IA (la liste des faits n'est plus coupée)", () => {
-    const rules = `${"STRUCTURE : intro imposée. ".repeat(200)}\nFAITS : écran de planning chez Banquo.`;
-    expect(rules.length).toBeGreaterThan(5_000);
-    expect(buildLetterPrompt(JOB, { ...KIT, rules }, {})).toContain("FAITS : écran de planning chez Banquo.");
-  });
-
-  it("accepte « approfondir X en m'appuyant sur Y » et les « j'ai » d'une lettre longue", () => {
-    const job = "Développeur Java Spring Boot, Kafka, Vue.js.";
-    const gap = "Je souhaite approfondir Kafka en m'appuyant sur ma pratique de Java Spring Boot.";
-    expect(findLetterIssues(gap, KIT, job).join("\n")).not.toMatch(/Kafka n'est pas dans le CV/);
-    expect(findLetterIssues("Je souhaite approfondir ma connaissance de Kafka.", KIT, job).join("\n")).toMatch(/Kafka n'est pas dans le CV/);
-    const filler = "Le module servait aux équipes de suivi chaque jour et devait rester simple à lire pour tout le monde. ";
-    const long = `Chez Banquo, j'ai développé des écrans Vue.js. ${filler}${filler}`.repeat(8);
-    expect(findLetterIssues(long, KIT, job).join("\n")).not.toMatch(/« J'ai » revient/);
-  });
-
-  it("repère le tiret long et les adverbes répétés", () => {
-    const all = findLetterIssues("Chez Banquo — en Vue.js — j'ai notamment créé un écran. J'ai notamment migré un module.", KIT, "Vue.js").join("\n");
-    expect(all).toMatch(/tiret long/);
-    expect(all).toMatch(/Supprime un « notamment »/);
-  });
-});
-
-it("un plan « correspondances » trop long est coupé, pas rejeté", () => {
-  const r = LetterDraftSchema.parse({
-    correspondances: Array(10).fill({ exigence: "x".repeat(500), preuve: "y".repeat(500) }),
-    objet: "Candidature",
-    paragraphes: ["a", "b", "c"],
-  });
-  expect(r.correspondances).toHaveLength(8);
-  expect(r.correspondances[0]!.exigence).toHaveLength(200);
-});
-
-describe("réécriture ciblée, manques, Job Radar (règles 2026-10-20)", () => {
-  const d = { objet: "x", paragraphes: ["Chez Banquo, j'ai développé des API. Je suis convaincu de ma motivation. Elles tournent sur PostgreSQL.", "Je serais ravi d'échanger."] };
-  it("réécrit la phrase interdite au lieu de la supprimer, avec ses voisines pour le contexte", async () => {
+  it("réécrit la phrase fautive au lieu de la supprimer, avec ses voisines pour le contexte", async () => {
     const seen: string[] = [];
     const client = { chatJson: async (_s: string, u: unknown) => (seen.push(String(u)), { phrase: "Ce travail m'a plu." }) };
     const out = await rewriteFlaggedSentences(client, d, { bannedWords: "" });
-    expect(out.paragraphes[0]).toBe("Chez Banquo, j'ai développé des API. Ce travail m'a plu. Elles tournent sur PostgreSQL.");
+    expect(out.paragraphes[0]).toBe("Chez Banquo j'ai développé des API. Ce travail m'a plu. Elles tournent sur PostgreSQL.");
     expect(seen[0]).toMatch(/PHRASE D'AVANT : Chez Banquo/);
     expect(seen[0]).toMatch(/PHRASE D'APRÈS : Elles tournent/);
   });
-  it("refuse une réécriture qui ajoute une techno ou un chiffre : la phrase est alors retirée", async () => {
+
+  it("refuse une réécriture qui ajoute une techno ou un chiffre : mot interdit → phrase retirée", async () => {
     for (const phrase of ["J'ai aussi utilisé Kafka.", "J'ai créé 12 écrans."]) {
       const out = await rewriteFlaggedSentences({ chatJson: async () => ({ phrase }) }, d, { bannedWords: "" });
-      expect(out.paragraphes[0]).toBe("Chez Banquo, j'ai développé des API. Elles tournent sur PostgreSQL.");
+      expect(out.paragraphes[0]).toBe("Chez Banquo j'ai développé des API. Elles tournent sur PostgreSQL.");
     }
   });
-  it("un seul manque hors intitulé du poste est signalé ; dans l'intitulé, il est permis", () => {
-    const job = "Développeur Vue.js / Java\nStack : Vue.js, Java Spring Boot, Kafka.";
-    expect(findLetterIssues("Je n'ai pas encore utilisé Kafka.", KIT, job).join("\n")).toMatch(/Ne liste pas tes manques \(Kafka\)/);
-    expect(findLetterIssues("Je n'ai pas encore utilisé Kafka.", KIT, "Développeur Java / Kafka\nStack : Java.").join("\n")).not.toMatch(/manques/);
+
+  it("ponctuation qui résiste : remplacée par le code, la phrase reste", async () => {
+    const p = { objet: "x", paragraphes: ["Mon rôle : créer des écrans chez Banquo.", "Je serais ravi d'échanger."] };
+    const out = await rewriteFlaggedSentences({ chatJson: async () => ({ phrase: "Mon rôle ; créer." }) }, p, { bannedWords: "" });
+    expect(out.paragraphes[0]).toBe("Mon rôle. Créer des écrans chez Banquo.");
   });
+});
+
+describe("vérité", () => {
+  it("techno absente du CV et des blocs, « maîtrise », faux liens de cause, mots creux", () => {
+    const bad = "x\nJe maîtrise Vue.js et j'ai de l'expérience en Go (Golang). J'ai développé un serveur, ce qui m'a permis d'avancer. Cette opportunité me motive.";
+    const issues = findLetterIssues(bad, KIT, "Go (Golang), Vue.js").join("\n");
+    expect(issues).toMatch(/Pas de « maîtrise »/);
+    expect(issues).toMatch(/Go.*n'est pas dans le CV/);
+    expect(issues).toMatch(/ce qui m'a permis/);
+    expect(issues).toMatch(/opportunité/);
+  });
+
+  it("un fait écrit dans un bloc compte comme vrai (techno et chiffre)", () => {
+    const kit = { ...KIT, blocks: [{ title: "Kafka", useFor: "", text: "Chez Banquo j'ai branché 3 flux Kafka." }] };
+    const all = findLetterIssues("x\nChez Banquo j'ai utilisé Kafka pour 3 flux.", kit, "Kafka").join("\n");
+    expect(all).not.toMatch(/Kafka n'est pas dans le CV/);
+    expect(all).not.toMatch(/chiffre « 3 »/);
+    expect(findLetterIssues("x\nChez Banquo j'ai créé 12 écrans.", KIT, jobText).join("\n")).toMatch(/chiffre « 12 »/);
+  });
+
+  it("manque cité hors intitulé du poste : signalé ; dans l'intitulé : permis", () => {
+    expect(findLetterIssues("x\nJe n'ai pas encore utilisé Kafka.", KIT, "Développeur Vue.js / Java\nStack : Vue.js, Java, Kafka.").join("\n")).toMatch(/Ne liste pas tes manques \(Kafka\)/);
+    expect(findLetterIssues("x\nJe n'ai pas encore utilisé Kafka.", KIT, "Développeur Java / Kafka\nStack : Java.").join("\n")).not.toMatch(/manques/);
+  });
+
+  it("techno attribuée au mauvais projet, entreprise d'alternance non nommée", () => {
+    const cv = [
+      "09/2023 – 09/2025 : Développeur Frontend — Alternance · LUSIS",
+      "- Interfaces web en Vue.js",
+      "",
+      "- Réservation de parking — Projet : Java / Spring Boot, Flutter, Docker Compose.",
+      "- CodeNShare — Projet : React, Node JS, PostgreSQL, Auth0 / JWT.",
+      "",
+      "COMPÉTENCES",
+      "- Architecture : API REST, Microservices",
+    ].join("\n");
+    const kit = { ...KIT, cvText: cv, blocks: [] };
+    const e = cvEntities(cv);
+    expect(e.find((x) => x.name === "Réservation de parking")?.skills.has("microservices")).toBe(false);
+    const issues = findLetterIssues("x\nJ'ai pratiqué les Microservices sur le projet de réservation de parking.", kit, "Microservices, Java.");
+    expect(issues[0]).toMatch(/Microservices n'est pas écrit pour Réservation de parking/);
+    expect(issues.join("\n")).toMatch(/Nomme l'entreprise d'alternance \(LUSIS\)/);
+  });
+
+  it("besoin inventé, phrase recopiée de l'annonce, « J'ai » en série", () => {
+    expect(inventedNeeds("Mon expérience Keycloak répond au besoin de sécurisation que vous décrivez.", "Développeurs .NET et Angular.")).toHaveLength(1);
+    const job = "Développeur\nVous travaillerez en méthode agile au sein d'une équipe pluridisciplinaire sur nos applications.";
+    expect(findLetterIssues("x\nJe travaillerai en méthode agile au sein d'une équipe pluridisciplinaire.", KIT, job).join("\n")).toMatch(/Phrase recopiée/);
+    expect(findLetterIssues("x\nJ'ai fait A. J'ai fait B. J'ai fait C.", KIT, jobText).join("\n")).toMatch(/Trois phrases de suite/);
+  });
+
   it("Job Radar : cité seulement si l'analyse IA de l'offre parle de développement avec des agents IA", () => {
     expect(analysisWantsAiCoding({ competences_obligatoires: ["Vue.js"], competences_bonus: ["Claude Code ou Cursor"] })).toBe(true);
     expect(analysisWantsAiCoding({ competences_obligatoires: ["Vue.js"], missions: ["Développer des écrans"] })).toBe(false);
     expect(analysisWantsAiCoding(null)).toBe(false);
-    const letter = "Sur Job Radar, mon projet perso, j'ai travaillé avec Claude Code.";
+    const letter = "x\nSur Job Radar, mon projet perso j'ai travaillé avec Claude Code.";
     expect(findLetterIssues(letter, KIT, "Vue.js").join("\n")).toMatch(/Supprime Job Radar/);
-    expect(findLetterIssues(letter, KIT, "Vue.js", { aiCoding: true }).join("\n")).not.toMatch(/Job Radar/);
-    expect(buildLetterPrompt(JOB, KIT, { aiCoding: true })).toContain("PROJET PERSO AUTORISÉ");
-    expect(buildLetterPrompt(JOB, KIT)).not.toContain("Job Radar");
+    expect(findLetterIssues(letter, KIT, "Vue.js", { aiCoding: true }).join("\n")).not.toMatch(/Job Radar|n'est pas dans le CV/);
+  });
+});
+
+describe("mise en forme et relecture affichée", () => {
+  it("découpe le texte de l'IA en paragraphes, sans « Madame, Monsieur », politesse ni signature", () => {
+    const p = toParagraphs("Madame, Monsieur,\n\n1. Premier paragraphe.\n\nSecond. Je vous prie d'agréer, Madame, Monsieur, mes salutations distinguées.\n\nAlex MARTIN", "Alex MARTIN");
+    expect(p).toEqual(["Premier paragraphe.", "Second."]);
+  });
+
+  it("politesse et signature jamais en double", () => {
+    const text = assembleLetter(KIT, { objet: "Candidature", paragraphes: ["Je candidate chez Logistik.", "Merci. Je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.\nAlex MARTIN"] }, new Date());
+    expect(text.match(/salutations distinguées/g)).toHaveLength(1);
+    expect(text.match(/Alex MARTIN/g)).toHaveLength(1);
+  });
+
+  it("relecture d'une lettre retouchée à la main : techno absente du CV, ponctuation du corps ; rien sur l'en-tête ni l'objet", () => {
+    const letter = assembleLetter(KIT, { objet: "Candidature au poste de Développeur", paragraphes: ["Chez Banquo j'ai créé des écrans en Vue.js.", "Je maîtrise Kafka : c'est mon fort."] }, new Date());
+    const w = checkLetter(letter, KIT, jobText, JOB.title).join("\n");
+    expect(w).toMatch(/« Kafka » n'est pas dans ton CV/);
+    expect(w).toMatch(/^Ponctuation/m);
+    expect(checkLetter(assembleLetter(KIT, { objet: "Candidature au poste de Développeur Vue.js / Java", paragraphes: ["Chez Banquo j'ai créé des écrans en Vue.js."] }, new Date()), KIT, jobText, JOB.title)).toEqual([]);
   });
 });

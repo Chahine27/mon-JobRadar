@@ -5,7 +5,13 @@ import Icon from "../components/Icon.vue";
 import PageHeader from "../components/PageHeader.vue";
 import type { LetterKit } from "../types";
 
-const kit = reactive<LetterKit>({ header: "", city: "", signature: "", cvText: "", letterExample: "", rules: "", mastered: "", closing: "", bannedWords: "", pdfName: "Lettre_de_motivation.pdf" });
+const kit = reactive<LetterKit>({ header: "", city: "", signature: "", cvText: "", blocks: [], rules: "", mastered: "", bannedWords: "", pdfName: "Lettre_de_motivation.pdf" });
+const MAX_BLOCKS = 20;
+const addBlock = () => kit.blocks.push({ title: "", text: "", useFor: "" });
+function removeBlock(i: number) {
+  if (kit.blocks[i]!.text.trim() && !window.confirm(`Supprimer le bloc « ${kit.blocks[i]!.title || i + 1} » ?`)) return;
+  kit.blocks.splice(i, 1);
+}
 const cvPdfName = ref<string | null>(null);
 const cvBusy = ref(false);
 const cvError = ref<string | null>(null);
@@ -108,14 +114,25 @@ async function save() {
     </section>
 
     <section class="card stack">
-      <h2><span class="step">2</span>Une lettre que tu as déjà écrite <span class="muted small">(conseillé)</span></h2>
-      <label>
-        <textarea v-model="kit.letterExample" rows="12" maxlength="10000" placeholder="Colle une lettre de motivation qui te plaît." />
-        <span class="hint">
-          Elle sert seulement à copier ton style (ton, longueur, façon de tourner les phrases). Le nom de l'entreprise et les détails
-          de cette ancienne offre ne sont pas repris ; si ça arrive, Job Radar te le signale.
-        </span>
-      </label>
+      <h2><span class="step">2</span>Tes blocs <span class="muted small">(conseillé)</span></h2>
+      <p class="hint">
+        Une petite histoire vraie par expérience, écrite comme tu la racontes. Pour chaque offre, l'IA en choisit 2 ou 3 et les relie.
+        Sans bloc, elle part de ton CV.
+      </p>
+      <div v-for="(b, i) in kit.blocks" :key="i" class="block stack">
+        <div class="row block-head">
+          <input v-model="b.title" maxlength="80" :placeholder="`Bloc ${i + 1} : titre (ex. Migration vers Vue 3)`" />
+          <button type="button" class="ghost" @click="removeBlock(i)">Supprimer</button>
+        </div>
+        <textarea v-model="b.text" rows="5" maxlength="1500" placeholder="Le contexte, ce que tu as fait, ce que ça a donné. Des phrases simples." />
+        <label>
+          Sert pour
+          <input v-model="b.useFor" maxlength="300" placeholder="frontend, Vue.js, banque, autonomie…" />
+        </label>
+      </div>
+      <div>
+        <button type="button" :disabled="kit.blocks.length >= MAX_BLOCKS" @click="addBlock"><Icon name="plus" :size="16" />Ajouter un bloc</button>
+      </div>
     </section>
 
     <section class="card stack">
@@ -139,21 +156,16 @@ async function save() {
     </section>
 
     <section class="card stack">
-      <h2><span class="step">4</span>Tes règles pour la lettre <span class="muted small">(conseillé)</span></h2>
+      <h2><span class="step">4</span>Règles d'honnêteté <span class="muted small">(conseillé)</span></h2>
       <label>
-        Tes règles (structure, phrases que tu utilises, faits à mettre en avant)
-        <textarea v-model="kit.rules" rows="12" maxlength="15000" placeholder="Ex. : 5 paragraphes. Paragraphe 2 : toujours LUSIS, le plus long…" />
-        <span class="hint">L'IA les suit en priorité, avant ses règles générales. Ce que tu écris ici compte comme vrai, au même titre que ton CV.</span>
+        Ce qu'il ne faut jamais dire ou mélanger
+        <textarea v-model="kit.rules" rows="8" maxlength="15000" placeholder="Ex. : le serveur Java était celui de Gold Circle, jamais celui de Webtango. Pas de Scrum chez LUSIS." />
+        <span class="hint">Courtes et précises. Ce que tu écris ici compte comme vrai, au même titre que ton CV. Le style et la structure sont gérés par Job Radar.</span>
       </label>
       <label>
         Technos que tu maîtrises vraiment (séparées par des virgules)
         <input v-model="kit.mastered" maxlength="400" placeholder="Vue.js, TypeScript, Java Spring Boot, API REST" />
         <span class="hint">Seules celles-ci peuvent être écrites « je maîtrise ». Pour le reste, la lettre dira « j'ai travaillé avec ». Vide = jamais « maîtrise ».</span>
-      </label>
-      <label>
-        Dernier paragraphe, toujours le même
-        <textarea v-model="kit.closing" rows="3" maxlength="500" placeholder="Je serais heureux d'échanger avec vous… {entreprise}." />
-        <span class="hint">Ajouté tel quel à la fin de chaque lettre ; {entreprise} est remplacé par le nom de l'entreprise.</span>
       </label>
       <label>
         Mots à ne jamais écrire (séparés par des virgules)
@@ -200,6 +212,9 @@ h2 { display: flex; align-items: center; gap: 0.55rem; margin: 0; }
 .step { display: inline-grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 0.8rem; }
 .req { color: var(--low); }
 textarea { font-weight: 400; color: var(--text); line-height: 1.5; }
+.block { padding: 0.8rem; border: 1px solid var(--border); border-radius: 0.6rem; gap: 0.5rem; }
+.block-head { gap: 0.5rem; align-items: center; }
+.block-head input { flex: 1; min-width: 0; font-weight: 600; }
 .choices { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; }
 .hint { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; font-weight: 400; font-size: 0.8rem; color: var(--muted); }
 .hint .num { margin-left: auto; }

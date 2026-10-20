@@ -284,16 +284,17 @@ export type AiAnalysis = {
 export type StoredAiAnalysis = { inputHash: string; model: string; result: AiAnalysis; createdAt: string };
 export type AiStatus = { available: boolean; model: string | null; installed?: boolean; message?: string };
 
-/** CV, lettre exemple et en-tête des lettres de motivation (privé). */
+/** Une petite histoire vraie : l'IA en choisit 2 ou 3 par lettre. */
+export type LetterBlock = { title: string; text: string; useFor: string };
+/** CV, blocs et en-tête des lettres de motivation (privé). */
 export type LetterKit = {
   header: string;
   city: string;
   signature: string;
   cvText: string;
-  letterExample: string;
+  blocks: LetterBlock[];
   rules: string;
   mastered: string;
-  closing: string;
   bannedWords: string;
   pdfName: string;
 };
