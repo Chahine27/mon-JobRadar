@@ -1,6 +1,6 @@
 # Job Radar
 
-Application personnelle de recherche d'emploi, qui tourne entièrement sur mon PC.
+Application personnelle de recherche d'emploi, qui tourne sur un petit serveur AWS (offre gratuite) et s'utilise depuis le navigateur du PC ou du téléphone.
 Elle collecte des offres sur plusieurs sites, les note selon mon profil, me prévient quand une bonne offre arrive et m'aide à postuler.
 
 > **Comment ce projet a été fait.** Job Radar a été conçu et piloté par moi, Chahine Mehadji, et codé par l'IA **Claude Code**.
@@ -40,13 +40,13 @@ Les réponses de l'IA doivent suivre un format imposé (JSON). Elles sont vérif
 
 Je me sers de toutes les fonctions au quotidien, et l'outil fait ce que je voulais : réunir les offres au même endroit, sans doublons, triées selon ce qui me correspond vraiment, et m'éviter de refaire les mêmes recherches chaque jour.
 
-Le projet compte **662 tests automatiques**, tous réussis.
+Le projet compte **860 tests automatiques**, tous réussis.
 
 ## Ce qui ne marche pas encore bien
 
 - **Les lettres de motivation.** Elles étaient faibles avec le petit modèle local : il a fallu ajouter beaucoup de règles de correction, encore en place et fragiles. Claude Sonnet écrit maintenant les lettres, pour quelques centimes ; il reste à voir quelles règles deviennent inutiles.
 - **La génération de CV.** Elle fonctionne, mais elle n'est pas encore assez pratique à utiliser ni optimisée.
-- **Une seule personne.** L'application est prévue pour un seul utilisateur, et le PC doit rester allumé (base de données, collectes, création des PDF).
+- **Une seule personne.** L'application est prévue pour un seul utilisateur.
 
 ## Ce que je compte améliorer
 

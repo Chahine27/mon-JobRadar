@@ -1,7 +1,11 @@
 # Job Radar — mode d'emploi
 
+> **Depuis le 17/10/2026, Job Radar tourne sur le serveur AWS** et se met à jour tout seul à chaque push sur `main`.
+> **Ne pas le lancer aussi sur le PC** (« Lancer Job Radar.cmd », `pnpm dev`) : les collectes et les mails partiraient en double.
+> Ce guide décrit l'ancien fonctionnement sur le PC. Il reste utile pour développer en local, avec une base locale.
+
 Ce guide explique comment démarrer l'appli, l'utiliser au quotidien et réparer les problèmes courants.
-Toutes les commandes se tapent dans un terminal ouvert dans le dossier `monPiston`.
+Toutes les commandes se tapent dans un terminal ouvert dans le dossier `mon JobRadar`.
 
 ## 1. Après un redémarrage du PC
 
