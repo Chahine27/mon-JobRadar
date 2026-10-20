@@ -58,6 +58,8 @@ export async function languageToolProblems(text: string, known: string, fetchFn:
   const out: ReviewProblem[] = [];
   for (const m of matches) {
     const bad = text.slice(m.offset, m.offset + m.length);
+    // « … est ce que je peux vous apporter. » : phrase affirmative, pas de trait d'union (LanguageTool croit à une question).
+    if (/^est ce$/i.test(bad) && !sentenceAround(text, m.offset, m.length).includes("?")) continue;
     if (m.rule.issueType === "misspelling") {
       if (/[\p{Lu}\d]/u.test(bad) || knownLower.includes(bad.toLowerCase())) continue;
     } else if (!/GRAMMAIRE|GRAMMAR|AGREEMENT|CONFUSED|TYPOS/i.test(m.rule.category.id)) continue;
@@ -113,11 +115,14 @@ export async function aiReviewProblems(client: Pick<AiClient, "chatJson">, text:
   const raw = await client.chatJson(AI_REVIEW_SYSTEM, `LETTRE :\n${text}`, AI_REVIEW_JSON_SCHEMA, { temperature: 0 });
   const parsed = AiReviewSchema.safeParse(raw);
   if (!parsed.success) throw new Error("Réponse de l'IA hors format");
-  const flat = (s: string) => s.replace(/[’]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
+  const flat = (s: string) => s.replace(/[’]/g, "'").replace(/\s+/g, " ").trim();
   const letter = flat(text);
-  // Un extrait qui n'est pas dans la lettre est inventé par l'IA : ignoré.
+  // Un extrait qui n'est pas dans la lettre est inventé par l'IA : ignoré. Pour une faute, la casse compte
+  // (l'IA recopie « avec » en minuscule puis signale une majuscule manquante qui n'existe pas).
+  const inLetter = (p: { type: string; extrait: string }) =>
+    p.type === "faute" ? letter.includes(flat(p.extrait)) : letter.toLowerCase().includes(flat(p.extrait).toLowerCase());
   return parsed.data.problemes
-    .filter((p) => p.extrait.trim() && letter.includes(flat(p.extrait)))
+    .filter((p) => p.extrait.trim() && inLetter(p))
     .map((p) => ({ kind: p.type, excerpt: p.extrait.trim(), detail: p.explication.trim() }));
 }
 
@@ -136,9 +141,10 @@ export async function reviewLetter(
 ): Promise<LetterReview> {
   const errors: string[] = [];
   const body = letterBody(text);
+  // L'objet (« Candidature au poste de » + intitulé) est écrit par le code : ce n'est pas un passage recopié.
   const fromCode: ReviewProblem[] = ctx.spontaneous
     ? []
-    : copiedFromJob(body, ctx.jobText, ctx.jobTitle ?? "").map((s) => ({ kind: "fragment" as const, excerpt: s, detail: "Passage recopié de l'annonce : dis-le avec tes mots." }));
+    : copiedFromJob(body.replace(/^Objet\s*:.*$/im, ""), ctx.jobText, ctx.jobTitle ?? "").map((s) => ({ kind: "fragment" as const, excerpt: s, detail: "Passage recopié de l'annonce : dis-le avec tes mots." }));
   const [lt, ai] = await Promise.all([
     languageToolProblems(body, `${ctx.cvText}\n${ctx.jobText}`, deps.fetch).catch((e: unknown) => {
       errors.push(`Fautes non vérifiées (LanguageTool injoignable : ${e instanceof Error ? e.message : String(e)}).`);

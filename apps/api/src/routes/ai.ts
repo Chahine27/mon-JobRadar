@@ -405,7 +405,9 @@ export async function aiRoutes(
 
   /** Relit la lettre enregistrée d'une offre et garde le résultat. */
   async function reviewJobLetter(letter: StoredLetter, jobId: string, ctx: { job: JobRow; kit: LetterKit | null }): Promise<StoredLetter> {
-    const review = await runReview(letter.content, { cvText: ctx.kit?.cvText ?? "", jobText: ctx.job.description, jobTitle: ctx.job.title });
+    // Nom de l'entreprise compris : sinon « emagine » (minuscule) passe pour une faute de frappe.
+    const jobText = `${ctx.job.company ?? ""}\n${ctx.job.description}`;
+    const review = await runReview(letter.content, { cvText: ctx.kit?.cvText ?? "", jobText, jobTitle: ctx.job.title });
     await stores.letters.setReview(jobId, review);
     return { ...letter, review };
   }

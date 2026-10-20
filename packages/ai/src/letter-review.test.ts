@@ -63,6 +63,31 @@ describe("relecture des lettres", () => {
     expect(r.problems).toMatchObject([{ kind: "fragment" }]);
   });
 
+  it("pas de fausse alerte (cas emagine) : objet, « est ce que » affirmatif, nom d'entreprise en minuscule, majuscule inventée par l'IA", async () => {
+    const text = [
+      "Objet : Candidature au poste de Développeur Fullstack Java / React",
+      "Madame, Monsieur,",
+      "Ce mélange de backend et de frontend est ce que je peux vous apporter. Avec Budget Insight, l'application relançait la connexion.",
+      "Je serais heureux d'échanger avec emagine.",
+    ].join("\n\n");
+    const job = "emagine\nCandidature au poste de Développeur Fullstack Java / React chez notre client.";
+    const lt = (async (_u: string, init: { body: URLSearchParams }) => {
+      const t = init.body.get("text")!;
+      const at = (w: string) => ({ offset: t.indexOf(w), length: w.length });
+      return new Response(
+        JSON.stringify({
+          matches: [
+            { ...at("est ce"), message: "Trait d'union.", rule: { id: "EST_CE", issueType: "grammar", category: { id: "CAT_GRAMMAIRE" } } },
+            { ...at("emagine"), message: "Faute de frappe possible.", rule: { id: "FR_SPELLING_RULE", issueType: "misspelling", category: { id: "TYPOS" } } },
+          ],
+        }),
+      );
+    }) as unknown as typeof fetch;
+    const ai = { chatJson: async () => ({ problemes: [{ type: "faute", extrait: "avec Budget Insight, l'application", explication: "Majuscule." }] }) };
+    const r = await reviewLetter(text, { cvText: "", jobText: job, jobTitle: "Développeur Fullstack Java / React (H/F)" }, { ai, fetch: lt });
+    expect(r.problems).toEqual([]);
+  });
+
   it("blocage : rien à signaler = libre ; problème = bloqué sauf validé ; autre texte = à relire", () => {
     const base = { hash: letterHash(LETTER), problems: [], errors: [], validated: false, at: "" };
     expect(reviewBlock(base, LETTER)).toBeNull();
