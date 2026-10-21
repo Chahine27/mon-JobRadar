@@ -160,7 +160,11 @@ let lastRunId: string | null = null;
 let fastPoll: ReturnType<typeof setInterval> | undefined;
 let slowPoll: ReturnType<typeof setInterval> | undefined;
 
+let statusPending = false;
 async function loadStatus() {
+  // Réponse précédente pas encore arrivée : on n'empile pas un appel de plus toutes les 2 s.
+  if (statusPending) return;
+  statusPending = true;
   try {
     const s = await api.collectionStatus();
     const finishedNewRun = s.lastRun && s.lastRun.id !== lastRunId && s.lastRun.status !== "running";
@@ -185,6 +189,8 @@ async function loadStatus() {
     }
   } catch {
     /* serveur momentanément injoignable : on réessaiera */
+  } finally {
+    statusPending = false;
   }
 }
 

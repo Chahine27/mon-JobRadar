@@ -57,11 +57,38 @@ function buildMatchers(skills: Skill[]): Matcher[] {
 
 const DEFAULT_MATCHERS = buildMatchers(SKILLS);
 
+/**
+ * Mémoire des résultats pour les petits textes : le score extrait des dizaines de bouts par offre (« Angular ou React »…),
+ * souvent les mêmes d'une offre à l'autre ; tout relire prenait ~45 % du calcul à froid. Les descriptions entières ne
+ * reviennent pas (score déjà en cache) : pas gardées, le serveur a peu de mémoire.
+ * ponytail: vidée d'un coup à 20 000 entrées, comme le cache des scores.
+ */
+const SHORT_TEXT = 300;
+const extractCache = new Map<string, string[]>();
+const matchersCache = new Map<string, Matcher[]>();
+
 /** Renvoie les identifiants des compétences trouvées dans le texte, sans doublon, dans l'ordre du dictionnaire. */
 export function extractSkills(text: string, extraSkills: Skill[] = []): string[] {
+  const extraKey = extraSkills.map((s) => `${s.id}=${s.aliases.join("|")}`).join(";");
+  const key = `${extraKey}\u0000${text}`;
+  const cached = extractCache.get(key);
+  if (cached) return [...cached];
+  if (extractCache.size >= 20_000) extractCache.clear();
+  let extra = matchersCache.get(extraKey);
+  if (!extra) {
+    extra = buildMatchers(extraSkills);
+    if (matchersCache.size >= 100) matchersCache.clear();
+    matchersCache.set(extraKey, extra);
+  }
+  const ids = extractUncached(text, extra);
+  if (text.length <= SHORT_TEXT) extractCache.set(key, ids);
+  return [...ids];
+}
+
+function extractUncached(text: string, extra: Matcher[]): string[] {
   const lower = normalizeText(text);
   const original = stripAccents(text);
-  const matchers = extraSkills.length ? [...DEFAULT_MATCHERS, ...buildMatchers(extraSkills)] : DEFAULT_MATCHERS;
+  const matchers = extra.length ? [...DEFAULT_MATCHERS, ...extra] : DEFAULT_MATCHERS;
   const found: Matcher[] = [];
   for (const m of matchers) {
     if (found.some((f) => f.skill.id === m.skill.id)) continue;

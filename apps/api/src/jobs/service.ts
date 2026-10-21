@@ -100,10 +100,27 @@ export type Chances = { points: number; tags: string[]; tryable: boolean };
 const TRY_MIN = 35;
 const TRY_MAX = 60;
 
+/**
+ * Formation proposée / ESN lus dans l'annonce, gardés par offre et contenu : la liste les relisait sur chaque description
+ * à chaque requête (~200 ms pour 3 000 offres).
+ * ponytail: vidée d'un coup à 20 000 entrées, comme le cache des scores.
+ */
+const textSignals = new Map<string, { training: boolean; consulting: boolean }>();
+function textSignalsOf(job: JobRow) {
+  const key = `${job.id}:${job.contentHash}:${job.description.length}:${job.company ?? ""}`;
+  let t = textSignals.get(key);
+  if (!t) {
+    t = { training: trainingOffered(job.description), consulting: consultingFirm(`${job.company ?? ""}\n${job.description}`) };
+    if (textSignals.size >= 20_000) textSignals.clear();
+    textSignals.set(key, t);
+  }
+  return t;
+}
+
 export function chancesOf(job: JobRow, s: ScoreResult, v: Verdict, final: number, now = Date.now()): Chances {
   const junior = detectSeniority(job.title) === "junior" || job.experienceMinYrs === 0;
-  const training = trainingOffered(job.description);
-  const consulting = v?.consulting ?? consultingFirm(`${job.company ?? ""}\n${job.description}`);
+  const { training, consulting: inText } = textSignalsOf(job);
+  const consulting = v?.consulting ?? inText;
   const recent = !!job.publishedAt && now - job.publishedAt.getTime() < 48 * 3600_000;
   const signals: Array<[boolean, string, number]> = [
     [junior, "Junior", 3],
@@ -231,7 +248,7 @@ function toSummary(job: JobRow, s: ScoreResult, v: Verdict = null): JobSummary {
     preferredSkills: s.preferredSkills,
     ai: verdict ? { adequation: verdict.adequation, avis: verdict.avis, before: final < s.final ? s.final : null } : null,
     abridged: isAbridged(job),
-    training: trainingOffered(job.description),
+    training: textSignalsOf(job).training,
     chances: chancesOf(job, s, verdict, final),
   };
 }

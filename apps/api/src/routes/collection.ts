@@ -36,11 +36,20 @@ export async function collectionRoutes(app: FastifyInstance, opts: { collector: 
     },
   );
 
+  // Compteur gardé 30 s : l'état est lu toutes les 2 s pendant une collecte, et recalculer tout le flux à chaque fois
+  // (offres neuves = scores pas encore en cache) saturait le serveur (réponses en 2 min, toutes les pages ralenties).
+  let newJobs: { userId: string; at: number; count: Promise<number> } | null = null;
   app.get("/api/collection/status", async (request) => {
     const status = await opts.collector.status();
-    if (!opts.jobs) return status;
-    // Nouvelles offres de ton flux, pas toutes celles en base (hors zone, senior… masquées : 1 498 au lieu de ~100).
-    const feed = await opts.jobs.list(request.userId!, { status: "NEW", includeHidden: false, minScore: 0, sort: "score" });
-    return { ...status, newJobs: feed.length };
+    const jobs = opts.jobs;
+    if (!jobs) return status;
+    const userId = request.userId!;
+    if (!newJobs || newJobs.userId !== userId || Date.now() - newJobs.at > 30_000) {
+      // Nouvelles offres de ton flux, pas toutes celles en base (hors zone, senior… masquées : 1 498 au lieu de ~100).
+      const count = jobs.list(userId, { status: "NEW", includeHidden: false, minScore: 0, sort: "score" }).then((f) => f.length);
+      newJobs = { userId, at: Date.now(), count };
+      count.catch(() => (newJobs = null));
+    }
+    return { ...status, newJobs: await newJobs.count };
   });
 }
