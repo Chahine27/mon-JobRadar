@@ -1,6 +1,6 @@
 import { type ApplyChannel, type ApplyCv, JOB_STATUSES, type JobStatus, type Profile } from "@job-radar/shared";
 import { similarOffer } from "@job-radar/job-normalizer";
-import { DEFAULT_RULES, hashProfile, scoreJob, scoringInputFromJob, type ScoreResult, type ScoringRules } from "@job-radar/scoring";
+import { DEFAULT_RULES, consultingFirm, detectSeniority, hashProfile, scoreJob, scoringInputFromJob, trainingOffered, type ScoreResult, type ScoringRules } from "@job-radar/scoring";
 import { distanceKm } from "../routes/leads";
 import { AI_SCORE_CAPS, type Adequation, type AiVerdict, analysisFitsJob, isAbridged, readVerdict } from "../ai-context";
 import { type JobEdits, type JobRow, type Stores, yearsText } from "../stores";
@@ -13,11 +13,11 @@ export type JobFilters = {
   /** Une seule rubrique du flux ; absent = toutes. */
   zone?: Zone | undefined;
   minScore: number;
-  /** "active" = tout sauf IGNORED / REJECTED / EXPIRED. */
-  status: JobStatus | "active" | "all";
+  /** "active" = tout sauf IGNORED / REJECTED / EXPIRED ; "try" = les actives « À tenter » (cf. Chances). */
+  status: JobStatus | "active" | "all" | "try";
   includeHidden: boolean;
   q?: string | undefined;
-  sort: "score" | "date";
+  sort: "score" | "date" | "chances";
   /** Seulement les offres trouvées par cette source (une offre vue sur 2 sources apparaît dans les 2). */
   source?: string | undefined;
   /** Seulement ce type de contrat (CDI, CDD…) ; « unknown » = contrat non précisé. */
@@ -48,6 +48,10 @@ export type JobSummary = {
   preferredSkills: string[];
   /** La source ne donne qu'un extrait (Adzuna, Jooble) : score approximatif, pas vérifié par l'IA. */
   abridged: boolean;
+  /** L'annonce propose une formation (« formation interne », « vous serez formé »…). */
+  training: boolean;
+  /** Tes chances (sans IA), à côté de la note de compatibilité qu'elles ne changent pas. */
+  chances: Chances;
   /** Avis de l'IA locale (analyse à jour) ; `before` = score avant correction quand l'IA l'a baissé. */
   ai: { adequation: Adequation; avis: string; before: number | null } | null;
 };
@@ -86,6 +90,35 @@ export type AppliedTwin = { id: string; title: string; company: string | null; c
 
 /** base : note technique ; adjust : bonus/malus en points ; cap : plafond (valeur atteinte) ; total : score final. */
 export type ScoreStep = { kind: "base" | "adjust" | "cap" | "total"; label: string; value: number };
+
+/**
+ * Chances d'un junior, sans IA : poste junior / débutant accepté, formation proposée, ESN ou cabinet, offre de moins de
+ * 48 h, techno manquante « à apprendre ». `tryable` : offre de 35 à 59 % jouable (junior ou formation), onglet « À tenter ».
+ */
+export type Chances = { points: number; tags: string[]; tryable: boolean };
+
+const TRY_MIN = 35;
+const TRY_MAX = 60;
+
+export function chancesOf(job: JobRow, s: ScoreResult, v: Verdict, final: number, now = Date.now()): Chances {
+  const junior = detectSeniority(job.title) === "junior" || job.experienceMinYrs === 0;
+  const training = trainingOffered(job.description);
+  const consulting = v?.consulting ?? consultingFirm(`${job.company ?? ""}\n${job.description}`);
+  const recent = !!job.publishedAt && now - job.publishedAt.getTime() < 48 * 3600_000;
+  const signals: Array<[boolean, string, number]> = [
+    [junior, "Junior", 3],
+    [training, "Formation proposée", 3],
+    [consulting, "ESN ou cabinet", 1],
+    [recent, "Publiée il y a moins de 48 h", 1],
+    [s.toLearn.length > 0, `À apprendre : ${s.toLearn.join(", ")}`, 1],
+  ];
+  const on = signals.filter(([ok]) => ok);
+  return {
+    points: on.reduce((a, [, , p]) => a + p, 0),
+    tags: on.map(([, tag]) => tag),
+    tryable: !s.hidden && final >= TRY_MIN && final < TRY_MAX && (junior || training),
+  };
+}
 
 const INACTIVE: JobStatus[] =["IGNORED", "REJECTED", "EXPIRED"];
 /** Hors du flux « Actives » : les offres inactives et celles où tu as déjà postulé (page « Candidatures »). */
@@ -195,6 +228,8 @@ function toSummary(job: JobRow, s: ScoreResult, v: Verdict = null): JobSummary {
     preferredSkills: s.preferredSkills,
     ai: verdict ? { adequation: verdict.adequation, avis: verdict.avis, before: final < s.final ? s.final : null } : null,
     abridged: isAbridged(job),
+    training: trainingOffered(job.description),
+    chances: chancesOf(job, s, verdict, final),
   };
 }
 
@@ -263,7 +298,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       const summarize = await summarizer(userId);
       const q = f.q?.trim().toLowerCase();
       // Statut filtré en base : seulement les offres demandées sont lues (pas les expirées ou ignorées pour le flux).
-      const statuses = f.status === "all" ? undefined : f.status === "active" ? JOB_STATUSES.filter((s) => !OUT_OF_FEED.includes(s)) : [f.status];
+      const statuses = f.status === "all" ? undefined : f.status === "active" || f.status === "try" ? JOB_STATUSES.filter((s) => !OUT_OF_FEED.includes(s)) : [f.status];
       const items = (await stores.jobs.list(statuses))
         .filter((j) => !q || `${j.title} ${j.company ?? ""} ${j.city ?? ""}`.toLowerCase().includes(q))
         .filter((j) => !f.source || j.sources.some((s) => s.source === f.source))
@@ -271,6 +306,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
         .filter((s) => !f.contract || (s.contractType ?? "unknown") === f.contract)
         .filter((s) => !f.zone || s.zone === f.zone)
         .filter((s) => s.score.final >= f.minScore)
+        .filter((s) => f.status !== "try" || s.chances.tryable)
         // Une offre ajoutée à la main n'est jamais masquée : tu l'as choisie. Sauf hors de ta zone :
         // l'extension sert souvent à évaluer une offre sans vouloir la garder dans le flux.
         .filter((s) => f.includeHidden || !s.score.hidden || (isManual(s) && s.score.breakdown.location > 15));
@@ -279,7 +315,9 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       items.sort((a, b) =>
         f.sort === "date"
           ? date(b) - date(a)
-          : b.score.final - a.score.final || b.preferredSkills.length - a.preferredSkills.length || date(b) - date(a),
+          : f.sort === "chances"
+            ? b.chances.points - a.chances.points || b.score.final - a.score.final || date(b) - date(a)
+            : b.score.final - a.score.final || b.preferredSkills.length - a.preferredSkills.length || date(b) - date(a),
       );
       return items;
     },

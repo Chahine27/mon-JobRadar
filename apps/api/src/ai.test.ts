@@ -1,6 +1,7 @@
 import { DEFAULT_PROFILE } from "@job-radar/shared";
+import { DEFAULT_RULES, scoreJob, scoringInputFromJob } from "@job-radar/scoring";
 import { describe, expect, it } from "vitest";
-import { withAiInfo } from "./jobs/service";
+import { chancesOf, withAiInfo } from "./jobs/service";
 import { createTestApp, login } from "./test-helpers";
 
 /** Seuil du profil (« Analyse IA à partir de ») : c'est lui qui décide des offres vérifiées. */
@@ -373,5 +374,32 @@ describe("offre sans description (ex. LinkedIn via JobScraper sans le détail)",
     expect(res.json().error).toBe("NO_DESCRIPTION");
     expect(aiCalls).toHaveLength(1);
     expect((await req("GET", "/api/jobs/j-vue")).json().abridged).toBe(true); // « Compléter l'annonce » proposé
+  });
+});
+
+describe("chances d'un junior (sans IA)", () => {
+  const now = new Date("2026-10-21T12:00:00Z").getTime();
+  it("signaux, points et onglet « À tenter » (35 à 59 %, junior ou formation)", async () => {
+    const { jobs } = await setup();
+    const base = structuredClone(jobs.get("j-vue")!);
+    const job = {
+      ...base,
+      title: "Développeur Java / Angular junior",
+      company: "Acme Conseil",
+      description: "Pour l'un de nos clients, Java et Angular. Formation Angular assurée.",
+      experienceMinYrs: null,
+      publishedAt: new Date(now - 3600_000),
+    };
+    const s = scoreJob(scoringInputFromJob(job), { ...DEFAULT_PROFILE, skills: ["Java"] }, DEFAULT_RULES);
+    const c = chancesOf(job, s, null, 50, now);
+    expect(c.tags).toEqual(["Junior", "Formation proposée", "ESN ou cabinet", "Publiée il y a moins de 48 h", "À apprendre : Angular"]);
+    expect(c.points).toBe(9);
+    expect(c.tryable).toBe(true);
+    expect(chancesOf(job, s, null, 60, now).tryable).toBe(false); // déjà au-dessus : dans le flux normal
+    expect(chancesOf(job, s, null, 34, now).tryable).toBe(false);
+    // Ni junior ni formation : pas « À tenter », même entre 35 et 59 %.
+    const plain = { ...job, title: "Développeur Java", description: "Java.", publishedAt: new Date(now - 72 * 3600_000) };
+    const p = chancesOf(plain, scoreJob(scoringInputFromJob(plain), DEFAULT_PROFILE, DEFAULT_RULES), { adequation: "moyenne", avis: "", required: [], bonus: [], experience: null, contract: null, noContract: false, salary: null, address: null, consulting: false }, 50, now);
+    expect(p).toEqual({ points: 0, tags: [], tryable: false });
   });
 });

@@ -79,10 +79,10 @@ async function uploadPdf(url: string, file: File): Promise<{ cvPdfName: string }
 
 export type JobQuery = {
   minScore?: number;
-  status?: JobStatus | "active" | "all";
+  status?: JobStatus | "active" | "all" | "try";
   includeHidden?: boolean;
   q?: string;
-  sort?: "score" | "date";
+  sort?: "score" | "date" | "chances";
   /** Une seule source (vide = toutes). */
   source?: string;
   /** Rubrique du flux : dans ta zone, full remote, lieu non précisé. */

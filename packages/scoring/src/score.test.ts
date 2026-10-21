@@ -23,7 +23,7 @@ describe(`scores figés — règles ${DEFAULT_RULES.version}`, () => {
   });
 
   it("version des règles attendue", () => {
-    expect(DEFAULT_RULES.version).toBe("2026-10-21.2");
+    expect(DEFAULT_RULES.version).toBe("2026-10-21.3");
   });
 });
 
@@ -192,22 +192,22 @@ describe("règles détaillées", () => {
     expect(plain.final).toBeLessThanOrEqual(DEFAULT_RULES.weakFitCap);
   });
 
-  it("au plus 2 technos à apprendre comptées à moitié, les plus importantes ; les suivantes manquent", () => {
+  it("au plus 3 technos à apprendre comptées à moitié, les plus importantes ; les suivantes manquent", () => {
     const java = { ...DEFAULT_PROFILE, skills: ["Java"] };
     const r = score(
       {
         ...PERFECT,
-        title: "Développeur Java EE",
+        title: "Développeur Java",
         description: "Formation interne assurée.",
         experienceMinYears: 2,
-        aiSkills: { required: ["Java", "Struts", "Hibernate", "Oracle", "Tomcat", "JSP", "jQuery"], bonus: [] },
+        aiSkills: { required: ["Java", "Angular", "Go", "Kotlin", "Rust"], bonus: [] },
       },
       java,
     );
-    expect(r.toLearn).toHaveLength(2);
-    expect(r.warnings.some((w) => w.startsWith("Trop de technos à apprendre (2 au plus comptées à moitié), manquantes :"))).toBe(true);
-    // Java du titre (× 3) + 2 technos à apprendre (2 × 0,5) sur 9 ; sans limite : 6 / 9 = 67 %.
-    expect(r.breakdown.technical).toBe(44);
+    expect(r.toLearn).toEqual(["Angular", "Go", "Kotlin"]);
+    expect(r.warnings).toContain("Trop de technos à apprendre (3 au plus comptées à moitié), manquantes : Rust");
+    // Java du titre (× 3) + 3 technos à apprendre (3 × 0,5) sur 7 ; sans limite : 5 / 7 = 71 %.
+    expect(r.breakdown.technical).toBe(64);
   });
 
   it("ta liste « je peux l'apprendre vite » : comptée à moitié sans formation écrite, sauf maîtrise exigée", () => {
@@ -460,11 +460,22 @@ describe("critère Technique calculé sur les compétences lues par l'IA", () =>
     const profile: Profile = { ...DEFAULT_PROFILE, skills: ["Java", "Spring Boot", "Vue.js"] };
     const input = { ...PERFECT, aiSkills: { required: ["Java 21", "Spring Boot", "Kafka"], bonus: ["AWS", "Vue.js"] } };
     const s = scoreJob(input, profile);
-    // (2 exigées + ½ × 1 plus) / (3 + ½ × 2) = 2,5 / 4 = 63 %
-    expect(s.breakdown.technical).toBe(63);
+    // Kafka et AWS sont des outils : sans effet quand l'offre a des langages / frameworks. (2 exigées + ½ plus) / 2,5 = 100 %
+    expect(s.breakdown.technical).toBe(100);
     expect(s.matchedSkills).toEqual(expect.arrayContaining(["Java", "Spring Boot", "Vue.js"]));
     expect(s.missingSkills).toEqual(expect.arrayContaining(["Kafka", "AWS"]));
     expect(s.reasons).toContain("Compétences lues par l'IA (« plus » comptés à moitié)");
+  });
+
+  it("mots qui ne sont pas des technos ignorés ; synonymes (« Bases de données » = SQL, « REST APIs » = API REST)", () => {
+    const profile: Profile = { ...DEFAULT_PROFILE, skills: ["Java", "SQL", "API REST"] };
+    const s = scoreJob(
+      { ...PERFECT, title: "Développeur Java", aiSkills: { required: ["Java", "Défense", "Cycle en V", "Anglais professionnel", "Bases de données"], bonus: ["REST APIs", "RSE"] } },
+      profile,
+    );
+    expect(s.breakdown.technical).toBe(100);
+    expect(s.missingSkills).toEqual([]);
+    expect(s.matchedSkills).toEqual(["Java", "SQL", "API REST"]);
   });
 
   it("sans liste de l'IA : calcul habituel sur le texte", () => {

@@ -50,12 +50,12 @@ export type ScoringRules = {
 };
 
 export const DEFAULT_RULES: ScoringRules = {
-  version: "2026-10-21.2",
+  version: "2026-10-21.3",
   neutral: 60,
   technicalPoints: 80,
   titleWeight: 3,
   learnableCredit: 0.5,
-  maxLearnable: 2,
+  maxLearnable: 3,
   projectCredit: 0.5,
   projectOnlyMainCap: 50,
   fluentEnglishPoints: -10,

@@ -13,13 +13,13 @@ const TRAVEL_WAIT_MS = 400;
 
 const ListQuery = z.object({
   minScore: z.coerce.number().int().min(0).max(100).default(0),
-  status: z.enum([...JOB_STATUSES, "active", "all"]).default("active"),
+  status: z.enum([...JOB_STATUSES, "active", "all", "try"]).default("active"),
   includeHidden: z
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
   q: z.string().max(200).optional(),
-  sort: z.enum(["score", "date"]).default("score"),
+  sort: z.enum(["score", "date", "chances"]).default("score"),
   /** Rubrique du flux : « local » (dans ta zone), « remote » (full remote), « unknown » (lieu non précisé). */
   zone: z.enum(["local", "remote", "unknown"]).optional(),
   /** Seulement les offres de cette source (« france-travail », « manual »…) ; absent = toutes. */

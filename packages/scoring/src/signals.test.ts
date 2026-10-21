@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_PROFILE } from "@job-radar/shared";
 import { getSkill } from "@job-radar/skills";
 import { hashProfile } from "./profile-hash";
-import { contractFromText, contractFromTitle, contractOfJob, detectNonDevRole, detectRemote, detectSeniority, looksLikeItTitle, normalizeContract, masteryRequired, parseExperienceYears, trainingOffered
+import { consultingFirm, contractFromText, contractFromTitle, contractOfJob, detectNonDevRole, detectRemote, detectSeniority, looksLikeItTitle, normalizeContract, masteryRequired, parseExperienceYears, trainingOffered
 } from "./signals";
 
 describe("detectSeniority", () => {
@@ -230,4 +230,13 @@ describe("masteryRequired : des années ne comptent que reliées à la techno", 
     ["Angular indispensable.", "maîtrise exigée"],
     ["Angular serait un plus.", null],
   ])("« %s » → %s", (text, expected) => expect(masteryRequired(text, angular)).toBe(expected));
+});
+
+describe("consultingFirm", () => {
+  it.each([
+    ["Pour l'un de nos clients grands comptes, nous recherchons…", true],
+    ["Vous interviendrez en mission chez nos clients.", true],
+    ["Rejoignez notre ESN à taille humaine.", true],
+    ["Nous développons notre propre produit SaaS.", false],
+  ])("« %s » → %s", (text, expected) => expect(consultingFirm(text)).toBe(expected));
 });

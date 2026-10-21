@@ -126,6 +126,9 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
   /** Compétences exigées : celles de l'IA, sinon celles du titre et du texte hors « un plus ». */
   let requiredIds: string[];
   if (useAi) {
+    // Seulement des technos : celles du dictionnaire ou de ton profil. Les secteurs, méthodes, langues et qualités lus par
+    // l'IA (« Défense », « Cycle en V », « Anglais professionnel ») restent affichés dans son analyse, pas dans la note.
+    const known = (id: string) => !!getSkill(id) || customSkills.some((c) => c.id === id);
     const idsOf = (labels: string[]) => [
       ...new Set(
         labels.flatMap((l) => {
@@ -133,10 +136,13 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
           return ex.length ? ex : [resolveSkill(l).id];
         }),
       ),
-    ];
+    ].filter(known);
     const req = idsOf(ai.required);
     const bonus = idsOf(ai.bonus).filter((id) => !req.includes(id));
-    items = [...req.map((id) => ({ id, weight: titleWeight(id) })), ...bonus.map((id) => ({ id, weight: 0.5 }))];
+    const all = [...req.map((id) => ({ id, weight: titleWeight(id) })), ...bonus.map((id) => ({ id, weight: 0.5 }))];
+    // Comme sans l'IA : les outils (Kubernetes, AWS, Kafka…) ne départagent pas, sauf s'il n'y a qu'eux.
+    const core = all.filter((it) => skillOf(it.id)?.core ?? true);
+    items = core.length ? core : all;
     found = [...req, ...bonus];
     aiLabels = [...ai.required, ...ai.bonus];
     requiredIds = req;

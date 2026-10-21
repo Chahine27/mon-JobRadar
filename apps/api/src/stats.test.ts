@@ -4,7 +4,7 @@ import { createTestApp, login } from "./test-helpers";
 
 const now = new Date("2026-10-10T12:00:00Z");
 const daysAgo = (d: number) => new Date(now.getTime() - d * 86_400_000);
-const job = (matched: string[], missing: string[], age: number, o: { exp?: number; source?: string; score?: number; hidden?: boolean } = {}) => ({
+const job = (matched: string[], missing: string[], age: number, o: { exp?: number; source?: string; score?: number; hidden?: boolean; training?: boolean } = {}) => ({
   matchedSkills: matched,
   missingSkills: missing,
   publishedAt: daysAgo(age),
@@ -12,6 +12,7 @@ const job = (matched: string[], missing: string[], age: number, o: { exp?: numbe
   experienceMinYrs: o.exp ?? null,
   sources: [{ source: o.source ?? "france-travail", url: "https://example.com" }],
   score: { final: o.score ?? 50, hidden: o.hidden ?? false },
+  training: o.training ?? false,
 });
 const opts = { experienceMax: 2, threshold: 70 };
 
@@ -21,7 +22,7 @@ describe("skillStats", () => {
       [
         job(["Vue.js", "TypeScript"], [], 1),
         job(["Java"], ["Angular", "Docker"], 2),
-        job(["Java"], ["Angular"], 3),
+        job(["Java"], ["Angular"], 3, { training: true }),
         job(["Vue.js"], ["React", "Angular"], 4),
         job([], [], 5), // pas un poste de développeur
       ],
@@ -33,7 +34,7 @@ describe("skillStats", () => {
     expect(s.skills[0]).toMatchObject({ label: "Angular", offers: 3, share: 75, owned: false, core: true, trend: null });
     expect(s.skills.find((k) => k.label === "Docker")).toMatchObject({ core: false });
     // Docker est un outil : seul Angular manque vraiment dans les offres Java.
-    expect(s.unlock).toEqual([{ label: "Angular", offers: 2 }]);
+    expect(s.unlock).toEqual([{ label: "Angular", offers: 2, training: 1 }]);
   });
 
   it("évolution : 30 derniers jours contre les 30 d'avant, seulement avec assez d'offres", () => {

@@ -120,6 +120,7 @@ export class FranceTravailSource implements JobSource {
       const q = new URLSearchParams({ motsCles: params.keywords, range: `${start}-${end}`, sort: "1" });
       if (params.department) q.set("departement", params.department);
       if (params.publishedSinceDays) q.set("publieeDepuis", String(params.publishedSinceDays));
+      if (params.beginnersOnly) q.set("experienceExigence", "D");
 
       const res = await this.get(`${this.cfg.searchUrl}?${q}`);
       if (res.status === 204) break; // 204 = aucun résultat, pas une erreur

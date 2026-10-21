@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@job-radar/db";
 import { normalize } from "@job-radar/job-normalizer";
 import type { Profile } from "@job-radar/shared";
-import { type JobSource, type RawJob, type SearchParams, SourceUnavailableError } from "@job-radar/source-connectors";
+import { FT_SOURCE, type JobSource, type RawJob, type SearchParams, SourceUnavailableError } from "@job-radar/source-connectors";
 import { ingestJob } from "./ingest";
 import { minIntervalFor } from "./quota";
 import { computeNextRunAt } from "./schedule";
@@ -65,6 +65,11 @@ export function buildQueries(profile: Profile, publishedSinceDays: SearchParams[
   return queries;
 }
 
+/** France Travail, en plus : « Développeur » limité aux offres « débutant accepté » (filtre officiel), sur chaque zone. */
+export function beginnerQueries(profile: Profile, publishedSinceDays: SearchParams["publishedSinceDays"], maxResults: number): SearchParams[] {
+  return buildQueries({ ...profile, searches: ["Développeur"] }, publishedSinceDays, maxResults).map((q) => ({ ...q, beginnersOnly: true }));
+}
+
 /**
  * Une collecte complète : chaque source est indépendante (une source en erreur n'arrête pas les autres),
  * chaque recherche aussi. Tout est tracé dans CollectionRun / SourceRun.
@@ -121,13 +126,13 @@ export async function collectOnce(opts: CollectOptions): Promise<CollectReport> 
       }
     }
 
-    const perQuery = source.fetchAll || source.searchAll ? [] : queries;
+    const perQuery = source.fetchAll || source.searchAll ? [] : source.name === FT_SOURCE ? [...queries, ...beginnerQueries(profile, opts.publishedSinceDays ?? 7, opts.maxResultsPerSearch ?? 300)] : queries;
     opts.onProgress?.(source.name, { done: 0, total: perQuery.length, found: raws.size });
     for (const [i, q] of perQuery.entries()) {
       try {
         const found = await source.search(q);
         for (const r of found) raws.set(r.sourceJobId, r);
-        log(`  ${source.name} « ${q.keywords} » (${q.department ?? "toute la France"}) : ${found.length} offre(s)`);
+        log(`  ${source.name} « ${q.keywords} »${q.beginnersOnly ? " débutants acceptés" : ""} (${q.department ?? "toute la France"}) : ${found.length} offre(s)`);
       } catch (err) {
         if (err instanceof SourceUnavailableError) {
           sr.status = "SOURCE_UNAVAILABLE";

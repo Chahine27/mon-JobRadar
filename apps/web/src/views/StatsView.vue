@@ -120,6 +120,7 @@ const years = (n: number) => `${n} an${n > 1 ? "s" : ""}`;
               <tr v-for="u in stats.unlock" :key="u.label">
                 <td>{{ u.label }}</td>
                 <td class="num">{{ u.offers }} offre{{ u.offers > 1 ? "s" : "" }}</td>
+                <td class="muted small">{{ u.training ? `dont ${u.training} avec formation proposée` : "" }}</td>
               </tr>
             </tbody>
           </table>

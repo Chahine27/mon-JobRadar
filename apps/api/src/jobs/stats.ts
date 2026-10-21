@@ -35,7 +35,7 @@ export type SkillStats = {
   fullMatch: number;
   skills: SkillStat[];
   /** Compétences absentes de ton profil, seule techno principale manquante d'une offre : ce qui en débloquerait le plus. */
-  unlock: Array<{ label: string; offers: number }>;
+  unlock: Array<{ label: string; offers: number; training: number }>;
   /** Expérience minimum demandée : tranches, et part accessible avec ton maximum (`experienceMax` du profil). */
   experience: {
     max: number;
@@ -50,6 +50,8 @@ export type SkillStats = {
 };
 
 type Input = Pick<JobSummary, "matchedSkills" | "missingSkills" | "publishedAt" | "firstSeenAt" | "experienceMinYrs" | "sources"> & {
+  /** L'annonce propose une formation. */
+  training?: boolean;
   score: Pick<JobSummary["score"], "final" | "hidden">;
 };
 
@@ -71,7 +73,7 @@ export function skillStats(jobs: Input[], opts: { experienceMax: number; thresho
   const accessible = (j: Input) => j.experienceMinYrs !== null && j.experienceMinYrs <= opts.experienceMax;
 
   const by = new Map<string, { offers: number; owned: boolean; recent: number; previous: number; known: number; accessible: number }>();
-  const unlock = new Map<string, number>();
+  const unlock = new Map<string, { offers: number; training: number }>();
   let recentOffers = 0;
   let previousOffers = 0;
   let fullMatch = 0;
@@ -94,7 +96,12 @@ export function skillStats(jobs: Input[], opts: { experienceMax: number; thresho
     }
     const missingCore = [...new Set(j.missingSkills.filter(isCore))];
     if (missingCore.length === 0) fullMatch++;
-    else if (missingCore.length === 1 && j.matchedSkills.some(isCore)) unlock.set(missingCore[0]!, (unlock.get(missingCore[0]!) ?? 0) + 1);
+    else if (missingCore.length === 1 && j.matchedSkills.some(isCore)) {
+      const u = unlock.get(missingCore[0]!) ?? { offers: 0, training: 0 };
+      u.offers++;
+      if (j.training) u.training++;
+      unlock.set(missingCore[0]!, u);
+    }
   }
 
   const trendOk = recentOffers >= MIN_OFFERS_FOR_TREND && previousOffers >= MIN_OFFERS_FOR_TREND;
@@ -150,7 +157,7 @@ export function skillStats(jobs: Input[], opts: { experienceMax: number; thresho
     fullMatch: pct(fullMatch, items.length),
     skills,
     unlock: [...unlock]
-      .map(([label, offers]) => ({ label, offers }))
+      .map(([label, u]) => ({ label, ...u }))
       .sort((a, b) => b.offers - a.offers)
       .slice(0, 5),
     experience: {

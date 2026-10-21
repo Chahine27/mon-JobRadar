@@ -10,6 +10,8 @@ export type SearchParams = {
   publishedSinceDays?: 1 | 3 | 7 | 14 | 31;
   /** Nombre max d'offres à récupérer pour cette recherche. */
   maxResults?: number;
+  /** Seulement les offres « débutant accepté » (France Travail : filtre officiel experienceExigence=D). */
+  beginnersOnly?: boolean;
 };
 
 /** Offre brute, telle que renvoyée par la source (jamais modifiée). */

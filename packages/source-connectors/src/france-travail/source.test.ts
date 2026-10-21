@@ -65,7 +65,16 @@ describe("FranceTravailSource", () => {
     expect(search.searchParams.get("departement")).toBe("60");
     expect(search.searchParams.get("publieeDepuis")).toBe("7");
     expect(search.searchParams.get("range")).toBe("0-149");
+    expect(search.searchParams.has("experienceExigence")).toBe(false);
     expect((calls[1]!.init!.headers as Record<string, string>).Authorization).toBe("Bearer tok-1");
+  });
+
+  it("débutants acceptés : filtre officiel experienceExigence=D", async () => {
+    const { fetch, calls } = fakeFetch((url) =>
+      url.hostname.startsWith("entreprise") ? tokenOk() : json({ resultats: offers(1) }, 206, { "content-range": "offres 0-0/1" }),
+    );
+    await makeSource(fetch).search({ keywords: "Développeur", department: "75", beginnersOnly: true });
+    expect(new URL(calls[1]!.url).searchParams.get("experienceExigence")).toBe("D");
   });
 
   it("réutilise le jeton entre deux recherches", async () => {

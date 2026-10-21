@@ -269,8 +269,12 @@ const contractTabs = computed(() => [
   { value: "unknown", label: "Non précisé" },
 ]);
 
+/** Signaux de chances montrés sur la carte d'une offre. */
+const CARD_TAGS = ["Formation proposée", "Junior", "Publiée il y a moins de 48 h"];
+
 const STATUS_TABS:Array<{ value: NonNullable<JobQuery["status"]>; label: string }> = [
   { value: "active", label: "Actives" },
+  { value: "try", label: "À tenter" },
   { value: "NEW", label: "Nouvelles" },
   { value: "SAVED", label: "Sauvegardées" },
   { value: "IGNORED", label: "Ignorées" },
@@ -426,6 +430,7 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
           <select v-model="filters.sort">
             <option value="score">Compatibilité</option>
             <option value="date">Plus récentes</option>
+            <option value="chances">Mes chances</option>
           </select>
         </label>
         <label class="switch"><input v-model="filters.includeHidden" type="checkbox" /> Offres masquées (contrat hors profil, senior…)</label>
@@ -474,6 +479,7 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
             <span v-if="job.status === 'NEW'" class="chip new">Nouvelle</span>
             <span v-else-if="job.status !== 'SEEN'" class="chip">{{ STATUS_LABELS[job.status] }}</span>
             <span v-if="job.score.hidden" class="chip warn">Masquée : {{ job.score.hiddenReason }}</span>
+            <span v-for="t in job.chances.tags.filter((x) => CARD_TAGS.includes(x))" :key="t" class="chip good">{{ t }}</span>
             <span
               v-if="job.abridged"
               class="chip"

@@ -313,5 +313,10 @@ export function fluentEnglishRequired(description: string): boolean {
   );
 }
 
+/** ESN, cabinet ou mission chez un client (« pour l'un de nos clients », « en mission chez ») : une porte d'entrée pour un junior. */
+export function consultingFirm(text: string): boolean {
+  return /\b(pour (le compte )?(de )?(l'un de |l'une de |un de |une de )?nos clients|en mission chez|missions? chez (nos|des|un|le) clients?|esn|ssii|societe de conseil|cabinet de conseil)\b/.test(normalizeText(text));
+}
+
 /** Le titre vise l'IA / les LLM / le machine learning (domaine à part, au-delà de la techno). */
 export const AI_DOMAIN = /\b(ai|ia|llms?|genai|gen ai|machine learning|ml|mlops|deep learning|data scien\w*|intelligence artificielle|nlp)\b/;

@@ -50,6 +50,10 @@ export type JobSummary = {
   preferredSkills: string[];
   /** La source ne donne qu'un extrait (Adzuna, Jooble) : score approximatif, pas vérifié par l'IA. */
   abridged: boolean;
+  /** L'annonce propose une formation. */
+  training: boolean;
+  /** Tes chances (sans IA) : signaux affichés en étiquettes, `tryable` = onglet « À tenter ». */
+  chances: { points: number; tags: string[]; tryable: boolean };
   /** Avis de l'IA locale ; `before` = score avant correction quand l'IA l'a baissé. */
   ai: { adequation: "forte" | "moyenne" | "faible"; avis: string; before: number | null } | null;
 };
@@ -443,7 +447,7 @@ export type SkillStats = {
   /** Part des offres (%) où tu as tous les langages et frameworks demandés. */
   fullMatch: number;
   skills: Array<{ label: string; offers: number; share: number; owned: boolean; core: boolean; trend: number | null; accessible: number | null }>;
-  unlock: Array<{ label: string; offers: number }>;
+  unlock: Array<{ label: string; offers: number; training: number }>;
   experience: { max: number; known: number; accessible: number; ranges: Array<{ label: string; offers: number; share: number }> };
   together: Array<{ label: string; offers: number; with: Array<{ label: string; share: number }> }>;
   sources: Array<{ source: string; offers: number; good: number }>;
