@@ -9,6 +9,7 @@ import {
   detectSeniority,
   detectSideRole,
   fluentEnglishRequired,
+  foreignLanguageRequired,
   looksLikeItTitle,
   masteryRequired,
   normalizeContract,
@@ -215,6 +216,11 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
     }
   }
   part.score = clamp((100 * got) / total);
+  // Seulement des outils comptés (SQL, Docker…), aucun langage ni framework : la note ne dit pas grand-chose.
+  if (!items.some((it) => skillOf(it.id)?.core ?? true) && part.score > rules.noCoreTechCap) {
+    part.score = rules.noCoreTechCap;
+    part.warnings.push(`Note peu fiable : aucune techno principale lue (technique plafonnée à ${rules.noCoreTechCap} %)`);
+  }
 
   const main = items.filter((it) => inTitle.has(it.id)).map((it) => it.id);
   // Techno principale (celle du titre, sinon les langages / frameworks exigés) vue seulement en projets : plafond.
@@ -489,6 +495,9 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
   if (offTopic) cap(rules.offTopicCap, "aucune techno et titre sans rapport avec l'informatique");
   if (tech.product) cap(profile.productExperienceCap ?? 40, "expérience exigée sur un produit que tu n'as pas");
   if (tech.blocking.length) cap(rules.missingMainTechCap, `techno principale ou exigée que tu n'as pas : ${tech.blocking.join(", ")}`);
+  // Langue étrangère exigée (autre que l'anglais) : aussi bloquant qu'une techno principale absente.
+  const language = foreignLanguageRequired(input.description, input.aiSkills?.required ?? []);
+  if (language) cap(rules.missingMainTechCap, `${language} exigé`);
   // Adéquation faible vérifiée par le code (le petit modèle d'IA s'y trompe) : compétences exigées manquantes, domaine IA.
   const weakFit: string[] = [];
   if (tech.missingRequired.length >= 2) weakFit.push(`compétences exigées manquantes : ${tech.missingRequired.join(", ")}`);
@@ -519,6 +528,7 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
   const all = Object.values(parts);
   const warnings = all.flatMap((p) => p.warnings);
   if (english) warnings.push("Anglais courant exigé");
+  if (language) warnings.push(`Langue exigée : ${language}`);
   if (capLabel) warnings.unshift(`Score plafonné à ${final} % : ${capLabel}`);
   return {
     final,

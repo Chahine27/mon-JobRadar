@@ -30,6 +30,8 @@ export type ScoringRules = {
    * (Angular, UiPath, Go…) : sous le seuil d'analyse IA par défaut. Mesuré sur 520 avis de l'IA : 0 « forte » sur 23.
    */
   missingMainTechCap: number;
+  /** Note technique maximum quand aucun langage ni framework n'est compté (seulement des outils comme SQL) : note peu fiable. */
+  noCoreTechCap: number;
   /** Masquer du flux principal les contrats hors profil (ils restent en base). */
   hideNonMatchingContract: boolean;
   /** Masquer au-delà de « ton expérience max » + N années demandées (null = jamais masquer, seulement pénaliser). */
@@ -50,7 +52,7 @@ export type ScoringRules = {
 };
 
 export const DEFAULT_RULES: ScoringRules = {
-  version: "2026-10-21.3",
+  version: "2026-10-21.4",
   neutral: 60,
   technicalPoints: 80,
   titleWeight: 3,
@@ -61,6 +63,7 @@ export const DEFAULT_RULES: ScoringRules = {
   fluentEnglishPoints: -10,
   weakFitCap: 40,
   missingMainTechCap: 45,
+  noCoreTechCap: 50,
   hideNonMatchingContract: true,
   hideYearsOverMax: 1,
   hideSenior: true,

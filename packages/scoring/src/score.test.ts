@@ -23,7 +23,7 @@ describe(`scores figés — règles ${DEFAULT_RULES.version}`, () => {
   });
 
   it("version des règles attendue", () => {
-    expect(DEFAULT_RULES.version).toBe("2026-10-21.3");
+    expect(DEFAULT_RULES.version).toBe("2026-10-21.4");
   });
 });
 
@@ -476,6 +476,31 @@ describe("critère Technique calculé sur les compétences lues par l'IA", () =>
     expect(s.breakdown.technical).toBe(100);
     expect(s.missingSkills).toEqual([]);
     expect(s.matchedSkills).toEqual(["Java", "SQL", "API REST"]);
+  });
+
+  it("langue étrangère exigée (autre que l'anglais) : plafonnée comme une techno principale absente (cas JD.COM)", () => {
+    const profile: Profile = { ...DEFAULT_PROFILE, skills: ["Java", "Spring Boot"] };
+    const jd = scoreJob({ ...PERFECT, title: "Software Engineer", aiSkills: { required: ["Java", "Spring Boot", "Chinois", "Anglais"], bonus: [] } }, profile);
+    expect(jd.final).toBe(DEFAULT_RULES.missingMainTechCap);
+    expect(jd.capLabel).toBe("chinois exigé");
+    expect(jd.warnings).toContain("Langue exigée : chinois");
+    // Sans l'IA : lu dans le texte, avec un niveau tout près ; pas en « un plus ».
+    const t = (description: string) => scoreJob({ ...PERFECT, description }, DEFAULT_PROFILE).capLabel;
+    expect(t("Vue.js et Node.js. Allemand courant exigé.")).toBe("allemand exigé");
+    expect(t("Vue.js et Node.js. Maîtrise du japonais indispensable.")).toBe("japonais exigé");
+    expect(t("Vue.js et Node.js.\nL'espagnol serait un plus.")).toBeNull();
+    expect(t("Vue.js et Node.js. Anglais courant.")).toBeNull();
+    expect(t("Vue.js et Node.js. Clients en Allemagne et en Italie.")).toBeNull();
+  });
+
+  it("aucun langage ni framework compté (seulement des outils) : technique plafonnée à 50, note peu fiable (cas Theodo GovTech)", () => {
+    const profile: Profile = { ...DEFAULT_PROFILE, skills: ["Java", "SQL"] };
+    const s = scoreJob(
+      { ...PERFECT, title: "Software Engineer Fullstack", aiSkills: { required: ["Concepts web", "Algorithmique", "Base de données", "Déploiement"], bonus: [] } },
+      profile,
+    );
+    expect(s.breakdown.technical).toBe(DEFAULT_RULES.noCoreTechCap);
+    expect(s.warnings).toContain("Note peu fiable : aucune techno principale lue (technique plafonnée à 50 %)");
   });
 
   it("sans liste de l'IA : calcul habituel sur le texte", () => {

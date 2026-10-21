@@ -318,5 +318,47 @@ export function consultingFirm(text: string): boolean {
   return /\b(pour (le compte )?(de )?(l'un de |l'une de |un de |une de )?nos clients|en mission chez|missions? chez (nos|des|un|le) clients?|esn|ssii|societe de conseil|cabinet de conseil)\b/.test(normalizeText(text));
 }
 
+/** Langues étrangères autres que l'anglais (l'anglais courant a son propre malus). */
+const FOREIGN_LANGUAGES: Array<[RegExp, string]> = [
+  [/\b(allemand|german|deutsch)\b/, "allemand"],
+  [/\b(espagnol|spanish|castillan)\b/, "espagnol"],
+  [/\b(italien|italian)\b/, "italien"],
+  [/\b(chinois|mandarin|chinese|cantonais)\b/, "chinois"],
+  [/\b(japonais|japanese)\b/, "japonais"],
+  [/\b(coreen|korean)\b/, "coréen"],
+  [/\b(arabe|arabic)\b/, "arabe"],
+  [/\b(russe|russian)\b/, "russe"],
+  [/\b(portugais|portuguese)\b/, "portugais"],
+  [/\b(neerlandais|dutch|flamand)\b/, "néerlandais"],
+  [/\b(polonais|polish)\b/, "polonais"],
+  [/\b(turc|turkish)\b/, "turc"],
+  [/\b(suedois|swedish|danois|danish|norvegien|norwegian|finnois|finnish)\b/, "langue nordique"],
+  [/\b(hebreu|hebrew|hindi|vietnamien|vietnamese|thai|grec|greek|roumain|romanian|tcheque|czech|hongrois|hungarian)\b/, "langue étrangère"],
+];
+const LANGUAGE_LEVEL =
+  /\b(courant|courante|bilingue|natif|native|maternelle|fluent|fluency|maitrise|maitriser|maitrisez|exige|exigee|indispensable|obligatoire|requis|requise|imperatif|imperative|professionnel|professional|c1|c2|b2)\b/;
+
+/**
+ * Langue étrangère autre que l'anglais exigée (« Chinois courant », « maîtrise de l'allemand ») : dans les compétences
+ * exigées lues par l'IA, sinon dans le texte, hors lignes « un plus ». Renvoie la langue, ou null.
+ */
+export function foreignLanguageRequired(description: string, aiRequired: string[] = []): string | null {
+  for (const label of aiRequired) {
+    const l = normalizeText(label);
+    const hit = FOREIGN_LANGUAGES.find(([re]) => re.test(l));
+    if (hit && !/\b(anglais|english)\b/.test(l)) return hit[1];
+  }
+  for (const line of normalizeText(requiredText(description)).split(/[\n.;!?]/)) {
+    for (const [re, name] of FOREIGN_LANGUAGES) {
+      const m = re.exec(line);
+      if (!m) continue;
+      // Le niveau doit être tout près de la langue : « chinois courant », « maîtrise de l'allemand », « German (C1) ».
+      const around = line.slice(Math.max(0, m.index - 30), m.index + m[0].length + 30);
+      if (LANGUAGE_LEVEL.test(around)) return name;
+    }
+  }
+  return null;
+}
+
 /** Le titre vise l'IA / les LLM / le machine learning (domaine à part, au-delà de la techno). */
 export const AI_DOMAIN = /\b(ai|ia|llms?|genai|gen ai|machine learning|ml|mlops|deep learning|data scien\w*|intelligence artificielle|nlp)\b/;
