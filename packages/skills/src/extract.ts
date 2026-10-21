@@ -3,15 +3,19 @@ import { SKILLS, SKILLS_BY_ID, type Skill } from "./dictionary";
 /**
  * Mémoire des derniers textes traités : le score relit la même description des dizaines de fois (une par règle) ;
  * la normaliser à chaque fois prenait ~60 % du calcul du flux (5 s à froid pour 1 800 offres).
- * ponytail: vidée d'un coup à 2 000 entrées (pas de LRU) : un flux entier y tient, au-delà on repart de zéro.
+ * Deux mémoires : les descriptions entières (peu, grosses : la RAM du serveur est petite) ne chassent plus les petits
+ * textes (écritures du dictionnaire, bouts de phrases), sinon recalculés sans cesse (~4 s à froid pour 2 900 offres).
+ * ponytail: vidées d'un coup quand elles sont pleines (pas de LRU).
  */
 function memo(fn: (s: string) => string): (s: string) => string {
-  const cache = new Map<string, string>();
+  const small = new Map<string, string>();
+  const big = new Map<string, string>();
   return (s) => {
+    const cache = s.length > 300 ? big : small;
     let v = cache.get(s);
     if (v === undefined) {
       v = fn(s);
-      if (cache.size >= 2000) cache.clear();
+      if (cache.size >= (cache === big ? 200 : 20_000)) cache.clear();
       cache.set(s, v);
     }
     return v;
@@ -39,13 +43,39 @@ function aliasRegex(alias: string, caseSensitive: boolean): RegExp {
   return new RegExp(`(?<![\\p{L}\\p{N}+#.])${body}(?![\\p{L}\\p{N}+#])`, caseSensitive ? "u" : "iu");
 }
 
-/** Écriture + son premier mot, qui doit figurer tel quel dans le texte pour qu'elle puisse y être (test très rapide). */
-type Alias = { re: RegExp; needle: string };
+/**
+ * Écriture + son premier mot, qui doit figurer tel quel dans le texte pour qu'elle puisse y être (test très rapide).
+ * `word` : le premier mot n'a que des caractères de mot (cf. aliasRegex) ; il commence alors forcément un mot du texte.
+ */
+type Alias = { re: RegExp; needle: string; word: boolean };
 type Matcher = { skill: Skill; regexes: Alias[]; csRegexes: Alias[] };
 
-const alias = (a: string, caseSensitive: boolean): Alias => ({ re: aliasRegex(a, caseSensitive), needle: a.split(/[\s/]+/).find(Boolean) ?? a });
-/** Pré-filtre : la plupart des ~95 compétences sont absentes d'une offre, leur expression régulière n'est même pas lancée. */
+/** Caractères d'un mot pour aliasRegex : une écriture commence là où aucun d'eux ne la précède. */
+const WORD = /[\p{L}\p{N}+#.]+/gu;
+const WORD_ONLY = /^[\p{L}\p{N}+#.]+$/u;
+
+const alias = (a: string, caseSensitive: boolean): Alias => {
+  const needle = a.split(/[\s/]+/).find(Boolean) ?? a;
+  return { re: aliasRegex(a, caseSensitive), needle, word: WORD_ONLY.test(needle) };
+};
+/** Pré-filtre : la plupart des ~550 écritures sont absentes d'une offre, leur expression régulière n'est même pas lancée. */
 const hit = (text: string, a: Alias) => text.includes(a.needle) && a.re.test(text);
+
+/**
+ * Mots du texte, et leurs débuts coupés avant chaque point (« node.js » → node.js, node), calculés une fois : chercher
+ * ~550 écritures une à une dans une description entière prenait plus de la moitié du calcul des scores.
+ * Suffit pour `word` : après le premier mot d'une écriture, aliasRegex n'accepte ni lettre, ni chiffre, ni + ou # ;
+ * seul un point peut prolonger le mot du texte.
+ */
+function wordStarts(text: string): Set<string> {
+  const starts = new Set<string>();
+  for (const w of new Set(text.match(WORD))) {
+    starts.add(w);
+    for (let i = w.indexOf(".", 1); i > 0; i = w.indexOf(".", i + 1)) starts.add(w.slice(0, i));
+  }
+  return starts;
+}
+const hitIn = (text: string, starts: Set<string>, a: Alias) => (a.word ? starts.has(a.needle) : text.includes(a.needle)) && a.re.test(text);
 
 function buildMatchers(skills: Skill[]): Matcher[] {
   return skills.map((skill) => ({
@@ -89,10 +119,17 @@ function extractUncached(text: string, extra: Matcher[]): string[] {
   const lower = normalizeText(text);
   const original = stripAccents(text);
   const matchers = extra.length ? [...DEFAULT_MATCHERS, ...extra] : DEFAULT_MATCHERS;
+  // Texte court : chercher chaque écriture coûte moins que découper le texte en mots.
+  const long = text.length > SHORT_TEXT;
+  const lowerStarts = long ? wordStarts(lower) : null;
+  const originalStarts = long ? wordStarts(original) : null;
   const found: Matcher[] = [];
   for (const m of matchers) {
     if (found.some((f) => f.skill.id === m.skill.id)) continue;
-    if (m.regexes.some((a) => hit(lower, a)) || m.csRegexes.some((a) => hit(original, a))) {
+    if (
+      m.regexes.some((a) => (lowerStarts ? hitIn(lower, lowerStarts, a) : hit(lower, a))) ||
+      m.csRegexes.some((a) => (originalStarts ? hitIn(original, originalStarts, a) : hit(original, a)))
+    ) {
       found.push(m);
     }
   }
@@ -155,6 +192,18 @@ const SYNONYMS = new Map(
  * Nom inconnu → compétence personnalisée (famille inconnue), pour que tout ajout du profil soit détectable.
  */
 export function resolveSkill(name: string): Skill {
+  let s = resolved.get(name);
+  if (!s) {
+    s = resolveUncached(name);
+    if (resolved.size >= 2000) resolved.clear();
+    resolved.set(name, s);
+  }
+  return s;
+}
+/** Le score résout chaque compétence du profil pour chaque offre : ~1 s à froid sans cette mémoire. */
+const resolved = new Map<string, Skill>();
+
+function resolveUncached(name: string): Skill {
   const raw = normalizeText(name.trim());
   const n = SYNONYMS.get(raw) ?? raw;
   for (const s of SKILLS) {

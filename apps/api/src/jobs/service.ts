@@ -319,10 +319,17 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       const q = f.q?.trim().toLowerCase();
       // Statut filtré en base : seulement les offres demandées sont lues (pas les expirées ou ignorées pour le flux).
       const statuses = f.status === "all" ? undefined : f.status === "active" || f.status === "try" ? JOB_STATUSES.filter((s) => !OUT_OF_FEED.includes(s)) : [f.status];
-      const items = (await stores.jobs.list(statuses))
+      const rows = (await stores.jobs.list(statuses))
         .filter((j) => !q || `${j.title} ${j.company ?? ""} ${j.city ?? ""}`.toLowerCase().includes(q))
-        .filter((j) => !f.source || j.sources.some((s) => s.source === f.source))
-        .map(summarize)
+        .filter((j) => !f.source || j.sources.some((s) => s.source === f.source));
+      const summaries: JobSummary[] = [];
+      for (const [i, j] of rows.entries()) {
+        // Notes pas en cache (après un redémarrage : ~13 s sur le serveur) : pause toutes les 100 offres pour que
+        // les autres requêtes passent, au lieu de bloquer tout le site pendant le calcul.
+        if (i % 100 === 99) await new Promise((r) => setImmediate(r));
+        summaries.push(summarize(j));
+      }
+      const items = summaries
         .filter((s) => !f.contract || (s.contractType ?? "unknown") === f.contract)
         .filter((s) => !f.zone || s.zone === f.zone)
         .filter((s) => s.score.final >= f.minScore)

@@ -76,6 +76,16 @@ describe("pré-filtre rapide : aucune écriture du dictionnaire n'est perdue", (
   });
 });
 
+describe("texte long (découpé en mots) : aucune écriture n'est perdue", () => {
+  const filler = "Nous recherchons une personne motivée pour rejoindre une équipe dynamique. ".repeat(5);
+  it.each(SKILLS.map((s) => [s.id, s] as const))("%s", (_, skill) => {
+    for (const a of [...skill.aliases, ...(skill.caseSensitiveAliases ?? [])]) {
+      for (const v of [`${a}.`, `(${a})`, `${a}, ${a}.`]) expect(extractSkills(`${filler}Poste : ${v}\n${filler}`), v).toContain(skill.id);
+    }
+  });
+  it("point avant et après l'écriture (« .NET. »)", () => expect(extractSkills(`${filler}Stack : .NET.`)).toContain("dotnet"));
+});
+
 describe("techno citée seulement dans le nom d'une autre", () => {
   it.each([
     ["Application mobile en React Native avec Expo.", ["react-native"]],

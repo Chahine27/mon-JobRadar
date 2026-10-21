@@ -23,6 +23,23 @@ type JobWithRelations = Omit<JobRow, "sources" | "travelMinutes" | "travelMode" 
   applyCv: string | null;
 };
 
+/**
+ * Contrat et salaire lus dans la description, gardés par offre : la liste relisait ~8 millions de caractères à chaque
+ * requête (~800 ms des 1,2 s de lecture des offres sur le serveur).
+ * ponytail: vidée d'un coup à 20 000 entrées, comme le cache des scores.
+ */
+const textReads = new Map<string, { contractType: JobRow["contractType"]; salaryMin: number | null; salaryMax: number | null }>();
+function readFromText(row: JobRow) {
+  const key = [row.id, row.contentHash, row.description.length, row.title, row.contractType, row.salaryMin, row.salaryMax].join("\u0000");
+  let r = textReads.get(key);
+  if (!r) {
+    r = { contractType: contractOfJob(row), ...salaryOfJob(row) };
+    if (textReads.size >= 20_000) textReads.clear();
+    textReads.set(key, r);
+  }
+  return r;
+}
+
 function toJobRow(j: JobWithRelations): JobRow {
   const { sources, travel, fullText, fullExperienceYrs, fullInfo, userEdits, applyChannel, applyCv, ...rest } = j;
   const row: JobRow = {
@@ -52,9 +69,8 @@ function toJobRow(j: JobWithRelations): JobRow {
   }
   // Même règle que le score : la pastille « Contrat » affiche ce que le score utilise.
   const stated = normalizeContract(row.contractType) ?? contractFromTitle(row.title);
-  row.contractType = contractOfJob(row);
+  Object.assign(row, readFromText(row));
   row.contractFromDescription = !stated && row.contractType !== null;
-  Object.assign(row, salaryOfJob(row));
   // Corrections saisies à la main : priment sur tout le reste (score et IA recalculés grâce au contentHash).
   const edits = (userEdits && typeof userEdits === "object" ? userEdits : null) as JobEdits | null;
   if (edits && j.userEditsAt) applyEdits(row, edits, j.userEditsAt);
