@@ -221,15 +221,16 @@ const fr = (n: number) => String(n).replace(".", ",");
 // ───────── Expérience ─────────
 
 /**
- * Niveau lu dans le titre. « Architecte » seul ne fait pas un poste de lead quand l'annonce demande
- * peu d'années (≤ ta cible max) : « Architecte Fullstack, 2 ans » reste dans ton niveau.
+ * Niveau lu dans le titre. « Architecte », « Confirmé » ou « Expérimenté » seuls ne font pas un poste de lead / senior
+ * quand l'annonce demande peu d'années (≤ ta cible max) : « Développeur Java confirmé, 2 ans » reste dans ton niveau.
+ * « Senior », « Expert » et « Lead » comptent toujours.
  */
 function titleSeniority(input: ScoringInput, profile: Profile): Seniority | null {
   if (input.seniority !== undefined) return input.seniority;
   const s = detectSeniority(input.title);
   const years = input.experienceMinYears;
-  if (s !== "lead" || years === null || years > profile.experienceMax) return s;
-  return detectSeniority(normalizeText(input.title).replace(/\barchitecte?\b/g, " "));
+  if ((s !== "lead" && s !== "senior") || years === null || years > profile.experienceMax) return s;
+  return detectSeniority(normalizeText(input.title).replace(/\b(architecte?|confirmee?|confirmed|experimentee?|experienced)\b/g, " "));
 }
 
 function scoreExperience(input: ScoringInput, profile: Profile, rules: ScoringRules, product: ProductExperience): Part {
@@ -319,13 +320,21 @@ function scoreSalary(job: ScoringInput, profile: Profile, rules: ScoringRules): 
 
   if (ref >= target) return { score: ref >= target + 5000 ? 100 : 95, reasons: [`Salaire ${label}`], warnings: [], adjustment: { label: `Salaire ${label}, à ta cible ou plus`, points: 5 } };
   if (ref >= minimum) return { score: 80, reasons: [`Salaire ${label}`], warnings: [] };
+  // Formation proposée : un salaire de départ plus bas se rattrape, malus divisé par deux.
+  const trained = trainingOffered(job.description);
+  const why = trained ? " (malus réduit : formation proposée)" : "";
   if (ref >= minimum - 3000)
-    return { score: 50, reasons: [], warnings: [`Salaire ${label}, sous ton minimum de ${k(minimum)}`], adjustment: { label: `Salaire ${label}, sous ton minimum`, points: -10 } };
+    return {
+      score: 50,
+      reasons: [],
+      warnings: [`Salaire ${label}, sous ton minimum de ${k(minimum)}`],
+      adjustment: { label: `Salaire ${label}, sous ton minimum${why}`, points: trained ? -5 : -10 },
+    };
   return {
     score: 20,
     reasons: [],
     warnings: [`Salaire ${label}, nettement sous ton minimum de ${k(minimum)}`],
-    adjustment: { label: `Salaire ${label}, nettement sous ton minimum`, points: -20 },
+    adjustment: { label: `Salaire ${label}, nettement sous ton minimum${why}`, points: trained ? -10 : -20 },
   };
 }
 

@@ -130,7 +130,7 @@ const when = computed(() =>
           <span class="chip" :class="ADEQUATION[a.adequation]?.tone">{{ ADEQUATION[a.adequation]?.label }}</span>
           <span class="chip">{{ NIVEAU[a.niveau] }}</span>
           <span v-if="a.experience_min_ans !== null" class="chip">{{ a.experience_min_ans }} an{{ a.experience_min_ans > 1 ? "s" : "" }} d'expérience min.</span>
-          <span v-if="a.employeur === 'esn_ou_cabinet'" class="chip warn">ESN ou cabinet</span>
+          <span v-if="a.employeur === 'esn_ou_cabinet'" class="chip">ESN ou cabinet</span>
           <span v-else-if="a.employeur === 'direct'" class="chip">Employeur direct</span>
         </div>
 

@@ -23,7 +23,7 @@ describe(`scores figés — règles ${DEFAULT_RULES.version}`, () => {
   });
 
   it("version des règles attendue", () => {
-    expect(DEFAULT_RULES.version).toBe("2026-10-19.3");
+    expect(DEFAULT_RULES.version).toBe("2026-10-21.1");
   });
 });
 
@@ -334,10 +334,31 @@ describe("règles détaillées", () => {
   });
 
   it("postes senior / confirmé / lead masqués du flux principal", () => {
-    expect(score({ ...PERFECT, title: "Développeur Java Confirmé H/F" }).hiddenReason).toBe("Poste senior / confirmé");
+    expect(score({ ...PERFECT, title: "Développeur Java Confirmé H/F", experienceMinYears: null }).hiddenReason).toBe("Poste senior / confirmé");
+    expect(score({ ...PERFECT, title: "Développeur Java Confirmé H/F", experienceMinYears: 4 }).hiddenReason).toBe("Poste senior / confirmé");
     expect(score({ ...PERFECT, title: "Senior Frontend Engineer" }).hidden).toBe(true);
     expect(score({ ...PERFECT, title: "Tech Lead Vue.js" }).hiddenReason).toBe("Poste de lead / manager");
     expect(score({ ...PERFECT, title: "Développeur Vue.js (futur lead)" }).hidden).toBe(false);
+  });
+
+  it("« confirmé » / « expérimenté » avec des années dans ta cible : ni masqué ni pénalisé ; « senior » et « expert » restent masqués", () => {
+    for (const title of ["Développeur Java Confirmé H/F", "Développeur Vue.js expérimenté", "Architecte Java confirmé"]) {
+      const r = score({ ...PERFECT, title, experienceMinYears: 2 });
+      expect(r.hidden).toBe(false);
+      expect(r.breakdown.experience).toBe(100);
+    }
+    expect(score({ ...PERFECT, title: "Développeur Java Senior", experienceMinYears: 2 }).hiddenReason).toBe("Poste senior / confirmé");
+    expect(score({ ...PERFECT, title: "Développeur Java expert", experienceMinYears: 2 }).hiddenReason).toBe("Poste senior / confirmé");
+    expect(score({ ...PERFECT, title: "Développeur senior confirmé", experienceMinYears: 2 }).hidden).toBe(true);
+  });
+
+  it("salaire sous ton minimum : malus divisé par deux si une formation est proposée", () => {
+    const low = (salary: number, description: string) =>
+      score({ ...PERFECT, salaryMin: salary, salaryMax: salary, description }).adjustments.find((a) => a.label.startsWith("Salaire"));
+    expect(low(36000, "Vue.js et Node.js.")?.points).toBe(-10);
+    expect(low(36000, "Vue.js et Node.js. Formation interne assurée.")).toEqual({ label: "Salaire 36k, sous ton minimum (malus réduit : formation proposée)", points: -5 });
+    expect(low(30000, "Vue.js et Node.js.")?.points).toBe(-20);
+    expect(low(30000, "Vue.js et Node.js. Vous serez formé à nos outils.")?.points).toBe(-10);
   });
 
   it("un « salaire » sous 8 000 € (taux journalier) est ignoré", () => {

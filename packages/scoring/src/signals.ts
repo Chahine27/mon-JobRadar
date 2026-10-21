@@ -173,7 +173,7 @@ export function detectSideRole(title: string): string | null {
  * « Formation : Bac+5 » (diplôme demandé) ne compte pas.
  */
 export function trainingOffered(text: string): boolean {
-  return /\b(formations? (en )?interne|formations? (assuree|proposee|prevue|offerte|complete|continue|dediee|adaptee|personnalisee)s?|nous (vous )?formons|vous (serez|etes) forme|(serez|etre|sera|seras) formee?s?|formee?s? (a|aux|sur) |parcours (de formation|d'integration)|programme de formation|montee en competences?|monter en competences?|mentorat|mentoring|tutorat|accompagnee? (par|dans|tout au long)|onboarding)/.test(
+  return /\b(formations? (en )?interne|formations? (assuree|proposee|prevue|offerte|complete|continue|dediee|adaptee|personnalisee)s?|nous (vous )?formons|vous (serez|etes) forme|(serez|etre|sera|seras) formee?s?|formee?s? (a|aux|sur) |parcours (de formation|d'integration)|programme de formation|montee en competences?|monter en competences?|mentorat|mentoring|tutorat|accompagnee? (par|dans|tout au long))/.test(
     normalizeText(text),
   );
 }
