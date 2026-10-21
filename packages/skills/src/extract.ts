@@ -62,14 +62,26 @@ export function extractSkills(text: string, extraSkills: Skill[] = []): string[]
   const lower = normalizeText(text);
   const original = stripAccents(text);
   const matchers = extraSkills.length ? [...DEFAULT_MATCHERS, ...buildMatchers(extraSkills)] : DEFAULT_MATCHERS;
-  const found: string[] = [];
+  const found: Matcher[] = [];
   for (const m of matchers) {
-    if (found.includes(m.skill.id)) continue;
+    if (found.some((f) => f.skill.id === m.skill.id)) continue;
     if (m.regexes.some((a) => hit(lower, a)) || m.csRegexes.some((a) => hit(original, a))) {
-      found.push(m.skill.id);
+      found.push(m);
     }
   }
-  return found;
+  // « React Native » n'est pas React, « React Query » non plus : une compétence trouvée seulement à l'intérieur de
+  // l'écriture plus longue d'une autre (« react » + « native ») est retirée.
+  return found
+    .filter((m) => {
+      const longer = found
+        .filter((o) => o !== m)
+        .flatMap((o) => o.skill.aliases.map(normalizeText))
+        .filter((b) => m.skill.aliases.some((a) => b.startsWith(`${normalizeText(a)} `)));
+      if (!longer.length) return true;
+      const rest = longer.reduce((t, b) => t.replace(new RegExp(aliasRegex(b, false).source, "giu"), " "), lower);
+      return m.regexes.some((a) => hit(rest, a));
+    })
+    .map((m) => m.skill.id);
 }
 
 /**

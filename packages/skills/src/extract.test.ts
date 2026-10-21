@@ -75,3 +75,12 @@ describe("pré-filtre rapide : aucune écriture du dictionnaire n'est perdue", (
     for (const a of skill.caseSensitiveAliases ?? []) expect(extractSkills(`Poste : ${a}, en équipe.`), a).toContain(skill.id);
   });
 });
+
+describe("techno citée seulement dans le nom d'une autre", () => {
+  it.each([
+    ["Application mobile en React Native avec Expo.", ["react-native"]],
+    ["React et React Native.", ["react", "react-native"]],
+    ["Front en React, mobile en React Native.", ["react", "react-native"]],
+    ["Cache avec React Query.", ["redux"]],
+  ])("« %s »", (text, expected) => expect(extractSkills(text).sort()).toEqual([...expected].sort()));
+});

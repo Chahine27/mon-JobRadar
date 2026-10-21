@@ -23,7 +23,7 @@ describe(`scores figés — règles ${DEFAULT_RULES.version}`, () => {
   });
 
   it("version des règles attendue", () => {
-    expect(DEFAULT_RULES.version).toBe("2026-10-21.5");
+    expect(DEFAULT_RULES.version).toBe("2026-10-21.6");
   });
 });
 
@@ -534,17 +534,36 @@ describe("critère Technique calculé sur les compétences lues par l'IA", () =>
     });
   });
 
+  it("React Native n'est pas React : pas de plafond levé par un ancien classement « en projets » (cas Garance)", () => {
+    const me: Profile = { ...DEFAULT_PROFILE, skills: ["React", "TypeScript"], projectSkills: ["React", "TypeScript"] };
+    const s = scoreJob(
+      {
+        ...PERFECT,
+        title: "Développeur Frontend Mobile F/H/X",
+        description: "Vous maîtrisez React Native, Expo et TypeScript.",
+        experienceMinYears: 3,
+        aiSkills: { required: ["React Native", "Expo", "TypeScript"], bonus: [], atWork: [], inProjects: ["React Native", "TypeScript"] },
+      },
+      me,
+    );
+    expect(s.liftedCaps).toEqual([]);
+    expect(s.matchedSkills).not.toContain("React");
+    expect(s.missingSkills).toContain("React Native");
+    expect(s.warnings).toContain("Techno principale ou exigée que tu n'as pas : React Native (maîtrise exigée)");
+  });
+
   it("plafond levé par la lecture de l'IA : techno que le code croit absente mais rangée « en projets » par l'IA", () => {
-    const me: Profile = { ...DEFAULT_PROFILE, skills: ["Java"] };
+    // L'IA a lu « React / Angular » (une barre, pas un « ou ») et l'a rangé « en projets » : tu as React en projets.
+    const me: Profile = { ...DEFAULT_PROFILE, skills: ["Java", "React"], projectSkills: ["React"] };
     const input: ScoringInput = { ...PERFECT, title: "Développeur Java / Angular", description: "Java. Maîtrise d'Angular indispensable.", experienceMinYears: 2 };
-    const ai = { required: ["Java", "Angular"], bonus: [] };
+    const ai = { required: ["Java", "React / Angular"], bonus: [] };
     expect(scoreJob({ ...input, aiSkills: ai }, me).final).toBe(DEFAULT_RULES.missingMainTechCap);
-    const lifted = scoreJob({ ...input, aiSkills: { ...ai, atWork: ["Java"], inProjects: ["Angular"] } }, me);
+    const lifted = scoreJob({ ...input, aiSkills: { ...ai, atWork: ["Java"], inProjects: ["React / Angular"] } }, me);
     expect(lifted.capLabel).toBeNull();
     expect(lifted.liftedCaps).toEqual(["techno principale ou exigée : Angular (rangée « en projets » par l'IA)"]);
-    expect(lifted.notStrong).toEqual(["Angular"]);
-    // Rangée « manquante » : rien ne change.
-    expect(scoreJob({ ...input, aiSkills: { ...ai, atWork: ["Java"], inProjects: [] } }, me).final).toBe(DEFAULT_RULES.missingMainTechCap);
+    // Rangée « en projets » alors qu'aucune de ses technos n'est à toi (ancien classement) : rien ne change.
+    const stale = scoreJob({ ...input, aiSkills: { required: ["Java", "Angular"], bonus: [], atWork: ["Java"], inProjects: ["Angular"] } }, me);
+    expect(stale.final).toBe(DEFAULT_RULES.missingMainTechCap);
   });
 
   it("sans liste de l'IA : calcul habituel sur le texte", () => {

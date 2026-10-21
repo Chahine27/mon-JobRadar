@@ -227,7 +227,10 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
   const credited = new Set(candidates.slice(0, rules.maxLearnable).map((it) => it.id));
   const tooMany = candidates.slice(rules.maxLearnable).map((it) => it.id);
   // Compétence exigée que le code croit absente mais que l'analyse range « en entreprise » / « en projets » : on suit l'IA.
-  const aiIds = (labels: string[] | undefined) => new Set((labels ?? []).flatMap((l) => extractSkills(l, customSkills)));
+  // Classement enregistré à l'analyse : revérifié avec ton profil actuel (une compétence du libellé doit être à toi),
+  // pour qu'une ancienne erreur (« React Native » rangé en projets grâce à React) ne lève pas un plafond.
+  const aiIds = (labels: string[] | undefined) =>
+    new Set((labels ?? []).map((l) => extractSkills(l, customSkills)).filter((ids) => ids.some((id) => ownedIds.has(id))).flat());
   const aiWork = useAi ? aiIds(ai.atWork) : new Set<string>();
   const aiProjects = useAi ? aiIds(ai.inProjects) : new Set<string>();
   const lifted: string[] = [];
