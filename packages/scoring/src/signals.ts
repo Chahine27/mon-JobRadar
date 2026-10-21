@@ -318,6 +318,22 @@ export function consultingFirm(text: string): boolean {
   return /\b(pour (le compte )?(de )?(l'un de |l'une de |un de |une de )?nos clients|en mission chez|missions? chez (nos|des|un|le) clients?|esn|ssii|societe de conseil|cabinet de conseil)\b/.test(normalizeText(text));
 }
 
+/**
+ * Exigences au choix dans le texte (« expérience significative sur Angular ou React ») : chaque groupe est UNE exigence,
+ * remplie par l'une des technos. Lu phrase par phrase, un ou deux mots de chaque côté du « ou ».
+ */
+export function alternativeSkills(text: string, extraSkills: Skill[] = []): string[][] {
+  const groups: string[][] = [];
+  for (const sentence of text.split(/[.;\n!?]/)) {
+    for (const m of sentence.matchAll(/(\S+(?:\s+\S+)?)\s+(?:ou|or)\s+(\S+(?:\s+\S+)?)/gi)) {
+      const left = extractSkills(m[1]!, extraSkills);
+      const right = extractSkills(m[2]!, extraSkills);
+      if (left.length && right.length && left.at(-1) !== right[0]) groups.push([left.at(-1)!, right[0]!]);
+    }
+  }
+  return groups;
+}
+
 /** Langues étrangères autres que l'anglais (l'anglais courant a son propre malus). */
 const FOREIGN_LANGUAGES: Array<[RegExp, string]> = [
   [/\b(allemand|german|deutsch)\b/, "allemand"],

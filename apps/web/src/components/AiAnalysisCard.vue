@@ -5,7 +5,13 @@ import type { StoredAiAnalysis } from "../types";
 import Icon from "./Icon.vue";
 
 /** Carte « Analyse IA » d'une offre. */
-const props = defineProps<{ jobId: string; /** Technos « à apprendre » selon le score (formation, poste junior, ta liste). */ toLearn?: string[] }>();
+const props = defineProps<{
+  jobId: string;
+  /** Technos « à apprendre » selon le score (formation, poste junior, ta liste). */
+  toLearn?: string[];
+  /** Avis après les vérifications du code (« forte » ramenée à « moyenne »…), s'il diffère de l'avis enregistré. */
+  adequation?: "forte" | "moyenne" | "faible" | null;
+}>();
 /** Nouvelle analyse faite : le score de l'offre a pu changer (l'IA baisse un score trop optimiste). */
 const emit = defineEmits<{ analyzed: [] }>();
 
@@ -133,7 +139,7 @@ const when = computed(() =>
         </p>
 
         <div class="row">
-          <span class="chip" :class="ADEQUATION[a.adequation]?.tone">{{ ADEQUATION[a.adequation]?.label }}</span>
+          <span class="chip" :class="ADEQUATION[adequation ?? a.adequation]?.tone">{{ ADEQUATION[adequation ?? a.adequation]?.label }}</span>
           <span class="chip">{{ NIVEAU[a.niveau] }}</span>
           <span v-if="a.experience_min_ans !== null" class="chip">{{ a.experience_min_ans }} an{{ a.experience_min_ans > 1 ? "s" : "" }} d'expérience min.</span>
           <span v-if="a.employeur === 'esn_ou_cabinet'" class="chip">ESN ou cabinet</span>

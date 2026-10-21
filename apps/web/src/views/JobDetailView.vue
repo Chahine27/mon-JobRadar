@@ -473,7 +473,7 @@ const ruleLabel = (r: ScoreRule) =>
 
     <div class="layout">
       <div class="stack main">
-        <AiAnalysisCard :key="`ai-${job.fullTextAt}`" :job-id="job.id" :to-learn="job.toLearn" @analyzed="reloadJob" />
+        <AiAnalysisCard :key="`ai-${job.fullTextAt}`" :job-id="job.id" :to-learn="job.toLearn" :adequation="job.ai?.adequation ?? null" @analyzed="reloadJob" />
 
         <div class="grid-2">
           <section class="card">

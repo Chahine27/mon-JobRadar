@@ -50,8 +50,8 @@ const ME: Profile = {
 describe("expérience exigée sur un produit absent du profil", () => {
   it("annonce Technia : 40 % maximum, avec le point de vigilance", () => {
     const s = scoreJob(TECHNIA, ME);
-    // 3DEXPERIENCE et APRISO (titre) comptent maintenant dans la technique : 26 %, déjà sous le plafond de 40 %.
-    expect(s.final).toBe(26);
+    // « 3DEXPERIENCE ou APRISO » : une seule exigence au choix ; la note reste dans le plafond de 40 % (3 ans exigés).
+    expect(s.final).toBe(40);
     expect(s.warnings).toContain("Expérience exigée sur un produit que tu n'as pas : 3DEXPERIENCE, DELMIA Apriso (3 ans demandés)");
     expect(s.reasons.some((r) => r.includes("d'expérience demandé"))).toBe(false);
   });
@@ -59,14 +59,12 @@ describe("expérience exigée sur un produit absent du profil", () => {
   it("plafond réglable", () => {
     const s = scoreJob(TECHNIA, { ...ME, productExperienceCap: 15 });
     expect(s.final).toBe(15);
-    expect(s.capLabel).toBe("expérience exigée sur un produit que tu n'as pas");
   });
 
   it("bonne technique mais années exigées sur une techno absente : plafonnée à 40 %", () => {
     const job = { ...TECHNIA, title: "Développeur Java", description: "Java, Spring Boot. 3 ans d'expérience minimum sur Angular." };
     const s = scoreJob(job, ME);
     expect(s.final).toBe(40);
-    expect(s.capLabel).toBe("expérience exigée sur un produit que tu n'as pas");
   });
 
   it("produit dans le profil : pas de plafond", () => {

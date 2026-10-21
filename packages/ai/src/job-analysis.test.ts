@@ -250,3 +250,22 @@ describe("technos à apprendre (formation proposée, poste junior, ta liste)", (
     expect(buildAnalysisPrompt(JOB, { ...JAVA, learnableSkills: ["Angular", "Go"] })).toContain("APPRENDRE VITE (absentes de son profil, choisies par lui) : Angular, Go");
   });
 });
+
+describe("techno principale vue seulement en projets", () => {
+  it("« forte » ramenée à « moyenne » par le code (cas Wemanity)", async () => {
+    const profile = { ...PROFILE, skills: ["Java", "Spring Boot", "React"], projectSkills: ["React"] };
+    const job = { ...JOB, title: "Ingénieur Full Stack (Java / Angular / React) (H/F)", description: "Java, Spring Boot. Une expérience significative sur Angular ou React." };
+    const read = (adequation: string) =>
+      analyzeJobWithAi(
+        new OllamaClient({
+          fetch: async () =>
+            json({ message: { content: JSON.stringify({ ...GOOD, niveau: "confirme", experience_min_ans: 2, competences_obligatoires: ["Java", "Spring Boot", "Angular ou React"], adequation }) } }),
+        }),
+        job,
+        profile,
+      ).then((r) => r.result);
+    const r = await read("forte");
+    expect(r.exigees_en_projets).toEqual(["Angular ou React"]);
+    expect(r.adequation).toBe("moyenne");
+  });
+});

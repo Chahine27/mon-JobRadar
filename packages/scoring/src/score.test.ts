@@ -23,7 +23,7 @@ describe(`scores figés — règles ${DEFAULT_RULES.version}`, () => {
   });
 
   it("version des règles attendue", () => {
-    expect(DEFAULT_RULES.version).toBe("2026-10-21.4");
+    expect(DEFAULT_RULES.version).toBe("2026-10-21.5");
   });
 });
 
@@ -501,6 +501,50 @@ describe("critère Technique calculé sur les compétences lues par l'IA", () =>
     );
     expect(s.breakdown.technical).toBe(DEFAULT_RULES.noCoreTechCap);
     expect(s.warnings).toContain("Note peu fiable : aucune techno principale lue (technique plafonnée à 50 %)");
+  });
+
+  describe("exigence au choix « A ou B » (cas réel Wemanity)", () => {
+    const WEMANITY: ScoringInput = {
+      ...PERFECT,
+      title: "Ingénieur Full Stack (Java / Angular / React) (H/F)",
+      description: "Profil recherché :\n2 à 5 ans d'expérience en développement\nUne bonne maîtrise de Java (Spring Boot)\nUne expérience significative sur Angular ou React",
+      experienceMinYears: 2,
+    };
+    const me: Profile = { ...DEFAULT_PROFILE, skills: ["Java", "Spring Boot", "React"], projectSkills: ["React"] };
+
+    it("sans l'IA : une seule exigence, remplie par React (en projets, compté à moitié) ; Angular ne bloque plus", () => {
+      const s = scoreJob(WEMANITY, me);
+      expect(s.capLabel).toBeNull();
+      expect(s.reasons).toContain("Exigence au choix, comptée une fois : Angular ou React (tu as React)");
+      expect(s.missingSkills).not.toContain("Angular");
+      // Java (titre, × 3) + React (titre, × 3, en projets : moitié) + Spring Boot (1) : 5,5 / 7 = 79 %.
+      expect(s.breakdown.technical).toBe(79);
+      expect(s.notStrong).toEqual(["React"]);
+    });
+
+    it("avec la liste de l'IA (« Angular ou React ») : même résultat", () => {
+      const s = scoreJob({ ...WEMANITY, aiSkills: { required: ["Java", "Spring Boot", "Angular ou React"], bonus: [] } }, me);
+      expect(s.capLabel).toBeNull();
+      expect(s.breakdown.technical).toBe(79);
+    });
+
+    it("sans React ni Angular : la maîtrise exigée bloque toujours", () => {
+      const s = scoreJob(WEMANITY, { ...me, skills: ["Java", "Spring Boot"], projectSkills: [] });
+      expect(s.capLabel).toMatch(/^techno principale ou exigée que tu n'as pas : /);
+    });
+  });
+
+  it("plafond levé par la lecture de l'IA : techno que le code croit absente mais rangée « en projets » par l'IA", () => {
+    const me: Profile = { ...DEFAULT_PROFILE, skills: ["Java"] };
+    const input: ScoringInput = { ...PERFECT, title: "Développeur Java / Angular", description: "Java. Maîtrise d'Angular indispensable.", experienceMinYears: 2 };
+    const ai = { required: ["Java", "Angular"], bonus: [] };
+    expect(scoreJob({ ...input, aiSkills: ai }, me).final).toBe(DEFAULT_RULES.missingMainTechCap);
+    const lifted = scoreJob({ ...input, aiSkills: { ...ai, atWork: ["Java"], inProjects: ["Angular"] } }, me);
+    expect(lifted.capLabel).toBeNull();
+    expect(lifted.liftedCaps).toEqual(["techno principale ou exigée : Angular (rangée « en projets » par l'IA)"]);
+    expect(lifted.notStrong).toEqual(["Angular"]);
+    // Rangée « manquante » : rien ne change.
+    expect(scoreJob({ ...input, aiSkills: { ...ai, atWork: ["Java"], inProjects: [] } }, me).final).toBe(DEFAULT_RULES.missingMainTechCap);
   });
 
   it("sans liste de l'IA : calcul habituel sur le texte", () => {

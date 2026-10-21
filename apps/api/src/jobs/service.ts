@@ -127,7 +127,8 @@ export const MANUAL_SOURCE = "manual";
 const isManual = (j: { sources: Array<{ source: string }> }) => j.sources.some((s) => s.source === MANUAL_SOURCE);
 
 type Verdict = AiVerdict | null;
-const aiSkillsOf = (v: Verdict) => (v && v.required.length + v.bonus.length > 0 ? { required: v.required, bonus: v.bonus } : null);
+const aiSkillsOf = (v: Verdict) =>
+  v && v.required.length + v.bonus.length > 0 ? { required: v.required, bonus: v.bonus, atWork: v.atWork ?? [], inProjects: v.inProjects ?? [] } : null;
 
 /**
  * Quand l'IA a lu l'annonce (analyse à jour), c'est SA lecture qui compte pour le score et l'affichage : les règles se
@@ -201,8 +202,10 @@ export function urlKey(url: string): string | null {
 const zoneOf = (job: JobRow): Zone => (job.remoteType === "remote" ? "remote" : job.department || job.latitude !== null ? "local" : "unknown");
 
 function toSummary(job: JobRow, s: ScoreResult, v: Verdict = null): JobSummary {
-  // Adéquation faible vérifiée par le code : l'avis de l'IA ne peut pas dire mieux.
-  const verdict = v && s.weakFit.length ? { ...v, adequation: "faible" as const } : v;
+  // Adéquation faible vérifiée par le code : l'avis de l'IA ne peut pas dire mieux. Techno principale vue seulement en
+  // projets : au mieux « moyenne » (règle de la consigne, que le petit modèle oublie).
+  const verdict =
+    v && s.weakFit.length ? { ...v, adequation: "faible" as const } : v?.adequation === "forte" && s.notStrong.length ? { ...v, adequation: "moyenne" as const } : v;
   const cap = verdict ? AI_SCORE_CAPS[verdict.adequation] : 100;
   const final = Math.min(s.final, cap);
   return {
@@ -245,7 +248,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
 
   function scoreOf(job: JobRow, profile: Profile, profileHash: string, v: Verdict = null): ScoreResult {
     const aiSkills = aiSkillsOf(v);
-    const aiKey = aiSkills ? `${aiSkills.required.join("|")}#${aiSkills.bonus.join("|")}` : "-";
+    const aiKey = aiSkills ? `${aiSkills.required.join("|")}#${aiSkills.bonus.join("|")}#${aiSkills.atWork.join("|")}#${aiSkills.inProjects.join("|")}` : "-";
     const home = homes.get(profile) ?? null;
     const km = home && job.latitude !== null && job.longitude !== null ? distanceKm(home, { lat: job.latitude, lng: job.longitude }) : null;
     const key = `${job.id}:${job.contentHash}:${job.department ?? "-"}:${job.experienceMinYrs ?? "-"}:${job.contractType ?? "-"}:${job.salaryMin ?? "-"}-${job.salaryMax ?? "-"}:${job.travelMinutes ?? "-"}:${job.travelMode ?? "-"}:${aiKey}:${profileHash}:${rules.version}:${km === null ? "-" : Math.round(km)}`;
@@ -375,6 +378,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
         { kind: "base", label: `Technique ${s.breakdown.technical} % (stack principale)`, value: s.base },
         ...s.adjustments.map((a) => ({ kind: "adjust" as const, label: a.label, value: a.points })),
       ];
+      for (const l of s.liftedCaps) scoreSteps.push({ kind: "cap", label: `Plafond levé par la lecture de l'IA : ${l}`, value: s.final });
       if (s.capLabel) scoreSteps.push({ kind: "cap", label: `Plafond : ${s.capLabel}`, value: s.final });
       if (summary.ai?.before != null) scoreSteps.push({ kind: "cap", label: `Plafond IA : adéquation ${summary.ai.adequation}`, value: summary.score.final });
       scoreSteps.push({ kind: "total", label: "Score", value: summary.score.final });

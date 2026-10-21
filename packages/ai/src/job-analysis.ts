@@ -285,6 +285,9 @@ function checkAdequation(
   if (AI_DOMAIN.test(normalizeText(job.title)) && !levels(profile).atWork.some((s) => AI_DOMAIN.test(normalizeText(s)))) return "faible";
   const inTarget = (r.experience_min_ans === null || r.experience_min_ans <= profile.experienceMax) && r.niveau !== "senior";
   if (r.adequation === "faible" && inTarget && reallyMissing.length === 0 && missingCore.length > 0) return "moyenne";
+  // Techno principale (celle du titre) vue seulement en projets : au mieux « moyenne », comme le dit la consigne.
+  const main = new Set(extractSkills(job.title));
+  if (r.adequation === "forte" && r.exigees_en_projets.some((x) => idsOf(x).some((id) => main.has(id)))) return "moyenne";
   return r.adequation;
 }
 

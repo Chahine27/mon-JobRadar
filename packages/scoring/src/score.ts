@@ -8,6 +8,7 @@ import {
   detectNonDevRole,
   detectSeniority,
   detectSideRole,
+  alternativeSkills,
   fluentEnglishRequired,
   foreignLanguageRequired,
   looksLikeItTitle,
@@ -48,8 +49,10 @@ export type ScoringInput = {
   /**
    * Compétences lues par l'IA (analyse à jour) : exigées et « un plus ». Si présentes, le critère Technique
    * est calculé sur elles (les « plus » comptent moitié) au lieu des mots-clés trouvés dans le texte.
+   * `atWork` / `inProjects` : compétences exigées que l'analyse a rangées « en entreprise » / « en projets » ; elles
+   * peuvent lever un plafond dû à une techno que le code croit absente (cf. liftedCaps).
    */
-  aiSkills?: { required: string[]; bonus: string[] } | null;
+  aiSkills?: { required: string[]; bonus: string[]; atWork?: string[]; inProjects?: string[] } | null;
 };
 
 /** Sous-notes de 0 à 100, affichées et utilisées pour masquer ; seule `technical` est la base du score. */
@@ -92,6 +95,10 @@ export type ScoreResult = {
   weakFit: string[];
   /** Technos absentes de ton profil comptées « à apprendre » (poste junior, formation proposée, ou ta liste). */
   toLearn: string[];
+  /** Plafonds levés parce que la lecture de l'IA contredit leur raison (techno rangée « en entreprise » / « en projets »). */
+  liftedCaps: string[];
+  /** Techno principale vue seulement en projets : l'avis de l'IA ne peut pas dire mieux que « moyenne ». */
+  notStrong: string[];
 };
 
 type Part = { score: number; reasons: string[]; warnings: string[]; adjustment?: Adjustment };
@@ -160,6 +167,26 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
   }
 
   const label = (id: string) => skillOf(id)?.label ?? aiLabels.find((l) => resolveSkill(l).id === id) ?? id;
+
+  // Exigence au choix (« Angular ou React », dans la liste de l'IA ou dans le texte) : UNE exigence, remplie par la
+  // techno que tu as le mieux (en entreprise, puis en projets, puis dans ta liste à apprendre) ; les autres sont retirées.
+  const groups = useAi
+    ? aiLabels.filter((l) => /\s(ou|or)\s/i.test(l)).map((l) => extractSkills(l, customSkills))
+    : alternativeSkills(splitRequired(input.description).required, customSkills);
+  const have = (id: string) => (ownedIds.has(id) ? (projectIds.has(id) ? 2 : 3) : learnIds.has(id) ? 1 : 0);
+  const dropped = new Set<string>();
+  const choices: string[] = [];
+  for (const g of groups) {
+    const members = [...new Set(g)].filter((id) => !dropped.has(id) && items.some((it) => it.id === id));
+    if (members.length < 2) continue;
+    const best = [...members].sort((a, b) => have(b) - have(a))[0]!;
+    const weight = Math.max(...items.filter((it) => members.includes(it.id)).map((it) => it.weight));
+    members.filter((id) => id !== best).forEach((id) => dropped.add(id));
+    items = items.filter((it) => it.id === best || !members.includes(it.id)).map((it) => (it.id === best ? { ...it, weight } : it));
+    choices.push(`${members.map(label).join(" ou ")}${have(best) ? ` (tu as ${label(best)})` : ""}`);
+  }
+  found = found.filter((id) => !dropped.has(id));
+  requiredIds = requiredIds.filter((id) => !dropped.has(id));
   const matched = found.filter((id) => ownedIds.has(id)).map(label);
   const inProjects = found.filter((id) => projectIds.has(id)).map(label);
   const missing = found.filter((id) => !ownedIds.has(id)).map(label);
@@ -174,7 +201,7 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
   const part: Part = { score: rules.noSkillsTechnical, reasons: [], warnings: [] };
   if (items.length === 0) {
     part.warnings.push("Aucune techno détectée : poste peut-être hors informatique");
-    return { part, matched, missing, preferredFound, main: [] as string[], product, requiredIds, missingRequired: [] as string[], blocking: [] as string[], toLearn: [] as string[] };
+    return { part, matched, missing, preferredFound, main: [] as string[], product, requiredIds, missingRequired: [] as string[], blocking: [] as string[], toLearn: [] as string[], lifted: [] as string[], liftedWeak: false, notStrong: [] as string[] };
   }
 
   const seniority = titleSeniority(input, profile);
@@ -199,6 +226,12 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
     .sort((a, b) => b.weight - a.weight || rank(b.id) - rank(a.id));
   const credited = new Set(candidates.slice(0, rules.maxLearnable).map((it) => it.id));
   const tooMany = candidates.slice(rules.maxLearnable).map((it) => it.id);
+  // Compétence exigée que le code croit absente mais que l'analyse range « en entreprise » / « en projets » : on suit l'IA.
+  const aiIds = (labels: string[] | undefined) => new Set((labels ?? []).flatMap((l) => extractSkills(l, customSkills)));
+  const aiWork = useAi ? aiIds(ai.atWork) : new Set<string>();
+  const aiProjects = useAi ? aiIds(ai.inProjects) : new Set<string>();
+  const lifted: string[] = [];
+  const liftedIds = new Set<string>();
   let got = 0;
   let total = 0;
   for (const it of items) {
@@ -211,6 +244,11 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
     if (credited.has(it.id)) {
       got += it.weight * rules.learnableCredit;
       (learnableWhy ? toLearn : listed).push(it.id);
+    } else if (requiredIds.includes(it.id) && (aiWork.has(it.id) || aiProjects.has(it.id))) {
+      const work = aiWork.has(it.id);
+      got += it.weight * (work ? 1 : rules.projectCredit);
+      liftedIds.add(it.id);
+      if (inTitle.has(it.id) || mastery) lifted.push(`${label(it.id)} (rangée « ${work ? "en entreprise" : "en projets"} » par l'IA)`);
     } else if (inTitle.has(it.id) || mastery) {
       blocking.push(mastery ? `${label(it.id)} (${mastery})` : label(it.id));
     }
@@ -231,6 +269,7 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
     part.warnings.push(`Techno principale vue seulement en projets : ${projectOnly.map(label).join(", ")} (technique plafonnée à ${rules.projectOnlyMainCap} %)`);
   }
   if (main.length) part.reasons.push(`Stack principale (titre) : ${main.map(label).join(", ")}`);
+  for (const c of choices) part.reasons.push(`Exigence au choix, comptée une fois : ${c}`);
   if (useAi) part.reasons.push("Compétences lues par l'IA (« plus » comptés à moitié)");
   if (matched.length) part.reasons.push(`Tu as : ${matched.join(", ")}`);
   if (inProjects.length) part.reasons.push(`Vu seulement en projets (compté à moitié) : ${inProjects.join(", ")}`);
@@ -244,8 +283,13 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
   if (others.length) part.warnings.push(`Mots-clés absents de ton profil : ${others.join(", ")} — à ajouter au CV si tu les maîtrises`);
   // Langages / frameworks exigés absents (les outils et mots inconnus — Kafka, Scrum… — ne comptent pas), hors technos à apprendre.
   // Sans l'IA, « cité dans l'annonce » n'est pas « exigé » : seulement les technos du titre ou à maîtrise exigée.
-  const missingRequired = useAi ? requiredIds.filter((id) => !ownedIds.has(id) && !learning.has(id) && getSkill(id)?.core).map(label) : blocking;
-  return { part, matched, missing, preferredFound, main, product, requiredIds, missingRequired, blocking, toLearn: learnLabels };
+  const missingCore = (ids: string[]) => ids.filter((id) => !ownedIds.has(id) && !learning.has(id) && getSkill(id)?.core).map(label);
+  const missingRequired = useAi ? missingCore(requiredIds.filter((id) => !liftedIds.has(id))) : blocking;
+  // L'IA a levé le plafond « adéquation faible » : sans sa lecture, 2 compétences exigées ou plus manquaient.
+  const liftedWeak = useAi && missingCore(requiredIds).length >= 2 && missingRequired.length < 2;
+  // Techno principale (titre, sinon exigée) remplie seulement par une techno vue en projets : l'IA dira au mieux « moyenne ».
+  const notStrong = mainCore.filter((id) => projectIds.has(id) || (aiProjects.has(id) && liftedIds.has(id))).map(label);
+  return { part, matched, missing, preferredFound, main, product, requiredIds, missingRequired, blocking, toLearn: learnLabels, lifted, liftedWeak, notStrong };
 }
 
 type ProductExperience = { labels: string[]; years: number } | null;
@@ -505,6 +549,10 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
   const aiAtWork = profile.skills.some((x) => !inProjects.has(normalizeText(x)) && AI_DOMAIN.test(normalizeText(x)));
   if (AI_DOMAIN.test(normalizeText(input.title)) && !aiAtWork) weakFit.push("poste orienté IA / LLM, domaine absent de ton expérience en entreprise");
   if (weakFit.length) cap(rules.weakFitCap, `adéquation faible (${weakFit.join(" ; ")})`);
+  const liftedCaps = [
+    ...(tech.lifted.length ? [`techno principale ou exigée : ${tech.lifted.join(", ")}`] : []),
+    ...(tech.liftedWeak ? ["adéquation faible (compétences exigées manquantes)"] : []),
+  ];
 
   let hiddenReason: string | null = null;
   const kind = contractOfJob(input);
@@ -546,6 +594,8 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
     capLabel,
     weakFit,
     toLearn: tech.toLearn,
+    liftedCaps,
+    notStrong: tech.notStrong,
   };
 }
 

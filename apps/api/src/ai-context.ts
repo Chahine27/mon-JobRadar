@@ -78,6 +78,9 @@ export type AiVerdict = {
   address: string | null;
   /** ESN / cabinet selon l'IA (null : inconnu, ou ancienne analyse). */
   consulting?: boolean | null;
+  /** Compétences exigées rangées « en entreprise » / « en projets » par l'analyse. */
+  atWork?: string[];
+  inProjects?: string[];
 };
 
 /** Lit l'adéquation et l'avis dans une analyse enregistrée (null si illisible). */
@@ -95,6 +98,8 @@ export function readVerdict(
     salaire_max?: unknown;
     adresse?: unknown;
     employeur?: unknown;
+    exigees_en_entreprise?: unknown;
+    exigees_en_projets?: unknown;
   } | null;
   if (!r || typeof r !== "object") return null;
   if (r.adequation !== "forte" && r.adequation !== "moyenne" && r.adequation !== "faible") return null;
@@ -110,5 +115,7 @@ export function readVerdict(
     salary: typeof r.salaire_min === "number" && typeof r.salaire_max === "number" ? { min: r.salaire_min, max: r.salaire_max } : null,
     address: typeof r.adresse === "string" && r.adresse ? r.adresse : null,
     consulting: r.employeur === "esn_ou_cabinet" ? true : r.employeur === "direct" ? false : null,
+    atWork: strings(r.exigees_en_entreprise),
+    inProjects: strings(r.exigees_en_projets),
   };
 }
