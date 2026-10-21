@@ -2,7 +2,6 @@
 import { computed, ref, watch } from "vue";
 import { api } from "../api";
 import Icon from "../components/Icon.vue";
-import Ring from "../components/Ring.vue";
 import SourceLogo from "../components/SourceLogo.vue";
 import { SOURCE_LABELS } from "../format";
 import type { SkillStats } from "../types";
@@ -53,37 +52,33 @@ const kpis = computed(() => {
   return [
     {
       icon: "code" as const,
-      title: "Couverture des compétences techniques",
+      title: "Offres entièrement couvertes",
       value: `${s.fullMatch} %`,
-      ring: s.fullMatch,
-      text: "des offres demandent des langages et frameworks que tu maîtrises tous.",
+      text: "des offres : tu as tous les langages et frameworks demandés.",
       delta: delta(s.fullMatch, p?.fullMatch, "pt"),
     },
     {
       icon: "target" as const,
-      title: "Compétences couvertes dans le Top 10",
+      title: "Top 10 dans ton profil",
       value: `${s.topOwned} / 10`,
-      ring: s.topOwned * 10,
-      text: "des langages et frameworks les plus demandés sont dans ton profil.",
+      text: "des langages et frameworks les plus demandés.",
       delta: delta(s.topOwned, p?.topOwned, ""),
     },
     {
       icon: "briefcase" as const,
-      title: "Part des offres accessibles en expérience",
+      title: "Accessibles en expérience",
       value: `${s.experience.accessible} %`,
-      ring: s.experience.accessible,
-      text: `des offres demandent ${years(s.experience.max)} d'expérience ou moins (ton maximum).`,
+      text: `des offres demandent ${years(s.experience.max)} ou moins (ton maximum).`,
       delta: delta(s.experience.accessible, p?.accessible, "pt"),
     },
     {
       icon: "file" as const,
       title: "Offres collectées",
       value: n(s.offers),
-      ring: null,
       text: s.days
-        ? `offres ces ${s.days} derniers jours (${n(s.previous!.offers)} les ${s.days} jours d'avant).`
+        ? `sur ${s.days} jours (${n(s.previous!.offers)} les ${s.days} jours d'avant).`
         : s.since
-          ? `offres de développeur depuis le ${date(s.since)}, expirées comprises.`
+          ? `depuis le ${date(s.since)}, expirées comprises.`
           : "offres de développeur.",
       delta: delta(s.offers, p?.offers, "%"),
     },
@@ -96,7 +91,12 @@ const PRIORITY = { high: "Élevée", mid: "Moyenne", low: "Basse" } as const;
 
 // Tableau des compétences : recherche, filtres, tri et pages côté navigateur.
 const query = ref("");
-const owned = ref<"all" | "yes" | "no">("all");
+const OWNED = [
+  { id: "all", label: "Toutes" },
+  { id: "yes", label: "Présentes" },
+  { id: "no", label: "Manquantes" },
+] as const;
+const owned = ref<(typeof OWNED)[number]["id"]>("all");
 const kind = ref<"all" | "core" | "tools">("all");
 const sort = ref<"offers" | "label">("offers");
 const perPage = ref(10);
@@ -136,14 +136,14 @@ const unlockLevel = (offers: number) => {
 };
 const UNLOCK_LEVEL = { high: "Élevée", mid: "Moyenne", low: "Faible" } as const;
 
-// Aperçu : part des demandes de compétences que tu couvres (pondérée par le nombre d'offres), puis par catégorie.
+// Catégories : part des compétences demandées que tu as (pondérée par le nombre d'offres), puis par catégorie.
 const coverage = computed(() => {
   const skills = stats.value?.skills ?? [];
   const total = skills.reduce((sum, s) => sum + s.offers, 0);
   return total ? Math.round((skills.filter((s) => s.owned).reduce((sum, s) => sum + s.offers, 0) / total) * 100) : 0;
 });
+// Langages et frameworks : déjà dans le chiffre clé « Top 10 ».
 const GROUPS = [
-  { id: "core", label: "Langages et frameworks" },
   { id: "devops", label: "DevOps et outils" },
   { id: "data", label: "Bases de données" },
   { id: "testing", label: "Tests" },
@@ -157,6 +157,23 @@ const groups = computed(() =>
     return { ...g, have, total: top.length, share: top.length ? Math.round((have / top.length) * 100) : 0 };
   }).filter((g) => g.total > 0),
 );
+
+// Analyses détaillées : un onglet à la fois ; changer d'onglet ne touche pas aux filtres du tableau.
+const TABS = [
+  { id: "categories", label: "Catégories" },
+  { id: "sources", label: "Sources" },
+  { id: "tips", label: "Recommandations" },
+] as const;
+const tab = ref<(typeof TABS)[number]["id"]>("categories");
+/** Flèches, Début et Fin : passent d'un onglet à l'autre (navigation clavier des onglets). */
+function onTabKey(e: KeyboardEvent) {
+  const i = TABS.findIndex((t) => t.id === tab.value);
+  const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: TABS.length - 1 }[e.key];
+  if (next === undefined) return;
+  e.preventDefault();
+  tab.value = TABS[(next + TABS.length) % TABS.length]!.id;
+  document.getElementById(`tab-${tab.value}`)?.focus();
+}
 
 const quality = (s: { offers: number; good: number }) => (s.offers ? Math.round((s.good / s.offers) * 100) : 0);
 const tone = (share: number) => (share >= 10 ? "good" : share >= 4 ? "mid" : "low");
@@ -178,6 +195,7 @@ const tips = computed(() => {
 });
 </script>
 
+
 <template>
   <header class="stats-head">
     <div class="title">
@@ -188,12 +206,12 @@ const tips = computed(() => {
       </div>
     </div>
     <div class="head-side">
-      <div class="tabs" role="tablist" aria-label="Période">
+      <span v-if="stats?.days" class="muted small">Écarts comparés aux {{ stats.days }} jours d'avant</span>
+      <div class="tabs period" role="tablist" aria-label="Période">
         <button v-for="p in PERIODS" :key="p.label" type="button" role="tab" :aria-selected="days === p.days" :class="{ active: days === p.days }" @click="days = p.days">
           {{ p.label }}
         </button>
       </div>
-      <span v-if="stats" class="muted small analysed"><Icon name="file" :size="15" />{{ n(stats.offers) }} offres analysées</span>
     </div>
   </header>
 
@@ -202,229 +220,239 @@ const tips = computed(() => {
   <p v-else-if="stats.offers === 0" class="muted">Aucune offre avec des compétences détectées sur cette période.</p>
 
   <div v-else class="stats-page">
-    <section class="kpis">
+    <section class="kpis" aria-label="Chiffres clés">
       <article v-for="k in kpis" :key="k.title" class="card kpi">
-        <div class="kpi-main">
-          <div class="kpi-title">
-            <span class="icon-box"><Icon :name="k.icon" :size="18" /></span>
-            <h2>{{ k.title }}</h2>
-          </div>
-          <strong class="kpi-value">{{ k.value }}</strong>
-          <p class="muted small">{{ k.text }}</p>
-          <p v-if="k.delta" class="small delta">
-            <span :class="k.delta.value > 0 ? 'up' : k.delta.value < 0 ? 'down' : 'muted'">{{ k.delta.value > 0 ? "↑" : k.delta.value < 0 ? "↓" : "=" }} {{ k.delta.text }}</span>
-            <span class="muted">vs période précédente</span>
-          </p>
+        <div class="kpi-title">
+          <span class="icon-box sm"><Icon :name="k.icon" :size="16" /></span>
+          <h2>{{ k.title }}</h2>
         </div>
-        <Ring v-if="k.ring !== null" :value="k.ring" class="kpi-ring" />
+        <div class="kpi-line">
+          <strong class="kpi-value">{{ k.value }}</strong>
+          <span v-if="k.delta" class="small" :class="k.delta.value > 0 ? 'up' : k.delta.value < 0 ? 'down' : 'muted'" :title="`Écart avec les ${stats.days} jours d'avant`">
+            {{ k.delta.value > 0 ? "↑" : k.delta.value < 0 ? "↓" : "=" }} {{ k.delta.text }}
+          </span>
+        </div>
+        <p class="muted small">{{ k.text }}</p>
       </article>
     </section>
 
     <div class="board">
-      <div class="column main">
-        <section class="card panel">
-          <div class="panel-head">
-            <span class="icon-box"><Icon name="sparkle" :size="18" /></span>
-            <div class="grow">
-              <h2>Compétences les plus demandées</h2>
-              <p class="muted small">Les technologies les plus demandées, ta couverture et leur part dans les offres.</p>
-            </div>
-            <label class="search">
-              <Icon name="search" :size="15" />
-              <input v-model="query" type="search" placeholder="Rechercher une compétence…" aria-label="Rechercher une compétence" />
-            </label>
+      <section class="card panel">
+        <div class="panel-head">
+          <span class="icon-box"><Icon name="sparkle" :size="18" /></span>
+          <div class="grow">
+            <h2>Compétences les plus demandées</h2>
+            <p class="muted small">Part des offres qui la demandent, et ta couverture.</p>
           </div>
-          <div class="toolbar">
-            <div class="tabs" role="tablist" aria-label="Dans ton profil">
-              <button v-for="o in [{ id: 'all', label: 'Toutes' }, { id: 'yes', label: 'Présentes' }, { id: 'no', label: 'Manquantes' }] as const" :key="o.id" type="button" role="tab" :aria-selected="owned === o.id" :class="{ active: owned === o.id }" @click="owned = o.id">
-                {{ o.label }}
-              </button>
-            </div>
-            <div class="selects">
-              <select v-model="kind" aria-label="Type de compétences">
-                <option value="all">Tous types</option>
-                <option value="core">Langages et frameworks</option>
-                <option value="tools">Outils</option>
-              </select>
-              <select v-model="sort" aria-label="Trier par">
-                <option value="offers">Trier par : volume</option>
-                <option value="label">Trier par : nom</option>
-              </select>
-            </div>
-          </div>
-          <div class="scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Compétence</th>
-                  <th class="num">Offres</th>
-                  <th>Part du marché</th>
-                  <th>Dans ton profil</th>
-                  <th>Priorité</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="s in shown" :key="s.label">
-                  <td class="muted">{{ rank.get(s.label) }}</td>
-                  <td class="strong">{{ s.label }}</td>
-                  <td class="num" :title="offersTitle(s)">{{ n(s.offers) }}</td>
-                  <td class="nowrap">
-                    <span class="share">{{ s.share }} %</span><span class="bar inline"><div class="fill" :style="{ width: `${s.share}%` }" /></span>
-                    <small v-if="hasTrend && s.trend !== null && Math.abs(s.trend) >= 3" :class="s.trend > 0 ? 'up' : 'down'" title="Part des 30 derniers jours moins celle des 30 jours d'avant">{{ trendText(s.trend) }}</small>
-                  </td>
-                  <td class="nowrap">
-                    <span class="dot" :class="s.owned ? 'good' : 'low'"><Icon :name="s.owned ? 'check' : 'x'" :size="10" /></span>{{ s.owned ? "Oui" : "Non" }}
-                  </td>
-                  <td><span class="badge" :class="priority(s.share)">{{ PRIORITY[priority(s.share)] }}</span></td>
-                </tr>
-                <tr v-if="!shown.length">
-                  <td colspan="6" class="muted">Aucune compétence ne correspond.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="pager">
-            <nav class="pages" aria-label="Pages">
-              <button type="button" class="ghost" :disabled="page === 1" aria-label="Page précédente" @click="page--">‹</button>
-              <template v-for="(p, i) in pageList" :key="i">
-                <span v-if="p === 0" class="muted">…</span>
-                <button v-else type="button" class="ghost" :class="{ current: p === page }" :aria-current="p === page ? 'page' : undefined" @click="page = p">{{ p }}</button>
-              </template>
-              <button type="button" class="ghost" :disabled="page === pages" aria-label="Page suivante" @click="page++">›</button>
-            </nav>
-            <label class="muted small per-page">
-              Voir
-              <select v-model.number="perPage" aria-label="Lignes par page">
-                <option :value="10">10</option>
-                <option :value="25">25</option>
-                <option :value="50">50</option>
-              </select>
-              par page
-            </label>
-          </div>
-        </section>
-
-        <section class="card panel">
-          <div class="panel-head">
-            <span class="icon-box"><Icon name="chart" :size="18" /></span>
-            <div class="grow">
-              <h2>Aperçu des compétences</h2>
-              <p class="muted small">Part des compétences demandées que tu couvres, pondérée par le nombre d'offres.</p>
-            </div>
-          </div>
-          <div class="overview">
-            <div class="donut-block">
-              <Ring :value="coverage" unit=" %" caption="couverture" tone="good" large class="donut" />
-              <ul class="legend small">
-                <li><span class="swatch good" />Présentes dans ton profil <strong>{{ coverage }} %</strong></li>
-                <li><span class="swatch accent" />Manquantes <strong>{{ 100 - coverage }} %</strong></li>
-              </ul>
-            </div>
-            <div class="groups">
-              <h3 class="small">Répartition par catégorie <span class="muted">(top 10 de chacune)</span></h3>
-              <div v-for="g in groups" :key="g.id" class="group">
-                <div class="group-line small">
-                  <span>{{ g.label }}</span>
-                  <span class="muted">{{ g.have }} / {{ g.total }}</span>
-                  <strong>{{ g.share }} %</strong>
-                </div>
-                <div class="bar"><div class="fill" :style="{ width: `${g.share}%` }" /></div>
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div class="column side">
-        <div class="pair">
-          <section class="card panel">
-            <div class="panel-head">
-              <span class="icon-box"><Icon name="star" :size="18" /></span>
-              <div class="grow">
-                <h2>Ce qui te débloquerait le plus d'offres</h2>
-                <p class="muted small">Seul langage ou framework qui te manque dans l'offre.</p>
-              </div>
-            </div>
-            <ol v-if="stats.unlock.length" class="unlock">
-              <li v-for="(u, i) in stats.unlock" :key="u.label">
-                <span class="rank">{{ i + 1 }}</span>
-                <div class="grow">
-                  <div class="unlock-line">
-                    <strong>{{ u.label }}</strong>
-                    <span class="badge" :class="unlockLevel(u.offers)">{{ UNLOCK_LEVEL[unlockLevel(u.offers)] }}</span>
-                  </div>
-                  <div class="bar"><div class="fill" :style="{ width: `${(u.offers / unlockMax) * 100}%` }" /></div>
-                </div>
-                <div class="unlock-count small">
-                  <span>{{ n(u.offers) }} offre{{ u.offers > 1 ? "s" : "" }}</span>
-                  <span class="muted" :title="u.training ? `dont ${u.training} avec formation proposée` : undefined">dont {{ n(u.accessible) }} ≤ {{ years(stats.experience.max) }}</span>
-                </div>
-              </li>
-            </ol>
-            <p v-else class="muted small">Aucune offre où il ne te manque qu'une techno.</p>
-          </section>
-
-          <section class="card panel">
-            <div class="panel-head">
-              <span class="icon-box"><Icon name="chart" :size="18" /></span>
-              <div class="grow">
-                <h2>Expérience demandée</h2>
-                <p class="muted small">Précisée dans {{ n(stats.experience.known) }} offres sur {{ n(stats.offers) }}.</p>
-              </div>
-            </div>
-            <div v-for="r in stats.experience.ranges" :key="r.label" class="range">
-              <div class="range-line">
-                <span>{{ r.label }}</span>
-                <strong>{{ r.share }} %</strong>
-              </div>
-              <div class="bar"><div class="fill" :style="{ width: `${r.share}%` }" /></div>
-              <span class="muted small range-count">{{ n(r.offers) }} offres</span>
-            </div>
-          </section>
+          <label class="search">
+            <Icon name="search" :size="15" />
+            <input v-model="query" type="search" placeholder="Rechercher une compétence…" aria-label="Rechercher une compétence" />
+          </label>
         </div>
-
-        <section class="card panel">
-          <div class="panel-head">
-            <span class="icon-box"><Icon name="rss" :size="18" /></span>
-            <div class="grow">
-              <h2>Sources</h2>
-              <p class="muted small">Volume d'offres et part de bonnes offres (au-dessus de ton seuil, non masquées).</p>
-            </div>
+        <div class="toolbar">
+          <div class="tabs" role="tablist" aria-label="Dans ton profil">
+            <button v-for="o in OWNED" :key="o.id" type="button" role="tab" :aria-selected="owned === o.id" :class="{ active: owned === o.id }" @click="owned = o.id">
+              {{ o.label }}
+            </button>
           </div>
+          <div class="selects">
+            <select v-model="kind" aria-label="Type de compétences">
+              <option value="all">Tous types</option>
+              <option value="core">Langages et frameworks</option>
+              <option value="tools">Outils</option>
+            </select>
+            <select v-model="sort" aria-label="Trier par">
+              <option value="offers">Tri : volume</option>
+              <option value="label">Tri : nom</option>
+            </select>
+          </div>
+        </div>
+        <div class="scroll">
           <table>
             <thead>
               <tr>
-                <th>Source</th>
+                <th>#</th>
+                <th>Compétence</th>
                 <th class="num">Offres</th>
-                <th class="num">Bonnes</th>
-                <th>Qualité</th>
+                <th>Part du marché</th>
+                <th>Dans ton profil</th>
+                <th>Priorité</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="s in stats.sources" :key="s.source">
-                <td class="ellipsis" :title="label(s.source)"><SourceLogo :source="s.source" :size="18" /> {{ label(s.source) }}</td>
-                <td class="num">{{ n(s.offers) }}</td>
-                <td class="num">{{ n(s.good) }}</td>
+              <tr v-for="s in shown" :key="s.label">
+                <td class="muted">{{ rank.get(s.label) }}</td>
+                <td class="strong">{{ s.label }}</td>
+                <td class="num" :title="offersTitle(s)">{{ n(s.offers) }}</td>
                 <td class="nowrap">
-                  <span class="share">{{ quality(s) }} %</span><span class="bar inline"><div :class="tone(quality(s))" :style="{ width: `${Math.min(100, quality(s) * 4)}%` }" /></span>
+                  <span class="share">{{ s.share }} %</span><span class="bar inline"><div class="fill" :style="{ width: `${s.share}%` }" /></span>
+                  <small v-if="hasTrend && s.trend !== null && Math.abs(s.trend) >= 3" :class="s.trend > 0 ? 'up' : 'down'" title="Part des 30 derniers jours moins celle des 30 jours d'avant">{{ trendText(s.trend) }}</small>
                 </td>
+                <td class="nowrap">
+                  <span class="dot" :class="s.owned ? 'good' : 'low'"><Icon :name="s.owned ? 'check' : 'x'" :size="10" /></span>{{ s.owned ? "Oui" : "Non" }}
+                </td>
+                <td><span class="badge" :class="priority(s.share)">{{ PRIORITY[priority(s.share)] }}</span></td>
+              </tr>
+              <tr v-if="!shown.length">
+                <td colspan="6" class="muted">Aucune compétence ne correspond.</td>
               </tr>
             </tbody>
           </table>
+        </div>
+        <div class="pager">
+          <nav class="pages" aria-label="Pages">
+            <button type="button" class="ghost" :disabled="page === 1" aria-label="Page précédente" @click="page--">‹</button>
+            <template v-for="(p, i) in pageList" :key="i">
+              <span v-if="p === 0" class="muted">…</span>
+              <button v-else type="button" class="ghost" :class="{ current: p === page }" :aria-current="p === page ? 'page' : undefined" @click="page = p">{{ p }}</button>
+            </template>
+            <button type="button" class="ghost" :disabled="page === pages" aria-label="Page suivante" @click="page++">›</button>
+          </nav>
+          <label class="muted small per-page">
+            Voir
+            <select v-model.number="perPage" aria-label="Lignes par page">
+              <option :value="10">10</option>
+              <option :value="25">25</option>
+              <option :value="50">50</option>
+            </select>
+            par page
+          </label>
+        </div>
+      </section>
+
+      <div class="side">
+        <section class="card panel">
+          <div class="panel-head">
+            <span class="icon-box"><Icon name="star" :size="18" /></span>
+            <div class="grow">
+              <h2>Ce qui te débloquerait le plus d'offres</h2>
+              <p class="muted small">Seul langage ou framework qui te manque dans l'offre.</p>
+            </div>
+          </div>
+          <ol v-if="stats.unlock.length" class="unlock">
+            <li v-for="(u, i) in stats.unlock" :key="u.label">
+              <span class="rank">{{ i + 1 }}</span>
+              <div class="grow">
+                <div class="unlock-line">
+                  <strong>{{ u.label }}</strong>
+                  <span class="badge" :class="unlockLevel(u.offers)">{{ UNLOCK_LEVEL[unlockLevel(u.offers)] }}</span>
+                  <span class="unlock-count small">
+                    {{ n(u.offers) }} offre{{ u.offers > 1 ? "s" : "" }}
+                    <span class="muted" :title="u.training ? `dont ${u.training} avec formation proposée` : undefined">· {{ n(u.accessible) }} ≤ {{ years(stats.experience.max) }}</span>
+                  </span>
+                </div>
+                <div class="bar thin"><div class="fill" :style="{ width: `${(u.offers / unlockMax) * 100}%` }" /></div>
+              </div>
+            </li>
+          </ol>
+          <p v-else class="muted small">Aucune offre où il ne te manque qu'une techno.</p>
         </section>
 
-        <section v-if="tips.length" class="card panel">
+        <section class="card panel">
           <div class="panel-head">
-            <span class="icon-box"><Icon name="target" :size="18" /></span>
-            <h2 class="grow">Nos recommandations</h2>
+            <span class="icon-box"><Icon name="briefcase" :size="18" /></span>
+            <div class="grow">
+              <h2>Expérience demandée</h2>
+              <p class="muted small">Précisée dans {{ n(stats.experience.known) }} offres sur {{ n(stats.offers) }}.</p>
+            </div>
           </div>
-          <ul class="tips small">
-            <li v-for="t in tips" :key="t"><Icon name="check" :size="14" class="up" />{{ t }}</li>
-          </ul>
+          <div class="ranges">
+            <template v-for="r in stats.experience.ranges" :key="r.label">
+              <span class="small">{{ r.label }}</span>
+              <span class="bar"><div class="fill" :style="{ width: `${r.share}%` }" /></span>
+              <strong class="small num">{{ r.share }} %</strong>
+              <span class="small muted num">{{ n(r.offers) }} offres</span>
+            </template>
+          </div>
         </section>
       </div>
     </div>
+
+    <section class="card panel details">
+      <div class="panel-head">
+        <span class="icon-box"><Icon name="chart" :size="18" /></span>
+        <h2 class="grow">Analyses détaillées</h2>
+        <div class="tabs" role="tablist" aria-label="Analyses détaillées" @keydown="onTabKey">
+          <button
+            v-for="t in TABS"
+            :id="`tab-${t.id}`"
+            :key="t.id"
+            type="button"
+            role="tab"
+            :aria-selected="tab === t.id"
+            :aria-controls="`panel-${t.id}`"
+            :tabindex="tab === t.id ? 0 : -1"
+            :class="{ active: tab === t.id }"
+            @click="tab = t.id"
+          >
+            {{ t.label }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="tab === 'categories'" id="panel-categories" role="tabpanel" aria-labelledby="tab-categories" class="categories">
+        <div class="coverage">
+          <div class="metric">
+            <div class="metric-line small">
+              <span>Part des compétences demandées que tu maîtrises</span>
+              <strong>{{ coverage }} %</strong>
+            </div>
+            <div class="bar"><div class="fill good" :style="{ width: `${coverage}%` }" /></div>
+            <p class="muted small">Chaque compétence compte autant de fois que d'offres la demandent.</p>
+          </div>
+          <div class="metric">
+            <div class="metric-line small">
+              <span>Part des offres dont tu as tous les langages et frameworks</span>
+              <strong>{{ stats.fullMatch }} %</strong>
+            </div>
+            <div class="bar"><div class="fill" :style="{ width: `${stats.fullMatch}%` }" /></div>
+            <p class="muted small">Une seule techno principale manquante suffit à exclure l'offre.</p>
+          </div>
+        </div>
+        <div class="groups">
+          <h3 class="small">Par catégorie <span class="muted">(10 compétences les plus demandées de chacune ; langages et frameworks : voir « Top 10 »)</span></h3>
+          <div v-for="g in groups" :key="g.id" class="group">
+            <div class="metric-line small">
+              <span>{{ g.label }}</span>
+              <span class="muted">{{ g.have }} / {{ g.total }}</span>
+              <strong>{{ g.share }} %</strong>
+            </div>
+            <div class="bar"><div class="fill" :style="{ width: `${g.share}%` }" /></div>
+          </div>
+        </div>
+      </div>
+
+      <div v-else-if="tab === 'sources'" id="panel-sources" role="tabpanel" aria-labelledby="tab-sources" class="scroll">
+        <p class="muted small">Bonnes offres : au-dessus de ton seuil de notification, non masquées.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th class="num">Offres</th>
+              <th class="num">Bonnes</th>
+              <th>Qualité</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="s in stats.sources" :key="s.source">
+              <td class="ellipsis" :title="label(s.source)"><SourceLogo :source="s.source" :size="18" /> {{ label(s.source) }}</td>
+              <td class="num">{{ n(s.offers) }}</td>
+              <td class="num">{{ n(s.good) }}</td>
+              <td class="nowrap">
+                <span class="share">{{ quality(s) }} %</span><span class="bar inline"><div :class="tone(quality(s))" :style="{ width: `${Math.min(100, quality(s) * 4)}%` }" /></span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-else id="panel-tips" role="tabpanel" aria-labelledby="tab-tips">
+        <ul v-if="tips.length" class="tips small">
+          <li v-for="t in tips" :key="t"><Icon name="check" :size="14" class="up" />{{ t }}</li>
+        </ul>
+        <p v-else class="muted small">Pas encore assez de données pour une recommandation.</p>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -434,38 +462,29 @@ const tips = computed(() => {
   flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  gap: 1rem;
-  margin-bottom: 1.25rem;
+  gap: 0.75rem 1rem;
+  margin-bottom: 1rem;
 }
 .title {
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
-.title h1 {
-  margin: 0;
-}
+.title h1,
 .title p {
   margin: 0;
 }
 .head-icon {
   color: var(--muted);
 }
-.head-side {
-  display: flex;
-  align-items: center;
-  gap: 1.25rem;
-  flex-wrap: wrap;
-}
-.head-side .tabs button.active,
-.toolbar .tabs button.active {
+/* Onglet actif bien visible : fond de la couleur d'accent. */
+.tabs button.active {
   background: var(--accent);
   color: var(--accent-contrast);
 }
-.analysed {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
+.tabs button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .stats-page {
   display: flex;
@@ -478,6 +497,7 @@ h2 {
 }
 h3 {
   margin: 0 0 0.25rem;
+  font-weight: 600;
 }
 p {
   margin: 0;
@@ -496,8 +516,16 @@ p {
   background: var(--accent-soft);
   color: var(--accent);
 }
+.icon-box.sm {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 8px;
+}
+.card {
+  padding: 0.9rem 1.1rem;
+}
 
-/* Chiffres clés. */
+/* Chiffres clés : titre, chiffre et écart sur une ligne, une phrase courte. */
 .kpis {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -505,37 +533,33 @@ p {
 }
 .kpi {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-.kpi-main {
-  display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.3rem;
   min-width: 0;
-  flex: 1;
 }
 .kpi-title {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.5rem;
 }
 .kpi-title h2 {
-  font-size: 0.85rem;
+  font-size: 0.875rem;
+}
+.kpi-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.75rem;
 }
 .kpi-value {
-  font-size: 1.6rem;
+  font-size: 1.5rem;
   font-variant-numeric: tabular-nums;
 }
-.kpi-ring {
-  --size: 52px;
-}
-.kpi-ring :deep(strong) {
-  display: none;
-}
-.delta {
+.head-side {
   display: flex;
-  gap: 0.4rem;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  flex-wrap: wrap;
 }
 .up {
   color: var(--good);
@@ -544,39 +568,33 @@ p {
   color: var(--low);
 }
 
-/* Grille : tableau et aperçu à gauche, le reste à droite. */
+/* Zone principale : le tableau, et à côté ce qui manque et l'expérience. */
 .board {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.6fr) minmax(19rem, 1fr);
   gap: 1rem;
   align-items: start;
 }
-.column {
+.side {
   display: flex;
   flex-direction: column;
   gap: 1rem;
   min-width: 0;
-}
-.pair {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-  gap: 1rem;
-  align-items: start;
 }
 .panel {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.7rem;
   min-width: 0;
 }
 .panel-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
 }
 .panel-head .muted {
-  margin-top: 0.15rem;
+  margin-top: 0.1rem;
 }
 
 /* Tableau des compétences. */
@@ -589,14 +607,18 @@ p {
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--muted);
-  min-width: 14rem;
+  min-width: 11rem;
+}
+.search:focus-within {
+  border-color: var(--accent);
 }
 .search input {
   border: none;
   background: transparent;
-  padding: 0.4rem 0;
+  padding: 0.35rem 0;
   min-height: 0;
   box-shadow: none;
+  outline: none;
   width: 100%;
 }
 .toolbar {
@@ -627,7 +649,7 @@ table {
 }
 th,
 td {
-  padding: 0.45rem 0.5rem;
+  padding: 0.38rem 0.5rem;
   text-align: left;
   border-bottom: 1px solid var(--border);
 }
@@ -670,10 +692,16 @@ tbody tr:last-child td {
   vertical-align: middle;
   margin-right: 0.4rem;
 }
+.bar.thin {
+  height: 5px;
+}
 .bar .fill {
   height: 100%;
   border-radius: 99px;
   background: var(--accent);
+}
+.bar .fill.good {
+  background: var(--good);
 }
 .dot {
   display: inline-grid;
@@ -704,7 +732,7 @@ tbody tr:last-child td {
 }
 .badge.mid {
   background: rgb(56 189 248 / 0.14);
-  color: #0ea5e9;
+  color: #0284c7;
 }
 .badge.low {
   background: var(--mid-bg);
@@ -739,73 +767,7 @@ tbody tr:last-child td {
   gap: 0.4rem;
 }
 
-/* Aperçu. */
-.overview {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 1.5rem;
-  align-items: center;
-}
-.donut-block {
-  display: flex;
-  align-items: center;
-  gap: 1.25rem;
-}
-.donut {
-  --size: 130px;
-  background: conic-gradient(var(--good) calc(var(--p) * 1%), var(--accent) 0);
-}
-.donut::before {
-  inset: 14px;
-}
-.donut :deep(strong) {
-  color: var(--text);
-}
-.legend {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 0.5rem;
-}
-.legend li {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-}
-.legend strong {
-  margin-left: auto;
-  padding-left: 0.75rem;
-}
-.swatch {
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 50%;
-}
-.swatch.good {
-  background: var(--good);
-}
-.swatch.accent {
-  background: var(--accent);
-}
-.groups {
-  display: grid;
-  gap: 0.6rem;
-}
-.group {
-  display: grid;
-  gap: 0.25rem;
-}
-.group-line {
-  display: grid;
-  grid-template-columns: 1fr auto 3rem;
-  gap: 0.75rem;
-}
-.group-line strong {
-  text-align: right;
-}
-
-/* Ce qui te débloquerait le plus d'offres. */
+/* Ce qui te débloquerait le plus d'offres : une ligne par techno, la barre en dessous. */
 .unlock {
   list-style: none;
   margin: 0;
@@ -815,61 +777,83 @@ tbody tr:last-child td {
 .unlock li {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.6rem 0;
+  gap: 0.65rem;
+  padding: 0.45rem 0;
   border-bottom: 1px solid var(--border);
 }
 .unlock li:last-child {
   border-bottom: none;
+  padding-bottom: 0;
 }
 .rank {
   display: grid;
   place-items: center;
   flex: none;
-  width: 1.6rem;
-  height: 1.6rem;
+  width: 1.5rem;
+  height: 1.5rem;
   border-radius: 50%;
   background: var(--surface-2);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 .unlock-line {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.35rem;
+  gap: 0.4rem 0.5rem;
+  margin-bottom: 0.3rem;
   flex-wrap: wrap;
 }
 .unlock-count {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  margin-left: auto;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Expérience demandée. */
-.range {
+/* Expérience : nom, barre, part et nombre d'offres sur une ligne. */
+.ranges {
+  display: grid;
+  grid-template-columns: auto minmax(3rem, 1fr) auto auto;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+}
+
+/* Analyses détaillées. */
+.categories {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.5rem;
+}
+.coverage {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+.metric,
+.group {
   display: grid;
   gap: 0.3rem;
-  padding-bottom: 0.6rem;
-  border-bottom: 1px solid var(--border);
 }
-.range:last-child {
-  border-bottom: none;
-}
-.range-line {
+.metric-line {
   display: flex;
-  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
 }
-.range-count {
-  text-align: right;
+.metric-line > :first-child {
+  flex: 1;
 }
-
+.groups {
+  display: grid;
+  gap: 0.55rem;
+  align-content: start;
+}
+#panel-sources {
+  display: grid;
+  gap: 0.5rem;
+}
 td :deep(.source-logo) {
   vertical-align: middle;
   margin-right: 0.3rem;
 }
-
 .tips {
   list-style: none;
   margin: 0;
@@ -887,52 +871,69 @@ td :deep(.source-logo) {
   margin-top: 0.15rem;
 }
 
-/* Écran moyen : les colonnes passent l'une sous l'autre. */
-@media (max-width: 1300px) {
-  .kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+/* Portable : cartes de chiffres clés étroites, l'icône laisse la place au titre. */
+@media (max-width: 1500px) {
+  .kpi .icon-box {
+    display: none;
   }
+}
+/* Écran moyen (portable étroit, tablette) : tout sur une colonne. */
+@media (max-width: 1100px) {
   .board {
     grid-template-columns: minmax(0, 1fr);
   }
+  .side {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
 }
+/* Chiffres clés en 2 × 2. */
+@media (max-width: 900px) {
+  .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* Téléphone : page verticale. */
 @media (max-width: 700px) {
   .kpis {
     gap: 0.6rem;
   }
+  .kpi-title h2 {
+    font-size: 0.8rem;
+  }
   .kpi-value {
     font-size: 1.25rem;
   }
-  .kpi-ring,
-  .kpi .icon-box {
-    display: none;
-  }
-  .kpi-title h2 {
-    font-size: 0.78rem;
-  }
-  .delta {
-    flex-wrap: wrap;
-    gap: 0 0.3rem;
-  }
   .head-side,
-  .head-side .tabs {
+  .stats-head .period,
+  .details .tabs {
     width: 100%;
   }
-  .head-side .tabs button {
+  .stats-head .period button,
+  .details .tabs button {
     flex: 1;
     padding-inline: 0.3rem;
     white-space: nowrap;
   }
-  .pair,
-  .overview {
+  .side,
+  .categories {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .donut-block {
-    justify-content: center;
   }
   .search {
     min-width: 0;
     width: 100%;
+  }
+  /* Le pourcentage suffit : le tableau tient dans la largeur du téléphone. */
+  .board .bar.inline {
+    display: none;
+  }
+  table {
+    font-size: 0.8rem;
+  }
+  th,
+  td {
+    padding-inline: 0.22rem;
   }
 }
 </style>
