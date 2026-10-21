@@ -219,6 +219,16 @@ const addSkill = (skill: string) =>
     job.value = await api.getJob(props.id);
   });
 
+/** « Je peux l'apprendre vite » : l'ajoute à ta liste du profil, le score se recalcule. */
+const addLearnable = (skill: string) =>
+  act(async () => {
+    const { profile } = await api.getProfile();
+    if (!profile.learnableSkills.some((s) => s.toLowerCase() === skill.toLowerCase())) {
+      await api.saveProfile({ ...profile, learnableSkills: [...profile.learnableSkills, skill] });
+    }
+    job.value = await api.getJob(props.id);
+  });
+
 const links = computed(() =>
   (job.value?.sources ?? []).map((s) => ({ ...s, safe: safeUrl(s.url) })).filter((s) => s.safe),
 );
@@ -463,7 +473,7 @@ const ruleLabel = (r: ScoreRule) =>
 
     <div class="layout">
       <div class="stack main">
-        <AiAnalysisCard :key="`ai-${job.fullTextAt}`" :job-id="job.id" @analyzed="reloadJob" />
+        <AiAnalysisCard :key="`ai-${job.fullTextAt}`" :job-id="job.id" :to-learn="job.toLearn" @analyzed="reloadJob" />
 
         <div class="grid-2">
           <section class="card">
@@ -538,6 +548,8 @@ const ruleLabel = (r: ScoreRule) =>
               <span v-for="s in job.missingSkills" :key="s" class="chip missing">
                 {{ s }}
                 <button type="button" :disabled="busy" :title="`J'ai ${s}`" @click="addSkill(s)">+ je l'ai</button>
+                <span v-if="job.toLearn.includes(s)" class="muted">à apprendre</span>
+                <button v-else type="button" :disabled="busy" :title="`Je peux apprendre ${s} vite`" @click="addLearnable(s)">+ je peux l'apprendre</button>
               </span>
             </div>
             <p class="muted small">Si tu les maîtrises, ajoute-les à ton profil et mets-les en avant dans ton CV et ta lettre.</p>

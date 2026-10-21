@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PROFILE } from "@job-radar/shared";
+import { getSkill } from "@job-radar/skills";
 import { hashProfile } from "./profile-hash";
-import { contractFromText, contractFromTitle, contractOfJob, detectNonDevRole, detectRemote, detectSeniority, looksLikeItTitle, normalizeContract, parseExperienceYears } from "./signals";
+import { contractFromText, contractFromTitle, contractOfJob, detectNonDevRole, detectRemote, detectSeniority, looksLikeItTitle, normalizeContract, masteryRequired, parseExperienceYears, trainingOffered
+} from "./signals";
 
 describe("detectSeniority", () => {
   it.each([
@@ -202,4 +204,30 @@ describe("signaux du score (oct. 2026)", () => {
     expect(detectSeniority("Confirmed Software Engineer (fullstack)")).toBe("senior");
     expect(detectSeniority("Experienced Backend Developer")).toBe("senior");
   });
+});
+
+describe("trainingOffered", () => {
+  it.each([
+    ["Formation Angular assurée à votre arrivée.", true],
+    ["Une formation interne complète.", true],
+    ["Vous serez formé à nos outils.", true],
+    ["Formation : Bac+5 en informatique.", false],
+    ["Un onboarding soigné.", false],
+  ])("« %s » → %s", (text, expected) => expect(trainingOffered(text)).toBe(expected));
+});
+
+describe("masteryRequired : des années ne comptent que reliées à la techno", () => {
+  const angular = getSkill("angular")!;
+  it.each([
+    ["Java et Angular, 2 ans d'expérience.", null],
+    ["Développeur Java / Angular avec 2 ans d'expérience minimum.", null],
+    ["Vous avez 3 ans d'expérience sur Angular.", "3 ans exigés"],
+    ["3 ans minimum en Angular.", "3 ans exigés"],
+    ["Au moins 4 ans d'expérience sur Java et Angular.", "4 ans exigés"],
+    ["Angular : 3 ans minimum.", "3 ans exigés"],
+    ["Angular (5 ans) indispensable.", "5 ans exigés"],
+    ["Maîtrise d'Angular.", "maîtrise exigée"],
+    ["Angular indispensable.", "maîtrise exigée"],
+    ["Angular serait un plus.", null],
+  ])("« %s » → %s", (text, expected) => expect(masteryRequired(text, angular)).toBe(expected));
 });

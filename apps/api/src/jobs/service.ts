@@ -72,6 +72,8 @@ export type JobDetail = JobSummary & {
   scoreSteps: ScoreStep[];
   /** Critère Technique calculé sur les compétences lues par l'IA. */
   aiSkills: boolean;
+  /** Technos absentes de ton profil comptées « à apprendre » (poste junior, formation proposée, ou ta liste). */
+  toLearn: string[];
   /** Candidatures déjà envoyées pour la même offre vue sur un autre site. */
   appliedTwins: AppliedTwin[];
 } & ApplyInfoFields;
@@ -359,6 +361,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
         userEdits: job.userEdits ?? null,
         scoreSteps,
         aiSkills: !!aiSkillsOf(verdict),
+        toLearn: s.toLearn,
         appliedTwins: await this.appliedTwins(id),
         applyChannel: job.applyChannel ?? null,
         applyCv: job.applyCv ?? null,

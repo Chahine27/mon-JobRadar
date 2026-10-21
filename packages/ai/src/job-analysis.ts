@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AI_DOMAIN, contractOfJob, normalizeContract } from "@job-radar/scoring";
+import { AI_DOMAIN, DEFAULT_RULES, contractOfJob, detectSeniority, masteryRequired, normalizeContract, productionRequired, trainingOffered } from "@job-radar/scoring";
 import { extractSkills, getSkill, normalizeText, resolveSkill } from "@job-radar/skills";
 import { toFields } from "./job-reading";
 import type { OllamaClient } from "./ollama";
@@ -9,8 +9,9 @@ import type { OllamaClient } from "./ollama";
  * les offres au-dessus du seuil « Analyse IA à partir de » (30 par collecte) ; les autres avec « Relancer »
  * (cf. analysisFitsJob dans l'API).
  * Pas changé pour contrat / salaire / adresse (2026-10-19) : les anciens avis restent bons, ils n'ont juste pas ces infos.
+ * 2026-10-21 : technos « à apprendre » (formation proposée, poste junior, liste du candidat) jamais une raison de « faible ».
  */
-export const ANALYSIS_PROMPT_VERSION = "2026-10-13.1";
+export const ANALYSIS_PROMPT_VERSION = "2026-10-21.1";
 
 /**
  * Liste rendue par l'IA : éléments vides retirés, trop longs coupés, liste coupée à `max`. Une liste un peu
@@ -107,6 +108,8 @@ export type AnalysisProfileInput = {
   skills: string[];
   /** Compétences vues seulement en projets (jamais en entreprise). */
   projectSkills?: string[];
+  /** Technos absentes de son profil qu'il peut apprendre vite (sa liste). */
+  learnableSkills?: string[];
   experienceMin: number;
   experienceMax: number;
   contracts: string[];
@@ -138,14 +141,15 @@ Règles :
 - Si l'annonce est marquée EXTRAIT : ce n'est que le début du texte. Ne déduis rien de ce qui manque, et mets « Annonce incomplète : ouvre l'annonce complète pour vérifier les exigences » dans points_attention.
 - Le candidat a deux niveaux de compétences : EN ENTREPRISE (expérience professionnelle) et SEULEMENT EN PROJETS (projets personnels ou de formation, aucune expérience professionnelle). Une compétence vue seulement en projets n'est JAMAIS une « solide base », une « maîtrise », une « bonne connaissance » ni une « expérience » : écris « vue en projets ».
 - exigees_en_entreprise / exigees_en_projets / exigees_manquantes : range chaque élément de competences_obligatoires dans une seule de ces 3 listes, d'après le PROFIL DU CANDIDAT.
+- Technologie À APPRENDRE : une technologie absente de son profil qui est dans sa liste « peut apprendre vite », OU n'importe quelle technologie absente quand l'annonce propose une formation (formation interne, « vous serez formé », montée en compétences, mentorat) ou vise un junior / débutant. SAUF si l'annonce exige une maîtrise ou des années d'expérience sur elle : elle manque alors vraiment. Une technologie à apprendre n'est jamais à elle seule une raison de « faible », même si c'est la technologie principale ; dans avis et points_attention, écris « à apprendre (formation proposée) », pas « te manque ».
 - Ce qui correspond au parcours du candidat (secteur où il a déjà travaillé, technologie de son CV) est un ATOUT : cite-le dans avis, jamais dans points_attention.
 - Type de contrat : compare-le aux « Contrats souhaités » du candidat. Si le contrat est connu et non souhaité, indique-le dans points_attention et considère l'adéquation comme faible. S'il est souhaité, ne le mets pas dans points_attention.
 - points_attention : les pièges concrets pour le candidat (poste senior, mission chez un client, astreintes, déplacements, anglais exigé, habilitation, salaire non indiqué, technologie principale absente de son profil…). 5 maximum.
 - adequation : compare l'annonce au PROFIL DU CANDIDAT donné, y compris le contrat souhaité.
   forte = il a EN ENTREPRISE la plupart des compétences exigées, dont la technologie principale, ET l'expérience demandée ne dépasse pas la sienne.
-  faible = contrat connu non souhaité, OU expérience demandée nettement au-dessus de la sienne, OU technologie principale absente de son profil, OU au moins 2 compétences exigées manquantes, OU poste très orienté vers un domaine absent de son expérience en entreprise (concevoir des modèles d'IA ou de LLM, data science…).
+  faible = contrat connu non souhaité, OU expérience demandée nettement au-dessus de la sienne, OU technologie principale absente de son profil et pas à apprendre, OU au moins 2 compétences exigées manquantes et pas à apprendre, OU poste très orienté vers un domaine absent de son expérience en entreprise (concevoir des modèles d'IA ou de LLM, data science…).
   Développer AVEC des agents de code IA (Claude Code, Cursor, Copilot, Codex) est une méthode de travail, pas un domaine : traite-le comme une compétence (en entreprise, en projets ou manquante), jamais à lui seul comme une raison de « faible ». S'il est demandé ou cité (IA appliquée au développement, agentic engineering…), mets-le dans les compétences, exigées ou bonus, avec les mots de l'annonce.
-  Technologie principale vue seulement en projets : au mieux moyenne.
+  Technologie principale vue seulement en projets, ou à apprendre : au mieux moyenne.
   moyenne = entre les deux.
 - avis : une phrase directe, en TUTOYANT le candidat (« tu », jamais « vous »), qui dit pourquoi ça colle ou pas, en distinguant ce qu'il a en entreprise, ce qu'il n'a vu qu'en projets et ce qui lui manque. Même règle pour points_attention.
 - contrat / salaire_min / salaire_max / salaire_periode / adresse : ce que dit VRAIMENT le texte de l'annonce, même si les champs « Contrat » ou « Salaire » au-dessus disent autre chose (ils viennent d'un robot qui se trompe parfois).
@@ -163,6 +167,7 @@ export function buildAnalysisPrompt(job: AnalysisJobInput, profile: AnalysisProf
   return `PROFIL DU CANDIDAT
 - Compétences EN ENTREPRISE : ${atWork.join(", ") || "non renseignées"}
 - Compétences vues SEULEMENT EN PROJETS (pas en entreprise) : ${inProjects.join(", ") || "aucune"}
+- Technologies qu'il peut APPRENDRE VITE (absentes de son profil, choisies par lui) : ${profile.learnableSkills?.join(", ") || "aucune"}
 - Expérience visée : ${profile.experienceMin} à ${profile.experienceMax} ans
 - Contrats souhaités : ${profile.contracts.join(", ") || "non renseignés"}
 - Zones : ${profile.locations.join(", ") || "non renseignées"}
@@ -243,7 +248,25 @@ function skillNames(list: string[]): string[] {
   return tidy(list).filter((x) => x.split(/\s+/).length <= 4 && !/\d+\s*(ans?|années?)\b/i.test(x));
 }
 
-/** Filet de sécurité : poste trop expérimenté pour le profil → adéquation faible, quoi qu'en dise le modèle. */
+/**
+ * Compétence exigée absente mais « à apprendre » (même règle que le score) : dans ta liste, ou poste junior / formation
+ * proposée — sauf maîtrise ou années exigées sur elle.
+ */
+export function learnableRequired(label: string, job: AnalysisJobInput, profile: AnalysisProfileInput, experienceMin: number | null): boolean {
+  const ids = idsOf(label);
+  const skills = ids.map((id) => getSkill(id)).filter((s) => s !== undefined);
+  if (skills.some((s) => masteryRequired(job.description, s))) return false;
+  const listed = new Set((profile.learnableSkills ?? []).flatMap(idsOf));
+  if (ids.some((id) => listed.has(id))) return true;
+  const junior = detectSeniority(job.title) === "junior" || experienceMin === 0;
+  return trainingOffered(job.description) || (junior && !productionRequired(job.description));
+}
+
+/**
+ * Filet de sécurité : poste trop expérimenté pour le profil → adéquation faible, quoi qu'en dise le modèle.
+ * À l'inverse, un « faible » dont la seule raison possible est une techno à apprendre (contrat voulu, expérience dans ta
+ * cible, rien d'autre ne manque, pas de domaine IA) remonte à « moyenne ».
+ */
 function checkAdequation(
   r: JobAnalysisResult,
   job: AnalysisJobInput,
@@ -253,9 +276,15 @@ function checkAdequation(
   const wantedContracts = profile.contracts.map((contract) => normalizeContract(contract) ?? contract.toUpperCase());
   if (kind && !wantedContracts.includes(kind)) return "faible";
   if (r.experience_min_ans !== null && r.experience_min_ans > profile.experienceMax + 1) return "faible";
-  // Vérifié par le code : au moins 2 langages / frameworks exigés manquants (pas les outils), ou poste orienté IA sans IA en entreprise.
-  if (r.exigees_manquantes.filter((x) => idsOf(x).some((id) => getSkill(id)?.core)).length >= 2) return "faible";
+  // Vérifié par le code : au moins 2 langages / frameworks exigés manquants (pas les outils, ni les technos à apprendre), ou poste orienté IA sans IA en entreprise.
+  const missingCore = r.exigees_manquantes.filter((x) => idsOf(x).some((id) => getSkill(id)?.core));
+  // Comme le score : au plus `maxLearnable` technos à apprendre, les suivantes manquent vraiment.
+  const learnable = missingCore.filter((x) => learnableRequired(x, job, profile, r.experience_min_ans));
+  const reallyMissing = [...missingCore.filter((x) => !learnable.includes(x)), ...learnable.slice(DEFAULT_RULES.maxLearnable)];
+  if (reallyMissing.length >= 2) return "faible";
   if (AI_DOMAIN.test(normalizeText(job.title)) && !levels(profile).atWork.some((s) => AI_DOMAIN.test(normalizeText(s)))) return "faible";
+  const inTarget = (r.experience_min_ans === null || r.experience_min_ans <= profile.experienceMax) && r.niveau !== "senior";
+  if (r.adequation === "faible" && inTarget && reallyMissing.length === 0 && missingCore.length > 0) return "moyenne";
   return r.adequation;
 }
 
@@ -343,7 +372,7 @@ export async function analyzeJobWithAi(
             .filter((p) => !wantedContract(p, profile.contracts))
             .slice(0, 6),
           niveau: checkNiveau(r, job.title),
-          adequation: checkAdequation(r, job, profile),
+          adequation: checkAdequation({ ...r, niveau: checkNiveau(r, job.title) }, job, profile),
         },
         model: client.model,
         durationMs: Date.now() - started,

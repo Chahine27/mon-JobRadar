@@ -214,3 +214,39 @@ describe("points d'attention sur le contrat", () => {
     expect(bad).toMatchObject({ salaire_min: null, salaire_max: null, adresse: null });
   });
 });
+
+describe("technos à apprendre (formation proposée, poste junior, ta liste)", () => {
+  const JAVA = { ...PROFILE, skills: ["Java", "Spring Boot", "TypeScript"] };
+  const job = (description: string, title = "Développeur Java / Angular (H/F)") => ({ ...JOB, title, description });
+  const read = (j: typeof JOB, extra: object, profile: typeof JAVA & { learnableSkills?: string[] } = JAVA) =>
+    analyzeJobWithAi(
+      new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify({ ...GOOD, niveau: "inconnu", experience_min_ans: 2, ...extra }) } }) }),
+      j,
+      profile,
+    ).then((r) => r.result.adequation);
+
+  it("« faible » à cause d'une techno à apprendre seulement : remonté en « moyenne »", async () => {
+    const trained = job("Java et Angular. 2 ans d'expérience. Formation Angular assurée à votre arrivée.");
+    expect(await read(trained, { competences_obligatoires: ["Java", "Angular"] })).toBe("moyenne");
+    // Deux technos à apprendre ne font pas « 2 compétences manquantes ».
+    expect(await read(trained, { competences_obligatoires: ["Java", "Angular", "Go"] })).toBe("moyenne");
+    // Ta liste « je peux l'apprendre vite », sans formation écrite.
+    const plain = job("Java et Angular. 2 ans d'expérience.");
+    expect(await read(plain, { competences_obligatoires: ["Java", "Angular"] }, { ...JAVA, learnableSkills: ["Angular"] })).toBe("moyenne");
+  });
+
+  it("reste « faible » : maîtrise exigée, rien à apprendre, expérience au-dessus, poste senior, autre manque", async () => {
+    const req = { competences_obligatoires: ["Java", "Angular"] };
+    expect(await read(job("Java. Maîtrise d'Angular indispensable. Formation interne assurée."), req)).toBe("faible");
+    expect(await read(job("Java et Angular. 2 ans d'expérience."), req)).toBe("faible");
+    const trained = job("Java et Angular. Formation interne assurée.");
+    expect(await read(trained, { ...req, experience_min_ans: 4 })).toBe("faible");
+    expect(await read(trained, { ...req, niveau: "senior" })).toBe("faible");
+    expect(await read(trained, { competences_obligatoires: ["Java"] })).toBe("faible"); // aucune techno à apprendre : l'avis de l'IA tient
+  });
+
+  it("la consigne et le profil donnés à l'IA parlent des technos à apprendre", () => {
+    expect(ANALYSIS_SYSTEM_PROMPT).toMatch(/À APPRENDRE/);
+    expect(buildAnalysisPrompt(JOB, { ...JAVA, learnableSkills: ["Angular", "Go"] })).toContain("APPRENDRE VITE (absentes de son profil, choisies par lui) : Angular, Go");
+  });
+});

@@ -15,6 +15,8 @@ export type ScoringRules = {
   titleWeight: number;
   /** Techno que tu n'as pas, sur un poste junior ou avec formation proposée (sans maîtrise exigée) : comptée à moitié. */
   learnableCredit: number;
+  /** Au plus N technos « à apprendre » comptées à moitié par offre (les plus importantes) ; les suivantes manquent. */
+  maxLearnable: number;
   /** Compétence vue seulement en projets (pas en entreprise) : comptée à moitié. */
   projectCredit: number;
   /** Note technique maximum quand la techno principale de l'offre n'est vue qu'en projets. */
@@ -48,11 +50,12 @@ export type ScoringRules = {
 };
 
 export const DEFAULT_RULES: ScoringRules = {
-  version: "2026-10-21.1",
+  version: "2026-10-21.2",
   neutral: 60,
   technicalPoints: 80,
   titleWeight: 3,
   learnableCredit: 0.5,
+  maxLearnable: 2,
   projectCredit: 0.5,
   projectOnlyMainCap: 50,
   fluentEnglishPoints: -10,

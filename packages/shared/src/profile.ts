@@ -66,6 +66,8 @@ export const ProfileSchema = z
     skills: z.array(z.string().trim().min(1)).min(1).default(DEFAULT_SKILLS),
     /** Compétences vues seulement en projets (jamais en entreprise) : comptent moitié dans le score technique. */
     projectSkills: z.array(z.string().trim().min(1)).max(100).default([]),
+    /** Technos que tu peux apprendre vite (ta liste) : absentes de ton profil, comptées à moitié sauf maîtrise exigée. */
+    learnableSkills: z.array(z.string().trim().min(1)).max(100).default([]),
     contracts: z.array(z.string().min(1)).min(1),
     experienceMin: z.number().int().min(0),
     experienceMax: z.number().int().min(0),
@@ -120,6 +122,7 @@ export type Profile = z.infer<typeof ProfileSchema>;
 export const DEFAULT_PROFILE: Profile = {
   skills: DEFAULT_SKILLS,
   projectSkills: [],
+  learnableSkills: [],
   contracts: ["CDI"],
   experienceMin: 1,
   experienceMax: 3,

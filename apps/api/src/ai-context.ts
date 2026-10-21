@@ -24,6 +24,7 @@ export function toProfileInput(p: Profile, kit: LetterKit | null): AnalysisProfi
   return {
     skills: p.skills,
     projectSkills: p.projectSkills,
+    learnableSkills: p.learnableSkills,
     experienceMin: p.experienceMin,
     experienceMax: p.experienceMax,
     contracts: p.contracts,

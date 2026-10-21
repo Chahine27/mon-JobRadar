@@ -89,6 +89,8 @@ export type ScoreResult = {
   capLabel: string | null;
   /** Raisons d'une adéquation faible vérifiées par le code (l'avis de l'IA est alors ramené à « faible »). */
   weakFit: string[];
+  /** Technos absentes de ton profil comptées « à apprendre » (poste junior, formation proposée, ou ta liste). */
+  toLearn: string[];
 };
 
 type Part = { score: number; reasons: string[]; warnings: string[]; adjustment?: Adjustment };
@@ -108,7 +110,9 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
   const owned = [...profile.skills.map(resolveSkill), ...projects];
   const projectIds = new Set(projects.map((s) => s.id));
   const preferred = profile.preferredTechs.map((p) => resolveSkill(p.name));
-  const customSkills = [...owned, ...preferred].filter((s) => s.id.startsWith("custom:"));
+  const learnable = (profile.learnableSkills ?? []).map(resolveSkill);
+  const learnIds = new Set(learnable.map((s) => s.id));
+  const customSkills = [...owned, ...preferred, ...learnable].filter((s) => s.id.startsWith("custom:"));
   const skillOf = (id: string): Skill | undefined => getSkill(id) ?? customSkills.find((s) => s.id === id);
   const ownedIds = new Set(owned.map((s) => s.id));
   const inTitle = new Set(extractSkills(input.title, customSkills));
@@ -163,7 +167,7 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
   const part: Part = { score: rules.noSkillsTechnical, reasons: [], warnings: [] };
   if (items.length === 0) {
     part.warnings.push("Aucune techno détectée : poste peut-être hors informatique");
-    return { part, matched, missing, preferredFound, main: [] as string[], product, requiredIds, missingRequired: [] as string[], blocking: [] as string[] };
+    return { part, matched, missing, preferredFound, main: [] as string[], product, requiredIds, missingRequired: [] as string[], blocking: [] as string[], toLearn: [] as string[] };
   }
 
   const seniority = titleSeniority(input, profile);
@@ -172,8 +176,22 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
     : (seniority === "junior" || input.experienceMinYears === 0) && !productionRequired(input.description)
       ? "poste junior"
       : null;
+  /** Technos absentes comptées à moitié : poste junior / formation proposée, ou ta liste « à apprendre vite ». */
   const toLearn: string[] = [];
+  const listed: string[] = [];
   const blocking: string[] = [];
+  const masteryOf = (id: string) => {
+    const skill = skillOf(id);
+    return skill ? masteryRequired(input.description, skill) : null;
+  };
+  // Au plus `maxLearnable` technos à apprendre comptées à moitié : les plus importantes (titre, exigées, puis langages et
+  // frameworks connus, outils connus, et enfin les libellés inconnus lus par l'IA) ; les suivantes comptent comme manquantes.
+  const rank = (id: string) => (getSkill(id) ? (getSkill(id)!.core ? 2 : 1) : 0);
+  const candidates = items
+    .filter((it) => !ownedIds.has(it.id) && (learnableWhy || learnIds.has(it.id)) && !masteryOf(it.id))
+    .sort((a, b) => b.weight - a.weight || rank(b.id) - rank(a.id));
+  const credited = new Set(candidates.slice(0, rules.maxLearnable).map((it) => it.id));
+  const tooMany = candidates.slice(rules.maxLearnable).map((it) => it.id);
   let got = 0;
   let total = 0;
   for (const it of items) {
@@ -182,11 +200,10 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
       got += it.weight * (projectIds.has(it.id) ? rules.projectCredit : 1);
       continue;
     }
-    const skill = skillOf(it.id);
-    const mastery = skill ? masteryRequired(input.description, skill) : null;
-    if (learnableWhy && !mastery) {
+    const mastery = masteryOf(it.id);
+    if (credited.has(it.id)) {
       got += it.weight * rules.learnableCredit;
-      toLearn.push(label(it.id));
+      (learnableWhy ? toLearn : listed).push(it.id);
     } else if (inTitle.has(it.id) || mastery) {
       blocking.push(mastery ? `${label(it.id)} (${mastery})` : label(it.id));
     }
@@ -205,14 +222,18 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
   if (useAi) part.reasons.push("Compétences lues par l'IA (« plus » comptés à moitié)");
   if (matched.length) part.reasons.push(`Tu as : ${matched.join(", ")}`);
   if (inProjects.length) part.reasons.push(`Vu seulement en projets (compté à moitié) : ${inProjects.join(", ")}`);
-  if (toLearn.length) part.reasons.push(`À apprendre (${learnableWhy}) : ${toLearn.join(", ")}`);
+  if (toLearn.length) part.reasons.push(`À apprendre (${learnableWhy}) : ${toLearn.map(label).join(", ")}`);
+  if (listed.length) part.reasons.push(`À apprendre (dans ta liste « je peux l'apprendre vite ») : ${listed.map(label).join(", ")}`);
+  if (tooMany.length) part.warnings.push(`Trop de technos à apprendre (${rules.maxLearnable} au plus comptées à moitié), manquantes : ${tooMany.map(label).join(", ")}`);
   if (blocking.length) part.warnings.push(`Techno principale ou exigée que tu n'as pas : ${blocking.join(", ")}`);
-  const others = missing.filter((m) => !toLearn.includes(m) && !blocking.some((b) => b.startsWith(m)));
+  const learning = new Set([...toLearn, ...listed]);
+  const learnLabels = [...learning].map(label);
+  const others = missing.filter((m) => !learnLabels.includes(m) && !tooMany.map(label).includes(m) && !blocking.some((b) => b.startsWith(m)));
   if (others.length) part.warnings.push(`Mots-clés absents de ton profil : ${others.join(", ")} — à ajouter au CV si tu les maîtrises`);
-  // Langages / frameworks exigés absents (les outils et mots inconnus — Kafka, Scrum… — ne comptent pas).
+  // Langages / frameworks exigés absents (les outils et mots inconnus — Kafka, Scrum… — ne comptent pas), hors technos à apprendre.
   // Sans l'IA, « cité dans l'annonce » n'est pas « exigé » : seulement les technos du titre ou à maîtrise exigée.
-  const missingRequired = useAi ? requiredIds.filter((id) => !ownedIds.has(id) && getSkill(id)?.core).map(label) : blocking;
-  return { part, matched, missing, preferredFound, main, product, requiredIds, missingRequired, blocking };
+  const missingRequired = useAi ? requiredIds.filter((id) => !ownedIds.has(id) && !learning.has(id) && getSkill(id)?.core).map(label) : blocking;
+  return { part, matched, missing, preferredFound, main, product, requiredIds, missingRequired, blocking, toLearn: learnLabels };
 }
 
 type ProductExperience = { labels: string[]; years: number } | null;
@@ -508,6 +529,7 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
     rulesVersion: rules.version,
     capLabel,
     weakFit,
+    toLearn: tech.toLearn,
   };
 }
 

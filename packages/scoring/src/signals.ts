@@ -170,24 +170,31 @@ export function detectSideRole(title: string): string | null {
 
 /**
  * L'annonce propose-t-elle de te former (« formation interne », « vous serez formé », « montée en compétences ») ?
- * « Formation : Bac+5 » (diplôme demandé) ne compte pas.
+ * « Formation Angular assurée » compte ; « Formation : Bac+5 » (diplôme demandé) et « onboarding » seul ne comptent pas.
  */
 export function trainingOffered(text: string): boolean {
-  return /\b(formations? (en )?interne|formations? (assuree|proposee|prevue|offerte|complete|continue|dediee|adaptee|personnalisee)s?|nous (vous )?formons|vous (serez|etes) forme|(serez|etre|sera|seras) formee?s?|formee?s? (a|aux|sur) |parcours (de formation|d'integration)|programme de formation|montee en competences?|monter en competences?|mentorat|mentoring|tutorat|accompagnee? (par|dans|tout au long))/.test(
+  return /\b(formations? (en )?interne|formations? (assuree|proposee|prevue|offerte|complete|continue|dediee|adaptee|personnalisee)s?|formations? ([\w+#.-]+ ){1,2}(assuree|proposee|prevue|offerte|dediee|adaptee|personnalisee)s?|nous (vous )?formons|vous (serez|etes) forme|(serez|etre|sera|seras) formee?s?|formee?s? (a|aux|sur) |parcours (de formation|d'integration)|programme de formation|montee en competences?|monter en competences?|mentorat|mentoring|tutorat|accompagnee? (par|dans|tout au long))/.test(
     normalizeText(text),
   );
 }
 
+/** « 3 ans (d'expérience) sur / en / d' » juste avant la techno (« sur Java et Angular » : les deux). */
+const YEARS_BEFORE =
+  /(\d{1,2})\s*\+?\s*(?:ans?|annees?|years?)\b(?:\s+(?:d'experience|of experience|minimum|min\.?|au moins|professionnelle?s?|confirmee?s?))*\s*(?:sur|en|avec|dans|de|d'|du|des|on|with|in|using)\s*(?:le |la |l'|les )?(?:[\w.#+-]+\s*(?:,|\/|et|ou|and|or)\s*){0,2}$/;
+/** « Angular : 3 ans », « Angular (3 ans) », « Angular 3 ans » juste après la techno (pas « Angular, 2 ans d'expérience »). */
+const YEARS_AFTER = /^[^\s,;]+\s*[:(–-]?\s*(\d{1,2})\s*\+?\s*(?:ans?|annees?|years?)\b/;
+
 /**
  * La maîtrise de cette techno est-elle exigée (« 3 ans d'expérience sur Angular », « maîtrise d'Angular »,
  * « Angular indispensable ») ? Renvoie la raison (« 3 ans exigés », « maîtrise exigée ») ou null.
+ * Des années ne comptent que si la phrase les relie à la techno : « Java et Angular, 2 ans d'expérience » = 2 ans sur le poste.
  */
 export function masteryRequired(text: string, skill: Skill): string | null {
   const t = normalizeText(text);
   for (const i of skillIndexes(text, skill)) {
     const before = t.slice(Math.max(0, i - 70), i).split(/[.;\n!?]/).pop() ?? "";
     const after = t.slice(i, i + 70).split(/[.;\n!?]/)[0] ?? "";
-    const years = [...`${before} ${after}`.matchAll(/(\d{1,2})\s*\+?\s*(ans?|annees?|years?)\b/g)].map((m) => Number(m[1])).filter((n) => n >= 2 && n <= 15);
+    const years = [before.match(YEARS_BEFORE)?.[1], after.match(YEARS_AFTER)?.[1]].map(Number).filter((n) => n >= 2 && n <= 15);
     if (years.length) return `${Math.max(...years)} ans exigés`;
     if (/(maitrise|maitriser|maitrisez|expert(e|ise)?|solide experience|forte experience|(tres )?bonne connaissance|excellente connaissance|experience (significative|confirmee|solide|averee)|confirmee? (en|sur))\b/.test(before.slice(-45)))
       return "maîtrise exigée";

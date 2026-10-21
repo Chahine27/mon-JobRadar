@@ -5,7 +5,7 @@ import type { StoredAiAnalysis } from "../types";
 import Icon from "./Icon.vue";
 
 /** Carte « Analyse IA » d'une offre. */
-const props = defineProps<{ jobId: string }>();
+const props = defineProps<{ jobId: string; /** Technos « à apprendre » selon le score (formation, poste junior, ta liste). */ toLearn?: string[] }>();
 /** Nouvelle analyse faite : le score de l'offre a pu changer (l'IA baisse un score trop optimiste). */
 const emit = defineEmits<{ analyzed: [] }>();
 
@@ -75,6 +75,12 @@ const has = (skill: string) => {
     return (m.length >= 3 && words(s).includes(words(m))) || (s.length >= 3 && words(m).includes(words(s)));
   });
 };
+/** « Exigées, qui te manquent » coupées en deux : à apprendre, ou qui manquent vraiment. */
+const learnable = (skill: string) => (props.toLearn ?? []).some((l) => key(l) === key(skill) || ` ${key(skill)} `.includes(` ${key(l)} `));
+const missing = computed(() => {
+  const all = a.value?.exigees_manquantes ?? [];
+  return { learn: all.filter(learnable), really: all.filter((s) => !learnable(s)) };
+});
 const NIVEAU: Record<string, string> = { junior: "Junior", confirme: "Confirmé", senior: "Senior", inconnu: "Niveau non précisé" };
 const ADEQUATION: Record<string, { label: string; tone: string }> = {
   forte: { label: "Bonne adéquation", tone: "good" },
@@ -162,7 +168,8 @@ const when = computed(() =>
         <ul v-if="a.exigees_en_entreprise" class="clean list small">
           <li><strong>Exigées, que tu as en entreprise :</strong> {{ a.exigees_en_entreprise.join(", ") || "aucune" }}</li>
           <li><strong>Exigées, vues seulement en projets :</strong> {{ a.exigees_en_projets?.join(", ") || "aucune" }}</li>
-          <li><strong>Exigées, qui te manquent :</strong> {{ a.exigees_manquantes?.join(", ") || "aucune" }}</li>
+          <li v-if="missing.learn.length"><strong>Exigées, à apprendre :</strong> {{ missing.learn.join(", ") }}</li>
+          <li><strong>Exigées, qui te manquent vraiment :</strong> {{ missing.really.join(", ") || "aucune" }}</li>
         </ul>
 
         <div v-if="a.points_attention.length">

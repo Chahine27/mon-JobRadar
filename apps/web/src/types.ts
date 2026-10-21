@@ -82,6 +82,8 @@ export type JobDetail = JobSummary & {
   scoreSteps: Array<{ kind: "base" | "adjust" | "cap" | "total"; label: string; value: number }>;
   /** Critère Technique calculé sur les compétences lues par l'IA. */
   aiSkills: boolean;
+  /** Technos absentes de ton profil comptées « à apprendre » (poste junior, formation proposée, ou ta liste). */
+  toLearn: string[];
   /** Candidatures déjà envoyées pour la même offre vue sur un autre site. */
   appliedTwins: Array<{ id: string; title: string; company: string | null; city: string | null; appliedAt: string; sources: string[] }>;
 } & ApplyInfoFields;

@@ -182,6 +182,11 @@ async function save() {
           <p class="muted small hint">Jamais utilisées en entreprise : comptent à moitié dans le score, et l'IA ne les présente pas comme acquises.</p>
         </div>
         <TagInput v-model="profile.projectSkills" placeholder="Ex. Python" />
+        <div>
+          <h3>Technos que je peux apprendre vite</h3>
+          <p class="muted small hint">Absentes de ton profil : comptent à moitié, même sans formation écrite, sauf si l'annonce exige leur maîtrise. Ne rendent jamais l'avis de l'IA « faible » à elles seules.</p>
+        </div>
+        <TagInput v-model="profile.learnableSkills" placeholder="Ex. Angular" />
       </section>
 
       <section class="card stack">

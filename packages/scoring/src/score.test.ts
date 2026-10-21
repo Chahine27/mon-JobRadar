@@ -23,7 +23,7 @@ describe(`scores figés — règles ${DEFAULT_RULES.version}`, () => {
   });
 
   it("version des règles attendue", () => {
-    expect(DEFAULT_RULES.version).toBe("2026-10-21.1");
+    expect(DEFAULT_RULES.version).toBe("2026-10-21.2");
   });
 });
 
@@ -175,6 +175,51 @@ describe("règles détaillées", () => {
 
     // « Formation : Bac+5 » est un diplôme demandé, pas une formation proposée.
     expect(t("Développeur Java / Angular", "Formation : Bac+5 en informatique. Java et Angular.").breakdown.technical).toBe(50);
+  });
+
+  it("formation proposée : une techno à apprendre ne compte pas dans les compétences exigées manquantes (lecture de l'IA)", () => {
+    const java = { ...DEFAULT_PROFILE, skills: ["Java", "Spring Boot", "TypeScript"] };
+    const t = (description: string, required: string[], profile: Profile = java) =>
+      score({ ...PERFECT, title: "Développeur Java / Angular", description, experienceMinYears: 2, aiSkills: { required, bonus: [] } }, profile);
+    const trained = t("Java et Angular. Formation Angular assurée.", ["Java", "Angular"]);
+    expect(trained.final).toBeGreaterThan(DEFAULT_RULES.weakFitCap);
+    expect(trained.toLearn).toEqual(["Angular"]);
+    expect(trained.reasons).toContain("À apprendre (formation proposée) : Angular");
+    expect(t("Java, Angular et Go. Formation interne assurée.", ["Java", "Angular", "Go"]).weakFit).toEqual([]);
+    // Sans formation : les deux manquent vraiment → adéquation faible, plafond 40.
+    const plain = t("Java, Angular et Go.", ["Java", "Angular", "Go"]);
+    expect(plain.weakFit).toEqual(["compétences exigées manquantes : Angular, Go"]);
+    expect(plain.final).toBeLessThanOrEqual(DEFAULT_RULES.weakFitCap);
+  });
+
+  it("au plus 2 technos à apprendre comptées à moitié, les plus importantes ; les suivantes manquent", () => {
+    const java = { ...DEFAULT_PROFILE, skills: ["Java"] };
+    const r = score(
+      {
+        ...PERFECT,
+        title: "Développeur Java EE",
+        description: "Formation interne assurée.",
+        experienceMinYears: 2,
+        aiSkills: { required: ["Java", "Struts", "Hibernate", "Oracle", "Tomcat", "JSP", "jQuery"], bonus: [] },
+      },
+      java,
+    );
+    expect(r.toLearn).toHaveLength(2);
+    expect(r.warnings.some((w) => w.startsWith("Trop de technos à apprendre (2 au plus comptées à moitié), manquantes :"))).toBe(true);
+    // Java du titre (× 3) + 2 technos à apprendre (2 × 0,5) sur 9 ; sans limite : 6 / 9 = 67 %.
+    expect(r.breakdown.technical).toBe(44);
+  });
+
+  it("ta liste « je peux l'apprendre vite » : comptée à moitié sans formation écrite, sauf maîtrise exigée", () => {
+    const learner = { ...DEFAULT_PROFILE, skills: ["Java"], learnableSkills: ["Angular"] };
+    const t = (description: string) => score({ ...PERFECT, title: "Développeur Java / Angular", description, experienceMinYears: null }, learner);
+    const plain = t("Java et Angular.");
+    expect(plain.breakdown.technical).toBe(75);
+    expect(plain.capLabel).toBeNull();
+    expect(plain.reasons).toContain("À apprendre (dans ta liste « je peux l'apprendre vite ») : Angular");
+    const mastery = t("Java. Maîtrise d'Angular indispensable.");
+    expect(mastery.breakdown.technical).toBe(50);
+    expect(mastery.final).toBe(DEFAULT_RULES.missingMainTechCap);
   });
 
   it("techno principale absente de ton profil : score plafonné sous le seuil de l'IA, pas si elle s'apprend", () => {
