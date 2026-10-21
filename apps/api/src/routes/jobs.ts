@@ -5,12 +5,14 @@ import { z } from "zod";
 import { requireAuth } from "../auth";
 import { UrlReadError, readJobFromUrl } from "../job-from-url";
 import type { JobService } from "../jobs/service";
-import { skillStats } from "../jobs/stats";
+import { periodStats } from "../jobs/stats";
 import type { Stores } from "../stores";
 
 /** Temps max d'attente du trajet avant d'afficher l'offre (au-delà, il arrive en différé). */
 const TRAVEL_WAIT_MS = 400;
 
+/** Fenêtre de la page Statistiques : 7, 30 ou 90 derniers jours, sinon toute la période. */
+const StatsQuery = z.object({ days: z.enum(["7", "30", "90"]).transform(Number).optional() });
 const ListQuery = z.object({
   minScore: z.coerce.number().int().min(0).max(100).default(0),
   status: z.enum([...JOB_STATUSES, "active", "all", "try"]).default("active"),
@@ -137,13 +139,15 @@ export async function jobRoutes(
   });
 
   // Toutes les offres, expirées comprises : l'évolution a besoin de l'historique.
-  app.get("/api/jobs/stats", async (request) => {
+  app.get("/api/jobs/stats", async (request, reply) => {
+    const query = StatsQuery.safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: "INVALID_QUERY" });
     const [items, rec] = await Promise.all([
       jobs.list(request.userId!, { status: "all", includeHidden: true, minScore: 0, sort: "date" }),
       opts.stores.profiles.get(request.userId!),
     ]);
     const p = rec!.profile; // jobs.list a déjà vérifié que le profil existe
-    return skillStats(items, { experienceMax: p.experienceMax, threshold: p.minScoreForNotification });
+    return periodStats(items, { experienceMax: p.experienceMax, threshold: p.minScoreForNotification }, query.data.days ?? null);
   });
 
   app.get("/api/jobs/:id", async (request, reply) => {

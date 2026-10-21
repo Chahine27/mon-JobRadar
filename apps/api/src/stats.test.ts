@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { skillStats } from "./jobs/stats";
+import { periodStats, skillStats } from "./jobs/stats";
 import { createTestApp, login } from "./test-helpers";
 
 const now = new Date("2026-10-10T12:00:00Z");
@@ -34,7 +34,8 @@ describe("skillStats", () => {
     expect(s.skills[0]).toMatchObject({ label: "Angular", offers: 3, share: 75, owned: false, core: true, trend: null });
     expect(s.skills.find((k) => k.label === "Docker")).toMatchObject({ core: false });
     // Docker est un outil : seul Angular manque vraiment dans les offres Java.
-    expect(s.unlock).toEqual([{ label: "Angular", offers: 2, training: 1 }]);
+    expect(s.unlock).toEqual([{ label: "Angular", offers: 2, training: 1, accessible: 0 }]);
+    expect(s.topOwned).toBe(3); // Java, Vue.js et TypeScript (Angular et React manquent)
   });
 
   it("évolution : 30 derniers jours contre les 30 d'avant, seulement avec assez d'offres", () => {
@@ -83,6 +84,17 @@ describe("skillStats", () => {
   });
 });
 
+describe("periodStats", () => {
+  it("garde les offres de la fenêtre et compare à la fenêtre d'avant", () => {
+    const jobs = [job(["Vue.js"], [], 2), job(["Vue.js"], ["React"], 5), job(["Vue.js"], [], 10), job(["Vue.js"], [], 20)];
+    const s = periodStats(jobs, opts, 7, now);
+    expect(s.offers).toBe(2);
+    expect(s.fullMatch).toBe(50);
+    expect(s.previous).toMatchObject({ offers: 1, fullMatch: 100 });
+    expect(periodStats(jobs, opts, null, now)).toMatchObject({ offers: 4, days: null, previous: null });
+  });
+});
+
 describe("GET /api/jobs/stats", () => {
   it("renvoie les statistiques des offres", async () => {
     const t = await createTestApp();
@@ -90,6 +102,7 @@ describe("GET /api/jobs/stats", () => {
     const res = await t.app.inject({ method: "GET", url: "/api/jobs/stats", cookies });
     expect(res.statusCode).toBe(200);
     expect(res.json().offers).toBe(4);
+    expect((await t.app.inject({ method: "GET", url: "/api/jobs/stats?days=12", cookies })).statusCode).toBe(400);
     expect((await t.app.inject({ method: "GET", url: "/api/jobs/stats" })).statusCode).toBe(401);
   });
 });

@@ -160,6 +160,8 @@ code { background: var(--surface-2); padding: 0.05rem 0.35rem; border-radius: 5p
 /* clip : un élément trop large ne fait plus dézoomer toute la page sur iPhone. */
 .content { min-width: 0; overflow-x: clip; }
 .page { max-width: 1180px; margin: 0 auto; padding: 1.75rem 1.75rem 4rem; }
+/* Statistiques : tableau de bord en pleine largeur. */
+.page:has(.stats-head) { max-width: 1640px; }
 .mobile-bar { display: none; }
 .bottom-nav { display: none; }
 .backdrop { display: none; }

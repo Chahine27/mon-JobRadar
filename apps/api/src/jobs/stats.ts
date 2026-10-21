@@ -23,7 +23,11 @@ export type SkillStat = {
   trend: number | null;
   /** Part (%) des offres à expérience précisée qui demandent au plus ton maximum ; null si trop peu. */
   accessible: number | null;
+  /** Catégorie pour l'aperçu : langages et frameworks, bases de données, DevOps, tests, autres outils. */
+  group: SkillGroup;
 };
+
+export type SkillGroup = "core" | "data" | "devops" | "testing" | "other";
 
 export type SkillStats = {
   /** Offres où au moins une compétence est lue (les autres ne sont pas des postes de développeur). */
@@ -33,9 +37,12 @@ export type SkillStats = {
   previousOffers: number;
   /** Part des offres (%) où tu as tous les langages et frameworks demandés. */
   fullMatch: number;
+  /** Combien des 10 langages et frameworks les plus demandés sont dans ton profil. */
+  topOwned: number;
   skills: SkillStat[];
-  /** Compétences absentes de ton profil, seule techno principale manquante d'une offre : ce qui en débloquerait le plus. */
-  unlock: Array<{ label: string; offers: number; training: number }>;
+  /** Compétences absentes de ton profil, seule techno principale manquante d'une offre : ce qui en débloquerait le plus.
+   * `accessible` : parmi ces offres, celles qui demandent au plus ton maximum d'expérience. */
+  unlock: Array<{ label: string; offers: number; training: number; accessible: number }>;
   /** Expérience minimum demandée : tranches, et part accessible avec ton maximum (`experienceMax` du profil). */
   experience: {
     max: number;
@@ -73,7 +80,7 @@ export function skillStats(jobs: Input[], opts: { experienceMax: number; thresho
   const accessible = (j: Input) => j.experienceMinYrs !== null && j.experienceMinYrs <= opts.experienceMax;
 
   const by = new Map<string, { offers: number; owned: boolean; recent: number; previous: number; known: number; accessible: number }>();
-  const unlock = new Map<string, { offers: number; training: number }>();
+  const unlock = new Map<string, { offers: number; training: number; accessible: number }>();
   let recentOffers = 0;
   let previousOffers = 0;
   let fullMatch = 0;
@@ -97,9 +104,10 @@ export function skillStats(jobs: Input[], opts: { experienceMax: number; thresho
     const missingCore = [...new Set(j.missingSkills.filter(isCore))];
     if (missingCore.length === 0) fullMatch++;
     else if (missingCore.length === 1 && j.matchedSkills.some(isCore)) {
-      const u = unlock.get(missingCore[0]!) ?? { offers: 0, training: 0 };
+      const u = unlock.get(missingCore[0]!) ?? { offers: 0, training: 0, accessible: 0 };
       u.offers++;
       if (j.training) u.training++;
+      if (accessible(j)) u.accessible++;
       unlock.set(missingCore[0]!, u);
     }
   }
@@ -114,6 +122,7 @@ export function skillStats(jobs: Input[], opts: { experienceMax: number; thresho
       core: isCore(label),
       trend: trendOk ? pct(s.recent, recentOffers) - pct(s.previous, previousOffers) : null,
       accessible: s.known >= MIN_KNOWN_EXPERIENCE ? pct(s.accessible, s.known) : null,
+      group: groupOf(label),
     }))
     .sort((a, b) => b.offers - a.offers || a.label.localeCompare(b.label));
 
@@ -155,6 +164,7 @@ export function skillStats(jobs: Input[], opts: { experienceMax: number; thresho
     recentOffers,
     previousOffers,
     fullMatch: pct(fullMatch, items.length),
+    topOwned: skills.filter((s) => s.core).slice(0, 10).filter((s) => s.owned).length,
     skills,
     unlock: [...unlock]
       .map(([label, u]) => ({ label, ...u }))
@@ -171,5 +181,30 @@ export function skillStats(jobs: Input[], opts: { experienceMax: number; thresho
     },
     together,
     sources: [...sources].map(([source, s]) => ({ source, ...s })).sort((a, b) => b.good - a.good || b.offers - a.offers),
+  };
+}
+
+function groupOf(label: string): SkillGroup {
+  const s = resolveSkill(label);
+  if (s.core) return "core";
+  return s.family === "data" || s.family === "devops" || s.family === "testing" ? s.family : "other";
+}
+
+export type PeriodStats = SkillStats & {
+  /** Fenêtre en jours (null : toute la période). */
+  days: number | null;
+  /** Mêmes chiffres clés sur la fenêtre d'avant, de même durée (null pour toute la période). */
+  previous: { offers: number; fullMatch: number; topOwned: number; accessible: number } | null;
+};
+
+/** Statistiques sur les `days` derniers jours, comparées aux `days` jours d'avant ; sans `days`, toutes les offres. */
+export function periodStats(jobs: Input[], opts: { experienceMax: number; threshold: number }, days: number | null, now = new Date()): PeriodStats {
+  if (!days) return { ...skillStats(jobs, opts, now), days: null, previous: null };
+  const age = (j: Input) => (now.getTime() - (j.publishedAt ?? j.firstSeenAt).getTime()) / DAY;
+  const before = skillStats(jobs.filter((j) => age(j) >= days && age(j) < 2 * days), opts, now);
+  return {
+    ...skillStats(jobs.filter((j) => age(j) < days), opts, now),
+    days,
+    previous: { offers: before.offers, fullMatch: before.fullMatch, topOwned: before.topOwned, accessible: before.experience.accessible },
   };
 }

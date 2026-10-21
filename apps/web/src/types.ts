@@ -446,9 +446,23 @@ export type SkillStats = {
   previousOffers: number;
   /** Part des offres (%) où tu as tous les langages et frameworks demandés. */
   fullMatch: number;
-  skills: Array<{ label: string; offers: number; share: number; owned: boolean; core: boolean; trend: number | null; accessible: number | null }>;
-  unlock: Array<{ label: string; offers: number; training: number }>;
+  /** Combien des 10 langages et frameworks les plus demandés sont dans ton profil. */
+  topOwned: number;
+  skills: Array<{
+    label: string;
+    offers: number;
+    share: number;
+    owned: boolean;
+    core: boolean;
+    trend: number | null;
+    accessible: number | null;
+    group: "core" | "data" | "devops" | "testing" | "other";
+  }>;
+  unlock: Array<{ label: string; offers: number; training: number; accessible: number }>;
   experience: { max: number; known: number; accessible: number; ranges: Array<{ label: string; offers: number; share: number }> };
   together: Array<{ label: string; offers: number; with: Array<{ label: string; share: number }> }>;
   sources: Array<{ source: string; offers: number; good: number }>;
+  /** Fenêtre en jours (null : toute la période) et chiffres clés de la fenêtre d'avant. */
+  days: number | null;
+  previous: { offers: number; fullMatch: number; topOwned: number; accessible: number } | null;
 };
