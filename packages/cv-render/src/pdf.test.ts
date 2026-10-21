@@ -1,9 +1,10 @@
 import { tailorCv } from "@job-radar/cv-tailor";
-import { EMPTY_OVERRIDES } from "@job-radar/shared";
+import { EMPTY_OVERRIDES, type TemplateId } from "@job-radar/shared";
 import { describe, expect, it } from "vitest";
 import { JOBS, MASTER } from "../../cv-tailor/src/fixtures";
 import type { CvEngine } from "./engine";
 import { fitToPage } from "./pdf";
+import { renderCvHtml } from "./templates";
 
 /** Faux navigateur : la « hauteur » est le nombre de lignes + 2 par projet ; la page en tient `limit`. */
 const engine = (limit: number): CvEngine => ({
@@ -28,6 +29,23 @@ describe("remplissage de la page", () => {
     const o = { ...EMPTY_OVERRIDES, remove: ["hackathon"] };
     const d = await fitToPage(tailorCv(MASTER, JOBS.java, "deux-colonnes", o), MASTER, JOBS.java, o, engine(999));
     expect(d.sections.projects.map((p) => p.id)).not.toContain("hackathon");
-    expect(d.sections.projects).toHaveLength(MASTER.rules.maxProjects - 1);
+    expect(d.sections.projects).toHaveLength(MASTER.rules.maxProjects);
   });
+});
+
+describe("modèles", () => {
+  for (const template of ["une-colonne", "deux-colonnes"] as TemplateId[]) {
+    it(`${template} : GitHub sous LinkedIn et lien du dépôt cliquables, dates Lusis, titres en gras`, () => {
+      const html = renderCvHtml(tailorCv(MASTER, JOBS.front, template).sections);
+      const at = (s: string) => html.indexOf(s);
+      expect(html).toContain('<a href="https://github.com/camille">github.com/camille</a>');
+      expect(at("github.com/camille")).toBeGreaterThan(at("linkedin.com/in/camille"));
+      expect(html).toContain('<a href="https://github.com/camille/job-radar">github.com/camille/job-radar</a>');
+      expect(html).toContain("<strong>Job Radar</strong>");
+      expect(html).toMatch(/10\/2023 –(<br>| )09\/2025/); // alternance Frontend
+      expect(html).toMatch(/09\/2023 –(<br>| )09\/2025/); // Mastère
+      expect(html).not.toMatch(/<u>|underline/);
+      expect(html).toContain("En recherche d'un CDI ou CDD");
+    });
+  }
 });

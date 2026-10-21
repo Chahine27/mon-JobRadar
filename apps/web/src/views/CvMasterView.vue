@@ -187,6 +187,7 @@ const issuesFor = (prefix: string) => issues.value.filter((i) => i.path === pref
             <label>Téléphone<input v-model="m.identity.phone" /></label>
             <label>E-mail<input v-model="m.identity.email" type="email" /></label>
             <label>LinkedIn<input v-model="m.identity.linkedin" /></label>
+            <label>GitHub<input v-model="m.identity.github" /></label>
             <label>Ville<input v-model="m.identity.city" /></label>
           </div>
           <span class="small strong">Ligne sous le titre (Bac+5…)</span>
@@ -267,6 +268,8 @@ const issuesFor = (prefix: string) => issues.value.filter((i) => i.path === pref
               <label>Contexte<input v-model="p.context" /></label>
               <label>Équipe<input v-model="p.team" /></label>
               <label>Mon rôle (facultatif)<input :value="p.roleNote ?? ''" @input="p.roleNote = ($event.target as HTMLInputElement).value || undefined" /></label>
+              <label>Lien (dépôt, facultatif)<input v-model="p.link" placeholder="github.com/…" /></label>
+              <label>Affichage<select v-model="p.rule"><option value="always">Toujours, en premier</option><option value="ifRelevant">Si utile pour l'offre</option></select></label>
             </div>
             <span class="small strong">Description (courte « nom », longue avec « Ma part » « verbe »)</span>
             <VariantList v-model="p.descriptions" />
@@ -278,7 +281,7 @@ const issuesFor = (prefix: string) => issues.value.filter((i) => i.path === pref
             <SkillPicker v-model="p.teamOnlySkills" :skills="skills" />
             <button type="button" class="small ghost" @click="m.projects.splice(pi, 1)"><Icon name="trash" :size="14" />Retirer le projet</button>
           </div>
-          <button type="button" class="small" @click="m.projects.push({ id: uid('p'), name: 'Nouveau projet', context: '', team: '', descriptions: [{ id: 'd1', style: 'nom', text: '', toValidate: false }], technologies: [], ownSkills: [], teamOnlySkills: [], rule: 'ifRelevant' })">
+          <button type="button" class="small" @click="m.projects.push({ id: uid('p'), name: 'Nouveau projet', context: '', team: '', descriptions: [{ id: 'd1', style: 'nom', text: '', toValidate: false }], technologies: [], ownSkills: [], teamOnlySkills: [], link: '', rule: 'ifRelevant' })">
             <Icon name="plus" :size="14" />Ajouter un projet
           </button>
         </div>
@@ -334,7 +337,6 @@ const issuesFor = (prefix: string) => issues.value.filter((i) => i.path === pref
             <label>Projets max<input v-model.number="m.rules.maxProjects" type="number" min="0" /></label>
             <label>Compétences max par groupe<input v-model.number="m.rules.maxSkillsPerGroup" type="number" min="1" /></label>
           </div>
-          <label class="switch"><input v-model="m.rules.titleTechSuffix.enabled" type="checkbox" />Ajouter au titre les technos exigées (« | Vue.js, Java »), au plus <input v-model.number="m.rules.titleTechSuffix.max" type="number" min="0" max="5" class="num-in" /></label>
           <label class="switch"><input v-model="m.rules.allowLabelSubstitution" type="checkbox" />Écrire une compétence comme l'offre (« VueJS » au lieu de « Vue.js ») dans les listes de compétences</label>
         </div>
 

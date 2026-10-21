@@ -32,6 +32,10 @@ const dot = (xs: string[]) => xs.map((x) => (x.length <= 24 ? `<span class="nb">
  * voient alors une liste, ligne par ligne. Même rendu : retrait suspendu, la puce dans la marge.
  */
 const bullets = (items: Array<{ text: string }>) => `<ul>${items.map((b) => `<li><span class="dot">•</span>${esc(b.text)}</li>`).join("")}</ul>`;
+/** Lien cliquable dans le PDF, affiché sans « https:// ». */
+const linkTo = (url: string) => `<a href="https://${esc(url.replace(/^https?:\/\//, ""))}">${esc(url)}</a>`;
+/** Technologies du projet puis son lien (dépôt). */
+const stack = (p: RenderModel["projects"][number]) => [...p.technologies.map(esc), ...(p.link ? [linkTo(p.link)] : [])].join(" · ");
 const block = (label: string, inner: string, tag = "div", cls = "") => `<${tag} class="${cls}" data-block="${esc(label)}">${inner}</${tag}>`;
 
 const FONT_DIR = join(import.meta.dirname, "..", "fonts");
@@ -93,7 +97,7 @@ function deuxColonnes(m: RenderModel): string {
     .map((p) =>
       block(
         `Projet ${p.name}`,
-        `<p><strong>${esc(p.name)}</strong> <span class="grey">— ${esc([p.context, p.roleNote, p.team].filter(Boolean).join(" · "))}</span></p><p>${esc(p.description)}</p>${p.technologies.length ? `<p class="stack">${p.technologies.map(esc).join(" · ")}</p>` : ""}`,
+        `<p><strong>${esc(p.name)}</strong> <span class="grey">— ${esc([p.context, p.roleNote, p.team].filter(Boolean).join(" · "))}</span></p><p>${esc(p.description)}</p>${stack(p) ? `<p class="stack">${stack(p)}</p>` : ""}`,
         "div",
         "proj",
       ),
@@ -139,7 +143,8 @@ header { display: flex; justify-content: space-between; align-items: flex-start;
     <div class="contact">
       ${esc(m.identity.phone)}<br>
       <a href="mailto:${esc(m.identity.email)}">${esc(m.identity.email)}</a><br>
-      ${m.identity.linkedin ? `<a href="https://${esc(m.identity.linkedin.replace(/^https?:\/\//, ""))}">${esc(m.identity.linkedin)}</a><br>` : ""}
+      ${m.identity.linkedin ? `${linkTo(m.identity.linkedin)}<br>` : ""}
+      ${m.identity.github ? `${linkTo(m.identity.github)}<br>` : ""}
       ${esc(m.identity.city)}
     </div>
   </header>
@@ -160,7 +165,8 @@ header { display: flex; justify-content: space-between; align-items: flex-start;
 }
 
 function uneColonne(m: RenderModel): string {
-  const contact = [m.identity.phone, m.identity.email, m.identity.linkedin, m.identity.city].filter(Boolean).map(esc).join(" · ");
+  const { phone, email, linkedin, github, city } = m.identity;
+  const contact = [esc(phone), email && esc(email), linkedin && linkTo(linkedin), github && linkTo(github), city && esc(city)].filter(Boolean).join(" · ");
   const exp = m.experiences
     .map((e) =>
       block(
@@ -175,7 +181,7 @@ function uneColonne(m: RenderModel): string {
     .map((p) =>
       block(
         `Projet ${p.name}`,
-        `<p><strong>${esc(p.name)}</strong> <span class="grey">— ${esc([p.context, p.roleNote, p.team].filter(Boolean).join(" · "))}</span></p><p>${esc(p.description)}</p>${p.technologies.length ? `<p class="stack">Technologies du projet : ${p.technologies.map(esc).join(" · ")}</p>` : ""}`,
+        `<p><strong>${esc(p.name)}</strong> <span class="grey">— ${esc([p.context, p.roleNote, p.team].filter(Boolean).join(" · "))}</span></p><p>${esc(p.description)}</p>${stack(p) ? `<p class="stack">Technologies du projet : ${stack(p)}</p>` : ""}`,
         "div",
         "proj",
       ),

@@ -13,7 +13,7 @@ const bullet = (id: string, skills: string[], rule: "always" | "ifRelevant", ver
   rule,
   variants: [v("v1", "verbe", verbe), v("v2", "nom", nom)],
 });
-const project = (id: string, name: string, context: string, team: string, nom: string, verbe: string, technologies: string[], ownSkills: string[], teamOnlySkills: string[], roleNote?: string) => ({
+const project = (id: string, name: string, context: string, team: string, nom: string, verbe: string, technologies: string[], ownSkills: string[], teamOnlySkills: string[], roleNote?: string, rule: "always" | "ifRelevant" = "ifRelevant", link = "") => ({
   id,
   name,
   context,
@@ -23,13 +23,14 @@ const project = (id: string, name: string, context: string, team: string, nom: s
   technologies,
   ownSkills,
   teamOnlySkills,
-  rule: "ifRelevant" as const,
+  link,
+  rule,
 });
 const item = (skillId: string, label: string, level: "pro" | "projet" | "cours") => ({ skillId, label, level });
 
 export const MASTER_INPUT = {
-  identity: { fullName: "Camille Testeur", phone: "06 00 00 00 00", email: "camille@example.com", linkedin: "linkedin.com/in/camille", city: "Creil (60100)" },
-  headline: [v("h1", "nom", "Bac+5 · Titre RNCP niveau 7 · En recherche d'un CDI · Permis B, véhiculé")],
+  identity: { fullName: "Camille Testeur", phone: "06 00 00 00 00", email: "camille@example.com", linkedin: "linkedin.com/in/camille", github: "github.com/camille", city: "Creil (60100)" },
+  headline: [v("h1", "nom", "Bac+5 · Titre RNCP niveau 7 · En recherche d'un CDI ou CDD · Permis B, véhiculé")],
   titles: [
     { id: "t-fullstack", text: "Développeur Full Stack Web & Mobile", skills: [], jobTypes: ["fullstack", "other"], toValidate: false, isDefault: true },
     { id: "t-front", text: "Développeur Frontend Vue.js", skills: ["vue"], jobTypes: ["frontend"], toValidate: false },
@@ -59,7 +60,7 @@ export const MASTER_INPUT = {
       role: "Développeur Frontend",
       company: "LUSIS",
       contract: "Alternance",
-      start: "2023-09",
+      start: "2023-10",
       end: "2025-09",
       rule: "always",
       minBullets: 3,
@@ -92,6 +93,7 @@ export const MASTER_INPUT = {
     },
   ],
   projects: [
+    project("job-radar", "Job Radar", "Application de recherche d'emploi en production (projet perso, depuis 2026)", "", "Cahier des charges, pilotage du développement avec Claude Code, tests et mise en ligne d'une application complète.", "Application complète de recherche d'emploi, mise en ligne sur serveur.", ["TypeScript", "Vue 3", "Fastify", "PostgreSQL", "API Claude"], ["typescript", "vue", "postgresql", "llm-api"], [], undefined, "always", "github.com/camille/job-radar"),
     project("doc-chez-vous", "Doc Chez Vous", "Projet de fin d'études 5e année", "équipe de 2", "Application de mise en relation patients / professionnels de santé à domicile.", "Mise en relation patients / professionnels de santé à domicile (3 rôles). Ma part : site web React (Keycloak, administration), back-office et application mobile Flutter. Backend .NET 8 surtout réalisé par mon binôme.", ["React + Vite", "Flutter", "Keycloak", ".NET 8 (Clean Architecture, CQRS)", "SQL Server", "Docker"], ["react", "vite", "flutter", "keycloak", "google-maps"], ["dotnet", "sql-server", "cqrs", "clean-architecture", "docker"]),
     project("codenshare", "CodeNShare", "Projet de fin d'études 4e année", "équipe", "Réseau social web et mobile de partage et d'exécution de code à distance.", "Réseau social web de partage et d'exécution de code à distance. Ma part : le front React (Auth0) et un test d'exécution à distance en Node.js.", ["React", "Node.js", "PostgreSQL", "Auth0 / JWT", "OpenAPI", "Vercel"], ["react", "auth0", "node"], ["postgresql", "jwt", "openapi", "vercel"]),
     project("hackathon", "Hackathon ESGI — 3e place", "Hackathon", "équipe", "Jeu multijoueur en ligne inspiré d'Among Us, développé comme extension du logiciel WorkAdventure.", "Jeu multijoueur en ligne inspiré d'Among Us, extension du logiciel WorkAdventure, dont j'ai proposé l'idée.", ["TypeScript"], ["gestion-de-projet"], ["typescript"], "porteur de l'idée et chef de projet"),
@@ -121,7 +123,6 @@ export const MASTER_INPUT = {
     maxProjects: 5,
     minProjects: 2,
     maxSkillsPerGroup: 8,
-    titleTechSuffix: { enabled: true, max: 3 },
   },
 };
 

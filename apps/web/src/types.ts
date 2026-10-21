@@ -405,8 +405,8 @@ export type TailoredCvDraft = {
   dropped: CvPicked[];
   substitutions: Array<{ blockId: string; from: string; to: string }>;
   missing: { absent: string[]; onlyCourse: string[]; forbidden: string[] };
-  /** Intitulé de l'offre repris comme titre (absent des CV adaptés avant cette règle). */
-  offerTitle?: string | null;
+  /** Titre construit (métier de l'offre + technos d'entreprise) ; absent des CV adaptés avant cette règle. */
+  builtTitle?: string | null;
   /** Compétences de ton profil ajoutées à la liste du CV (citées par l'offre, absentes du CV complet). */
   fromProfile?: string[];
   /** Compétences de l'offre retrouvées dans le texte du CV. */

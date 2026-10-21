@@ -62,7 +62,7 @@ describe("CV complet", () => {
     const { req } = await setup();
     const bad = structuredClone(MASTER_INPUT);
     bad.experiences[0]!.bullets[0]!.skills.push("php", "techno-inconnue");
-    bad.projects[0]!.descriptions.forEach((d) => (d.toValidate = true));
+    bad.experiences[0]!.bullets[1]!.variants.forEach((v) => (v.toValidate = true));
     const r = await req("PUT", "/api/cv-master", { master: bad });
     expect(r.statusCode).toBe(400);
     const messages = r.json().issues.map((i: { message: string }) => i.message).join(" | ");

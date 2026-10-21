@@ -67,7 +67,10 @@ export const ProjectSchema = z.object({
   ownSkills: skillIds,
   /** Fait par l'équipe : affiché, mais ne compte pas comme compétence. */
   teamOnlySkills: skillIds,
-  rule: z.literal("ifRelevant").default("ifRelevant"),
+  /** Lien affiché sous le projet (dépôt, site), sans « https:// ». */
+  link: z.string().trim().max(120).default(""),
+  /** always = affiché en premier sur tous les CV, quelle que soit l'offre. */
+  rule: z.enum(["always", "ifRelevant"]).default("ifRelevant"),
 });
 export type Project = z.infer<typeof ProjectSchema>;
 
@@ -83,7 +86,6 @@ export const CvRulesSchema = z.object({
   maxProjects: z.number().int().min(0).max(10),
   minProjects: z.number().int().min(0).max(10),
   maxSkillsPerGroup: z.number().int().min(1).max(30),
-  titleTechSuffix: z.object({ enabled: z.boolean(), max: z.number().int().min(0).max(5) }),
   /** Libellé de compétence écrit comme dans l'offre (« VueJS ») si c'est un synonyme du dictionnaire. */
   allowLabelSubstitution: z.boolean().default(true),
 });
@@ -123,6 +125,7 @@ const CvMasterObject = z.object({
     phone: z.string().trim().min(1).max(40),
     email: z.email(),
     linkedin: z.string().trim().max(120).default(""),
+    github: z.string().trim().max(120).default(""),
     city: z.string().trim().max(120).default(""),
   }),
   headline: z.array(TextVariantSchema).min(1).max(4),
@@ -197,9 +200,9 @@ export const CvMasterSchema = CvMasterObject.superRefine((m, ctx) => {
       b.skills.forEach((s, si) => known(s, ["experiences", ei, "bullets", bi, "skills", si]));
     });
   });
+  // Projet sans description validée : permis, jamais affiché tant qu'aucune ne l'est (projet tout juste proposé).
   m.projects.forEach((p, pi) => {
     unique(p.id, ["projects", pi, "id"]);
-    validated(p.descriptions, ["projects", pi, "descriptions"]);
     p.ownSkills.forEach((s, si) => known(s, ["projects", pi, "ownSkills", si]));
     p.teamOnlySkills.forEach((s, si) => {
       if (!getCvSkill(s)) issue(["projects", pi, "teamOnlySkills", si], `Compétence inconnue du dictionnaire : « ${s} »`);

@@ -21,6 +21,12 @@ describe("rendu PDF avec Edge", () => {
       expect(pages).toBe(1);
       expect(text).toContain(MASTER.identity.email);
       expect(d.checks.filter((c) => c.ok !== true)).toEqual([]);
+      // Liens cliquables dans le PDF : GitHub (en-tête) et dépôt du projet Job Radar.
+      const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      const task = getDocument({ data: new Uint8Array(pdf) });
+      const urls = (await (await (await task.promise).getPage(1)).getAnnotations()).map((a: { url?: string }) => a.url);
+      await task.destroy();
+      expect(urls).toEqual(expect.arrayContaining(["https://github.com/camille", "https://github.com/camille/job-radar"]));
     });
   }
 
@@ -28,7 +34,7 @@ describe("rendu PDF avec Edge", () => {
     const input = structuredClone(MASTER_INPUT);
     const front = input.experiences[0]!;
     front.maxBullets = 20;
-    for (let i = 0; i < 8; i++) front.bullets.push({ ...structuredClone(front.bullets[1]!), id: `extra-${i}` });
+    for (let i = 0; i < 14; i++) front.bullets.push({ ...structuredClone(front.bullets[1]!), id: `extra-${i}` });
     const master = CvMasterSchema.parse(input);
     const start = tailorCv(master, JOBS.front, "une-colonne");
     const d = await fitToPage(start, master, JOBS.front, EMPTY_OVERRIDES, engine);

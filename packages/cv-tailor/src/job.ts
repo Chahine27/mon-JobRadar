@@ -1,5 +1,5 @@
 import type { JobType } from "@job-radar/shared";
-import { extractCvSkills, findSkillForm, getCvSkill, normalizeText, resolveCvSkills } from "@job-radar/skills";
+import { extractCvSkills, findSkillForm, getCvSkill, resolveCvSkills } from "@job-radar/skills";
 import type { JobForCv } from "./types";
 
 export const FRONT = new Set(["vue", "react", "angular", "svelte", "nuxt", "nextjs", "html", "css", "tailwind", "vuetify", "pinia", "redux", "vuex", "vite", "jquery"]);
@@ -58,30 +58,4 @@ export function buildJobForCv(input: {
     forms,
     profileSkills: uniq((input.profileSkills ?? []).flatMap(resolveCvSkills)),
   };
-}
-
-/** Intitulé de poste (développeur, engineer, ingénieur…). */
-const ROLE = /\b(developpeu(r|se)|developer|dev|engineer|ingenieur(e)?|software)\b/;
-/** Jamais repris : niveau au-dessus de junior, encadrement, ou contrat qui n'est pas un emploi. */
-const NOT_ME =
-  /\b(senior|sr|lead|principal|staff|confirme(e)?s?|confirmed|experimente(e)?|experienced|expert|architecte?|manager|head|chef|responsable|directeu?r|director|cto|founding|stage|stagiaire|intern(ship)?|alternance|alternant(e)?|apprenti(e)?)\b/;
-
-/**
- * Intitulé de l'offre nettoyé (sans H/F, CDI, lieu ni entreprise), pour le reprendre comme titre du CV :
- * les recruteurs cherchent par intitulé. null s'il ne peut pas servir (pas un poste de développeur,
- * niveau au-dessus du tien, trop long). Les compétences citées sont vérifiées par l'appelant.
- */
-export function cleanOfferTitle(title: string): string | null {
-  let t = title
-    .replace(/^\s*(cdi|cdd)\s*[-–—:]\s*/i, "")
-    .replace(/\(?\b[hfx]\s*\/\s*[hfx](\s*\/\s*[hfx])?\b\)?/gi, " ")
-    .split(/\s[-–—|]\s|[(,:]/)[0]!
-    .replace(/\b(cdi|cdd)\b/gi, " ");
-  // « Ingénieur logiciel/Ingénieure logiciel » : une seule fois.
-  const halves = t.split("/");
-  if (halves.length === 2 && halves.every((h) => ROLE.test(normalizeText(h)))) t = halves[0]!;
-  t = t.replace(/\s+/g, " ").replace(/[\s\-–—/]+$/, "").trim();
-  const n = normalizeText(t);
-  if (t.length < 8 || t.length > 60 || !ROLE.test(n) || NOT_ME.test(n)) return null;
-  return t;
 }

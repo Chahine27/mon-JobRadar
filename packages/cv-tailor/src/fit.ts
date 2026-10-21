@@ -9,7 +9,7 @@ const SPACE = "manque de place";
 
 /**
  * Retire UN élément pour gagner de la place, dans l'ordre fixe du §6.3 :
- * loisirs → projet le moins bien noté → ligne « ifRelevant » la moins bien notée → compétences « cours » à 0 point
+ * loisirs → projet le moins bien noté (jamais un projet « toujours ») → ligne « ifRelevant » la moins bien notée → compétences « cours » à 0 point
  * → (une colonne) description courte d'un projet. Ce qui a été remis à la main n'est jamais retiré.
  * null = plus rien à retirer. Ne touche jamais à la police ni aux marges.
  */
@@ -18,13 +18,14 @@ export function shrinkOnce(draft: TailoredCvDraft, master: CvMaster, overrides: 
   const picked = [...draft.picked];
   const manual = new Set(overrides.add);
   const scoreOf = (kind: PickedItem["kind"], id: string) => picked.find((p) => p.kind === kind && p.id === id)?.score ?? 0;
+  const ruleOf = (kind: PickedItem["kind"], id: string) => picked.find((p) => p.kind === kind && p.id === id)?.rule;
   const done = (removed: PickedItem[]): TailoredCvDraft => ({
     ...draft,
     sections: s,
     picked: picked.filter((p) => !removed.includes(p)),
     dropped: [...draft.dropped, ...removed.map((r) => ({ ...r, why: SPACE }))],
     match: matchOf(s, draft.match.offer, master),
-    checks: runChecks(s, master, draft.substitutions, draft.offerTitle, (draft.fromProfile ?? []).map(cvSkillLabel)),
+    checks: runChecks(s, master, draft.substitutions, draft.builtTitle, (draft.fromProfile ?? []).map(cvSkillLabel)),
   });
   /** Le moins bien noté ; à égalité, le dernier affiché. */
   const lowest = <T>(xs: T[], score: (x: T) => number): T | undefined => xs.reduce<T | undefined>((min, x) => (min === undefined || score(x) <= score(min) ? x : min), undefined);
@@ -37,7 +38,7 @@ export function shrinkOnce(draft: TailoredCvDraft, master: CvMaster, overrides: 
 
   // 2. Projet le moins bien noté (sans descendre sous minProjects)
   if (s.projects.length > master.rules.minProjects) {
-    const p = lowest(s.projects.filter((x) => !manual.has(x.id)), (x) => scoreOf("project", x.id));
+    const p = lowest(s.projects.filter((x) => !manual.has(x.id) && ruleOf("project", x.id) !== "always"), (x) => scoreOf("project", x.id));
     if (p) {
       s.projects = s.projects.filter((x) => x !== p);
       return done(picked.filter((x) => x.kind === "project" && x.id === p.id));

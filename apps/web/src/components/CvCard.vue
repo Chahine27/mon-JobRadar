@@ -192,7 +192,7 @@ const STATUS = { DRAFT: "Brouillon", VALIDATED: "Validé", EXPORTED: "Exporté" 
 
             <label class="small">Titre
               <select :value="cv.overrides.titleId ?? ''" :disabled="!!busy" @change="setTitle(($event.target as HTMLSelectElement).value)">
-                <option value="">Automatique ({{ pickedOf('title', draft.picked.find((p) => p.kind === 'title')?.id ?? '')?.label }}{{ draft.offerTitle ? " — intitulé de l'offre" : "" }})</option>
+                <option value="">Automatique ({{ pickedOf('title', draft.picked.find((p) => p.kind === 'title')?.id ?? '')?.label }}{{ draft.builtTitle ? " — construit pour l'offre" : "" }})</option>
                 <option v-for="t in titles" :key="t.id" :value="t.id">{{ t.text }}</option>
               </select>
             </label>

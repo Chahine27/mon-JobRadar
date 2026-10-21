@@ -4,15 +4,16 @@ import {
   type CvMaster,
   type CvOverrides,
   EMPTY_OVERRIDES,
+  type JobType,
   type Level,
   type Style,
   type TemplateId,
   type TextVariant,
 } from "@job-radar/shared";
 import { cvSkillLabel, getCvSkill, isPlainSkillLabel, extractCvSkills, normalizeText } from "@job-radar/skills";
-import { displayedTexts, runChecks } from "./checks";
-import { BACK, cleanOfferTitle, FRONT } from "./job";
-import { CV_RULES_VERSION, type CvMatch, type JobForCv, type PickedItem, type Reason, type RenderModel, type Substitution, type TailoredCvDraft } from "./types";
+import { displayedTexts, proSkills, runChecks } from "./checks";
+import { BACK, FRONT } from "./job";
+import { CV_RULES_VERSION, type CvMatch, type JobForCv, type PickedItem, type Reason, type RenderModel, SKILL_LINES, type Substitution, type TailoredCvDraft } from "./types";
 
 export const STYLE_OF: Record<TemplateId, Style> = { "une-colonne": "verbe", "deux-colonnes": "nom" };
 
@@ -40,6 +41,35 @@ function masterLabel(m: CvMaster, skillId: string): string | null {
   for (const g of m.skillGroups) for (const i of g.items) if (i.skillId === skillId) return i.label;
   return null;
 }
+
+/** Notions (architecture, tests, méthodes) : leurs groupes restent tels quels, hors des deux lignes de technos. */
+const NOTIONS = new Set(["architecture-logicielle", "ddd", "architecture-hexagonale", "microservices", "architecture-modulaire", "clean-architecture", "cqrs", "tests-unitaires", "tests-integration", "tests-e2e", "agile-scrum", "kanban"]);
+/** Ligne « En projets et formation » : courte. */
+const OTHER_LINE_MAX = 5;
+
+/** Titre par métier : chaque morceau garde seulement les technos faites en entreprise. */
+const BUILT_TITLES: Partial<Record<JobType, [string, string[][]]>> = {
+  frontend: ["Développeur Frontend", [["vue"], ["typescript"]]],
+  backend: ["Développeur", [["java", "spring"], ["vue"]]],
+  fullstack: ["Développeur Full Stack", [["vue"], ["java", "spring"]]],
+};
+
+/**
+ * Titre construit avec le métier de l'offre et les technos prouvées en entreprise (jamais l'intitulé de l'offre).
+ * Offre Java classée full stack sans le dire dans son intitulé : titre Java d'abord. null = pas de métier (mobile, autre).
+ */
+export function buildTitle(master: CvMaster, job: Pick<JobForCv, "title" | "jobType">): string | null {
+  const kind = job.jobType === "fullstack" && /\bjava\b/i.test(job.title) && !/full[\s-]?stack/i.test(job.title) ? "backend" : job.jobType;
+  const spec = BUILT_TITLES[kind];
+  if (!spec) return null;
+  const pro = proSkills(master);
+  const parts = spec[1].map((ids) => ids.filter((s) => pro.has(s)).map((s) => masterLabel(master, s) ?? cvSkillLabel(s)).join(" ")).filter(Boolean);
+  return parts.length ? `${spec[0]} ${parts.join(" / ")}` : null;
+}
+
+/** Métier écrit au début d'un texte (titre, profil). */
+const KINDS: Array<[string, RegExp]> = [["full stack", /full[\s-]?stack/i], ["frontend", /front[\s-]?end/i], ["backend", /back[\s-]?end/i]];
+const kindOf = (s: string) => KINDS.find(([, r]) => r.test(s.split(/[,(.:]/)[0]!))?.[0];
 
 const short = (s: string, n = 70) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
@@ -147,20 +177,23 @@ export function tailorCv(
     label: x.p.name,
     score: x.score,
     reasons: x.reasons,
+    rule: x.p.rule,
     ...(why ? { why } : filled.has(x.id) && !overrides.add.includes(x.id) ? { fill: true } : {}),
   });
   const projUsable = projScored.filter((x) => {
     if (x.pick) return true;
     dropped.push(projItem(x, "aucune description validée"));
+    if (x.p.rule === "always") warnings.push(`Projet « ${x.p.name} » toujours affiché, mais sa description est encore à valider (page /cv).`);
     return false;
   });
   const projByScore = (a: (typeof projScored)[number], b: (typeof projScored)[number]) => b.score - a.score || a.i - b.i;
   const projCandidates = projUsable.filter((x) => !removed.has(x.id)).sort(projByScore);
-  const projKept: typeof projScored = [];
-  for (const x of projCandidates) if (projKept.length < maxProjects && x.score > 0) projKept.push(x);
+  // Projets « toujours » : gardés quelle que soit l'offre, en premier.
+  const projKept = projCandidates.filter((x) => x.p.rule === "always");
+  for (const x of projCandidates) if (projKept.length < maxProjects && x.score > 0 && !projKept.includes(x)) projKept.push(x);
   for (const x of projCandidates) if (projKept.length < minProjects && !projKept.includes(x)) projKept.push(x);
   for (const x of projUsable) if (added.has(x.id) && !projKept.includes(x)) projKept.push(x);
-  projKept.sort(projByScore);
+  projKept.sort((a, b) => (a.p.rule === "always" ? 0 : 1) - (b.p.rule === "always" ? 0 : 1) || projByScore(a, b));
   const projOrdered = applyOrder(projKept, "projects");
   for (const x of projOrdered) {
     picked.push(projItem(x));
@@ -189,6 +222,7 @@ export function tailorCv(
       ...(p.roleNote ? { roleNote: p.roleNote } : {}),
       description: pick!.v.text,
       ...(template === "une-colonne" && other ? { shortDescription: other.text } : {}),
+      ...(p.link ? { link: p.link } : {}),
       technologies: p.technologies.map((t) => {
         const ids = extractCvSkills(t);
         return substitute(t, ids.length === 1 ? ids[0] : undefined, `${p.id}:technologies`);
@@ -215,16 +249,27 @@ export function tailorCv(
     if (best && best.n > 0) profileGroup.set(s, best.g.id);
   }
 
-  // ── Compétences : groupes les plus utiles d'abord ; dans un groupe : exigées, « plus », puis par niveau.
-  const groups = master.skillGroups
+  // ── Compétences : d'abord les technos faites en entreprise, puis une ligne courte des technos de projets ou de cours
+  // que l'offre cite ; les groupes de notions (architecture, tests, méthodes) restent tels quels, après.
+  // Dans une ligne : exigées, « plus », puis par niveau et ordre du CV complet.
+  const isNotions = (g: CvMaster["skillGroups"][number]) => g.items.length > 0 && g.items.every((i) => NOTIONS.has(i.skillId));
+  const tech = master.skillGroups
+    .filter((g) => !isNotions(g))
+    .flatMap((g) => [...g.items, ...[...profileGroup].filter(([, gid]) => gid === g.id).map(([s]) => ({ skillId: s, label: cvSkillLabel(s), level: "projet" as Level }))]);
+  const lines = [
+    { id: "entreprise", label: SKILL_LINES.pro, items: tech.filter((i) => i.level === "pro"), max: Infinity, onlyCited: false },
+    { id: "projets", label: SKILL_LINES.other, items: tech.filter((i) => i.level !== "pro"), max: OTHER_LINE_MAX, onlyCited: true },
+    ...master.skillGroups.filter(isNotions).map((g) => ({ id: g.id, label: g.label, items: g.items, max: master.rules.maxSkillsPerGroup, onlyCited: false })),
+  ];
+  const ranked = lines
     .map((g, gi) => {
-      const extra = [...profileGroup].filter(([, gid]) => gid === g.id).map(([s]) => ({ skillId: s, label: cvSkillLabel(s), level: "projet" as Level }));
-      const items = [...g.items, ...extra]
+      const items = g.items
         .filter((it) => !forbidden.has(it.skillId))
         .map((it, ii) => ({ it, ii, pts: pointsOf(it.skillId) * (it.level === "cours" ? 0.5 : 1) }));
       const rank = (x: (typeof items)[number]) => (req.has(x.it.skillId) ? 0 : nice.has(x.it.skillId) ? 1 : 2 + LEVEL_RANK[x.it.level]);
       const sorted = [...items].sort((a, b) => rank(a) - rank(b) || a.ii - b.ii);
-      const kept = sorted.slice(0, master.rules.maxSkillsPerGroup);
+      const cited = g.onlyCited ? sorted.filter((x) => x.pts > 0) : sorted;
+      const kept = cited.slice(0, g.max);
       const skillItem = (x: (typeof items)[number], why?: string): PickedItem => ({
         kind: "skill",
         id: x.it.skillId,
@@ -236,11 +281,14 @@ export function tailorCv(
         ...(why ? { why } : {}),
       });
       for (const x of kept) picked.push(skillItem(x));
-      for (const x of sorted.slice(master.rules.maxSkillsPerGroup)) dropped.push(skillItem(x, "limite du groupe atteinte"));
+      for (const x of sorted) if (!kept.includes(x)) dropped.push(skillItem(x, cited.includes(x) ? "limite du groupe atteinte" : "pas demandé par l'offre"));
       return { g, gi, sum: items.reduce((a, x) => a + x.pts, 0), kept };
     })
-    .filter((x) => x.kept.length > 0)
-    .sort((a, b) => (b.sum > 0 ? 1 : 0) - (a.sum > 0 ? 1 : 0) || b.sum - a.sum || a.gi - b.gi);
+    .filter((x) => x.kept.length > 0);
+  const groups = [
+    ...ranked.filter((x) => x.gi < 2),
+    ...ranked.filter((x) => x.gi >= 2).sort((a, b) => (b.sum > 0 ? 1 : 0) - (a.sum > 0 ? 1 : 0) || b.sum - a.sum || a.gi - b.gi),
+  ];
   // Même compétence plusieurs fois dans un groupe (« Claude Code » et « Cursor », tous deux « agents-ia ») : libellés
   // voulus, jamais remplacés par le mot de l'offre (sinon « Claude Code · Claude Code »).
   const skillGroups = groups.map(({ g, kept }) => ({
@@ -252,7 +300,8 @@ export function tailorCv(
     })),
   }));
 
-  // ── Titre : celui du type de poste qui partage le plus de compétences exigées ; sinon le titre par défaut.
+  // ── Titre : métier de l'offre + technos faites en entreprise ; sinon (titre choisi à la main, mobile, autre)
+  // celui du type de poste qui partage le plus de compétences exigées, ou le titre par défaut.
   const titles = master.titles.filter((t) => !t.toValidate);
   const forcedTitle = overrides.titleId ? titles.find((t) => t.id === overrides.titleId) : undefined;
   const matching = titles
@@ -261,34 +310,9 @@ export function tailorCv(
     .sort((a, b) => b.n - a.n || a.i - b.i);
   const title = forcedTitle ?? matching[0]?.t ?? titles.find((t) => t.isDefault) ?? titles[0]!;
   const levels = bestLevels(master);
-  // Intitulé de l'offre repris tel quel (les recruteurs cherchent par intitulé), sauf titre choisi à la main,
-  // poste hors de tes types, ou compétence citée que ton CV n'a pas (ou seulement vue en cours, ou interdite).
-  const cleaned = forcedTitle || job.jobType === "other" ? null : cleanOfferTitle(job.title);
-  const offerTitle =
-    cleaned && extractCvSkills(cleaned).every((s) => !forbidden.has(s) && ((levels.has(s) && levels.get(s) !== "cours") || profileGroup.has(s))) ? cleaned : null;
-  const titleSkills = offerTitle ? extractCvSkills(offerTitle) : title.skills;
-  const baseTitle = offerTitle ?? title.text;
-  let titleText = baseTitle;
-  if (master.rules.titleTechSuffix.enabled && master.rules.titleTechSuffix.max > 0) {
-    const inTitle = normalizeText(baseTitle);
-    // Toutes exigées (mêmes points) : ce qui a été fait en entreprise d'abord, puis l'ordre du CV complet.
-    const labels: Array<{ label: string; rank: number }> = [];
-    for (const g of master.skillGroups)
-      for (const it of g.items) {
-        const s = it.skillId;
-        const lvl = levels.get(s);
-        if (!req.has(s) || forbidden.has(s) || !lvl || lvl === "cours" || titleSkills.includes(s)) continue;
-        const label = masterLabel(master, s)!;
-        if (labels.some((l) => l.label === label) || inTitle.includes(normalizeText(label))) continue;
-        labels.push({ label, rank: LEVEL_RANK[lvl] });
-      }
-    const suffix = labels
-      .sort((a, b) => a.rank - b.rank)
-      .slice(0, master.rules.titleTechSuffix.max)
-      .map((l) => l.label);
-    if (suffix.length) titleText = `${baseTitle} | ${suffix.join(", ")}`;
-  }
-  picked.push({ kind: "title", id: offerTitle ? OFFER_TITLE_ID : title.id, label: titleText, ...scoreOf(titleSkills, "pro") });
+  const builtTitle = forcedTitle ? null : buildTitle(master, job);
+  const titleText = builtTitle ?? title.text;
+  picked.push({ kind: "title", id: builtTitle ? BUILT_TITLE_ID : title.id, label: titleText, ...scoreOf(builtTitle ? extractCvSkills(builtTitle) : title.skills, "pro") });
 
   // ── Résumé : celui du modèle et du type de poste ; sinon celui du modèle pour tous les postes.
   const summaries = master.summaries.filter((s) => !s.toValidate);
@@ -300,6 +324,10 @@ export function tailorCv(
     summaries.find((s) => fitsTpl(s) && s.jobTypes === "any");
   if (summary) picked.push({ kind: "summary", id: summary.id, label: short(summary.text), score: 0, reasons: [] });
   else warnings.push(`Aucun résumé validé pour le modèle « ${template} ».`);
+  const titleKind = kindOf(titleText);
+  const summaryKind = summary && kindOf(summary.text);
+  if (titleKind && summaryKind && titleKind !== summaryKind)
+    warnings.push(`Profil « ${summaryKind} » sous un titre « ${titleKind} » : valide un profil pour ce type de poste (page /cv).`);
 
   const headline = pickVariant(master.headline, "headline");
   const education = master.education.map((e) => {
@@ -348,16 +376,16 @@ export function tailorCv(
     dropped,
     substitutions,
     missing,
-    offerTitle,
+    builtTitle,
     fromProfile: [...profileGroup.keys()],
     match: matchOf(sections, offerSkills, master),
     warnings: [...new Set(warnings)],
-    checks: runChecks(sections, master, substitutions, offerTitle, [...profileGroup.keys()].map(cvSkillLabel)),
+    checks: runChecks(sections, master, substitutions, builtTitle, [...profileGroup.keys()].map(cvSkillLabel)),
   };
 }
 
-/** Le titre repris de l'offre n'est pas un titre du CV complet. */
-export const OFFER_TITLE_ID = "offre";
+/** Le titre construit n'est pas un titre du CV complet. */
+export const BUILT_TITLE_ID = "construit";
 
 /**
  * Compétences de l'offre retrouvées dans le texte affiché du CV : ce que trouve un logiciel de tri

@@ -1,6 +1,6 @@
 import { courseSkillsIn, type CvMaster } from "@job-radar/shared";
-import { cvSkillLabel, getCvSkill, mentionsSkill, normalizeText } from "@job-radar/skills";
-import type { CheckResult, RenderModel, Substitution } from "./types";
+import { cvSkillLabel, extractCvSkills, getCvSkill, mentionsSkill, normalizeText } from "@job-radar/skills";
+import { type CheckResult, type RenderModel, SKILL_LINES, type Substitution } from "./types";
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 
@@ -12,6 +12,7 @@ export function displayedTexts(m: RenderModel): Array<{ where: string; text: str
   fixed("téléphone", m.identity.phone);
   fixed("e-mail", m.identity.email);
   fixed("LinkedIn", m.identity.linkedin);
+  fixed("GitHub", m.identity.github);
   fixed("ville", m.identity.city);
   if (m.headline) out.push({ where: "en-tête", text: m.headline, kind: "variant" });
   out.push({ where: "titre", text: m.title, kind: "title" });
@@ -27,6 +28,7 @@ export function displayedTexts(m: RenderModel): Array<{ where: string; text: str
     fixed(`${p.id} (contexte)`, p.context);
     fixed(`${p.id} (équipe)`, p.team);
     fixed(`${p.id} (rôle)`, p.roleNote);
+    fixed(`${p.id} (lien)`, p.link);
     out.push({ where: p.id, text: p.description, kind: "variant" });
     for (const t of p.technologies) out.push({ where: `${p.id} (technologies)`, text: t, kind: "label" });
   }
@@ -58,8 +60,9 @@ function masterTexts(master: CvMaster) {
     [
       ...Object.values(master.identity),
       ...master.experiences.flatMap((e) => [e.role, e.company, e.contract]),
-      ...master.projects.flatMap((p) => [p.name, p.context, p.team, p.roleNote ?? ""]),
+      ...master.projects.flatMap((p) => [p.name, p.context, p.team, p.roleNote ?? "", p.link]),
       ...master.skillGroups.map((g) => g.label),
+      ...Object.values(SKILL_LINES),
       ...master.languages,
       ...master.hobbies,
     ].map(norm),
@@ -69,15 +72,37 @@ function masterTexts(master: CvMaster) {
   return { validated, pending, titles, labels, fixed };
 }
 
+/** Technos faites en entreprise : celles des lignes d'expérience de niveau « pro ». */
+export function proSkills(master: CvMaster): Set<string> {
+  return new Set(master.experiences.flatMap((e) => e.bullets.filter((b) => b.level === "pro").flatMap((b) => b.skills)));
+}
+
+/**
+ * Technos du titre que les expériences ne prouvent pas : absentes des lignes « pro » (« Docker », « Angular »),
+ * ou écrites autrement que le CV (« Java EE » quand seul « Java » est prouvé).
+ */
+export function unprovenTitleSkills(master: CvMaster, title: string): string[] {
+  const pro = proSkills(master);
+  return extractCvSkills(title).flatMap((id) => {
+    const skill = getCvSkill(id)!;
+    if (!pro.has(id) || master.rules.forbiddenSkills.includes(id)) return [cvSkillLabel(id)];
+    const labels = [skill.label, ...master.skillGroups.flatMap((g) => g.items.filter((i) => i.skillId === id).map((i) => i.label))].map(normalizeText);
+    const other = [...skill.aliases, ...(skill.caseSensitiveAliases ?? [])].find(
+      (a) => !labels.some((l) => l.includes(normalizeText(a))) && mentionsSkill(title, { ...skill, label: a, aliases: [a], caseSensitiveAliases: [] }),
+    );
+    return other ? [other] : [];
+  });
+}
+
 const wordRegex = (w: string) => new RegExp(`(?<![\\p{L}\\p{N}])${normalizeText(w).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "u");
 
-/** Contrôles bloquants 1 à 6 (§5), sur ce qui sera affiché. Les contrôles 7 et 8 sont faits sur le PDF. */
-/** `offerTitle` : intitulé de l'offre repris comme titre (vérifié au choix : poste de développeur, compétences de ton CV). */
+/** Contrôles bloquants 1 à 6 et 9 (§5), sur ce qui sera affiché. Les contrôles 7 et 8 sont faits sur le PDF. */
 export function runChecks(
   m: RenderModel,
   master: CvMaster,
   substitutions: Substitution[],
-  offerTitle: string | null = null,
+  /** Titre construit (métier + technos d'entreprise), à la place d'un titre du CV complet. */
+  builtTitle: string | null = null,
   /** Libellés des compétences ajoutées depuis ton profil. */
   profileLabels: string[] = [],
 ): CheckResult[] {
@@ -93,10 +118,7 @@ export function runChecks(
       s.kind === "variant" ? t.validated.has(x)
       : s.kind === "fixed" ? t.fixed.has(x)
       : s.kind === "label" ? t.labels.has(x) || subs.has(x)
-      : (() => {
-          const [base, suffix] = x.split(" | ");
-          return (t.titles.has(base!) || base === offerTitle) && (!suffix || suffix.split(", ").every((l) => t.labels.has(l)));
-        })();
+      : t.titles.has(x) || x === builtTitle;
     if (!ok) origin.push(`${s.where} : « ${x.slice(0, 80)} » ne vient pas du CV complet`);
   }
 
@@ -125,11 +147,13 @@ export function runChecks(
   if (!m.headline) mandatory.push("ligne d'en-tête (Bac+5…)");
   for (const e of master.experiences) if (!m.experiences.some((x) => x.id === e.id)) mandatory.push(`expérience ${e.role} (${e.company})`);
   for (const e of master.education) if (!m.education.some((x) => x.id === e.id && x.lines.length)) mandatory.push(`formation ${e.id}`);
+  for (const p of master.projects)
+    if (p.rule === "always" && p.descriptions.some((d) => !d.toValidate) && !m.projects.some((x) => x.id === p.id)) mandatory.push(`projet ${p.name}`);
 
   // 5. Rien de « vu en cours » dans le titre, le résumé ou les lignes d'expérience
   const course: string[] = [];
   const bulletTags = new Map(master.experiences.flatMap((e) => e.bullets.map((b) => [b.id, b.skills] as const)));
-  const titleTags = master.titles.find((x) => norm(x.text) === norm(m.title.split(" | ")[0]!))?.skills ?? [];
+  const titleTags = master.titles.find((x) => norm(x.text) === norm(m.title))?.skills ?? [];
   const check5 = (where: string, text: string, tags: string[] = []) => {
     const c = courseSkillsIn(master, text, tags);
     if (c.length) course.push(`${where} : ${c.map(cvSkillLabel).join(", ")}`);
@@ -141,8 +165,10 @@ export function runChecks(
   // 6. Aucune phrase « à valider »
   // L'intitulé repris de l'offre vient de l'offre, pas d'une phrase à valider du CV complet.
   const pending = shown
-    .filter((s) => (s.kind === "title" ? s.text.split(" | ")[0]! !== offerTitle && t.pending.has(norm(s.text.split(" | ")[0]!)) : t.pending.has(norm(s.text))))
+    .filter((s) => s.text !== builtTitle && t.pending.has(norm(s.text)))
     .map((s) => `${s.where} : phrase pas encore validée`);
+
+  const unproven = unprovenTitleSkills(master, m.title);
 
   return [
     { id: 1, label: "Toutes les phrases viennent du CV complet", ok: origin.length === 0, details: origin },
@@ -153,6 +179,7 @@ export function runChecks(
     { id: 6, label: "Aucune phrase à valider", ok: pending.length === 0, details: pending },
     { id: 7, label: "Tient sur une page", ok: null, details: [] },
     { id: 8, label: "PDF lisible par les logiciels de tri (nom, e-mail, titre)", ok: null, details: [] },
+    { id: 9, label: "Titre : seulement des technos faites en entreprise", ok: unproven.length === 0, details: unproven.map((x) => `« ${x} » n'est pas prouvé par une expérience`) },
   ];
 }
 

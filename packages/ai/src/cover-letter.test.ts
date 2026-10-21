@@ -294,7 +294,7 @@ describe("vérité", () => {
 
   it("techno attribuée au mauvais projet, entreprise d'alternance non nommée", () => {
     const cv = [
-      "09/2023 – 09/2025 : Développeur Frontend — Alternance · LUSIS",
+      "10/2023 – 09/2025 : Développeur Frontend — Alternance · LUSIS",
       "- Interfaces web en Vue.js",
       "",
       "- Réservation de parking — Projet : Java / Spring Boot, Flutter, Docker Compose.",

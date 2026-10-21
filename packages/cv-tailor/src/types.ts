@@ -4,7 +4,10 @@ import type { CvMaster, JobType, Level, TemplateId } from "@job-radar/shared";
  * Règles du choix des morceaux. Toute modification qui change un CV adapté DOIT changer cette version
  * (les CV déjà adaptés sont alors marqués « à refaire »).
  */
-export const CV_RULES_VERSION = "2026-10-10.2";
+export const CV_RULES_VERSION = "2026-10-21.1";
+
+/** Les deux lignes de technos de la rubrique Compétences (avant les groupes de notions). */
+export const SKILL_LINES = { pro: "En entreprise", other: "En projets et formation" } as const;
 
 /** Ce que le choix lit de l'offre (§4.1). */
 export type JobForCv = {
@@ -68,6 +71,8 @@ export type RenderModel = {
     /** Version courte validée (modèle une colonne, si la place manque). */
     shortDescription?: string;
     technologies: string[];
+    /** Lien du projet (dépôt), sans « https:// ». */
+    link?: string;
   }>;
   skillGroups: Array<{ id: string; label: string; items: Array<{ skillId: string; label: string }> }>;
   education: Array<{ id: string; start: string; end: string; lines: string[] }>;
@@ -107,8 +112,8 @@ export interface TailoredCvDraft {
   dropped: PickedItem[];
   substitutions: Substitution[];
   missing: { absent: string[]; onlyCourse: string[]; forbidden: string[] };
-  /** Intitulé de l'offre repris comme titre (null = titre du CV complet). */
-  offerTitle: string | null;
+  /** Titre construit (métier de l'offre + technos faites en entreprise) ; null = titre du CV complet. */
+  builtTitle: string | null;
   /** Compétences de ton profil ajoutées à la liste (citées par l'offre, absentes du CV complet). */
   fromProfile: string[];
   match: CvMatch;

@@ -1,11 +1,11 @@
 import { CvMasterSchema, type TemplateId } from "@job-radar/shared";
 import { CV_SKILLS } from "@job-radar/skills";
 import { describe, expect, it } from "vitest";
-import { runChecks } from "./checks";
+import { blockingFailures, runChecks } from "./checks";
 import { shrinkOnce } from "./fit";
 import { JOBS, jobFor, MASTER, MASTER_INPUT } from "./fixtures";
-import { buildJobForCv, cleanOfferTitle, jobTypeOf } from "./job";
-import { OFFER_TITLE_ID, tailorCv } from "./tailor";
+import { buildJobForCv, jobTypeOf } from "./job";
+import { BUILT_TITLE_ID, tailorCv } from "./tailor";
 import type { TailoredCvDraft } from "./types";
 
 const bulletIds = (d: TailoredCvDraft, exp: string) => d.sections.experiences.find((e) => e.id === exp)!.bullets.map((b) => b.id);
@@ -15,9 +15,9 @@ const failed = (d: TailoredCvDraft) => d.checks.filter((c) => c.ok === false);
 describe("tailorCv — offres figées", () => {
   it("Frontend Vue.js / TypeScript", () => {
     const d = tailorCv(MASTER, JOBS.front, "deux-colonnes");
-    expect(d.sections.title).toBe("Développeur Frontend Vue.js | TypeScript");
+    expect(d.sections.title).toBe("Développeur Frontend Vue.js / TypeScript");
     expect(bulletIds(d, "lusis-front").slice(0, 2)).toEqual(["f-interfaces", "f-migration"]);
-    expect(d.sections.skillGroups[0]!.id).toBe("frontend");
+    expect(d.sections.skillGroups[0]!.id).toBe("entreprise");
     expect(d.sections.skillGroups[0]!.items.slice(0, 3).map((i) => i.skillId)).toEqual(["typescript", "vue", "vuetify"]);
     expect(bulletIds(d, "lusis-back")).toHaveLength(2); // réduite au minimum
     expect(d.sections.experiences.map((e) => e.id)).toEqual(["lusis-front", "lusis-back"]);
@@ -27,8 +27,8 @@ describe("tailorCv — offres figées", () => {
   it("Java junior Spring Boot", () => {
     const d = tailorCv(MASTER, JOBS.java, "une-colonne");
     expect(bulletIds(d, "lusis-back")).toEqual(expect.arrayContaining(["b-serveur", "b-api-externes", "b-api-internes"]));
-    expect(d.sections.skillGroups[0]!.id).toBe("backend");
-    expect(d.sections.title).toMatch(/Java/);
+    expect(d.sections.skillGroups[0]!.items.slice(0, 3).map((i) => i.skillId)).toEqual(["java", "spring", "rest"]);
+    expect(d.sections.title).toBe("Développeur Java Spring Boot / Vue.js");
     expect(d.sections.experiences[0]!.bullets[0]!.text).toMatch(/^Développé/); // style verbe
     expect(failed(d)).toEqual([]);
   });
@@ -36,10 +36,11 @@ describe("tailorCv — offres figées", () => {
   it("Mobile Flutter / Kotlin", () => {
     const job = jobFor("Développeur mobile Flutter / Kotlin", "Applications Android en Kotlin et multiplateforme en Flutter. BLoC apprécié.", ["Flutter", "Kotlin", "Android"], ["BLoC"]);
     const d = tailorCv(MASTER, job, "deux-colonnes");
-    expect(d.sections.projects.slice(0, 2).map((p) => p.id)).toEqual(["search-your-product", "parking"]);
-    expect(d.sections.skillGroups[0]!.id).toBe("mobile");
-    expect(d.sections.title).toBe("Développeur mobile Flutter / Kotlin | Android"); // intitulé de l'offre
-    expect(d.offerTitle).toBe("Développeur mobile Flutter / Kotlin");
+    expect(d.sections.projects.slice(0, 3).map((p) => p.id)).toEqual(["job-radar", "search-your-product", "parking"]);
+    expect(d.sections.skillGroups[1]!.items.map((i) => i.skillId)).toEqual(["flutter", "android", "kotlin"]);
+    expect(d.sections.title).toBe("Développeur Web & Mobile"); // pas de techno mobile faite en entreprise : titre du CV complet
+    expect(d.builtTitle).toBeNull();
+    expect(failed(d)).toEqual([]);
   });
 
   it("offre qui exige PHP et Jira : jamais affichés, signalés « choisi de ne pas afficher »", () => {
@@ -107,11 +108,11 @@ describe("tailorCv — offres figées", () => {
     ] };
     const master = CvMasterSchema.parse({ ...MASTER_INPUT, skillGroups: [...MASTER_INPUT.skillGroups, ia] });
     const job = jobFor("Développeur Full Stack", "Vue.js, Java. Vous codez avec Claude Code et des agents IA.", ["Vue.js", "Java"]);
-    const group = tailorCv(master, job, "deux-colonnes").sections.skillGroups.find((g) => g.id === "ia")!;
-    expect(group.items.map((i) => i.label)).toEqual(["Claude Code", "Cursor", "MCP"]);
-    // Rien ajouté ailleurs depuis le profil (Claude Code est déjà dans le CV complet).
-    const elsewhere = tailorCv(master, { ...job, profileSkills: ["agents-ia"] } as typeof job, "deux-colonnes").sections.skillGroups.filter((g) => g.id !== "ia");
-    expect(elsewhere.flatMap((g) => g.items.map((i) => i.label))).not.toContain("Claude Code");
+    const line = tailorCv(master, job, "deux-colonnes").sections.skillGroups.find((g) => g.id === "projets")!;
+    expect(line.items.map((i) => i.label)).toEqual(["Claude Code", "Cursor"]); // MCP : pas cité par l'offre
+    // Rien ajouté en double depuis le profil (Claude Code est déjà dans le CV complet).
+    const all = tailorCv(master, { ...job, profileSkills: ["agents-ia"] } as typeof job, "deux-colonnes").sections.skillGroups.flatMap((g) => g.items.map((i) => i.label));
+    expect(all.filter((l) => l === "Claude Code")).toHaveLength(1);
   });
 
   it("jamais de libellé raccourci : « Docker Compose » reste tel quel quand l'offre écrit « Docker »", () => {
@@ -188,7 +189,7 @@ describe("propriétés (200 offres au hasard)", () => {
       expect(d.sections.identity.fullName).toBe(MASTER.identity.fullName);
       expect(d.sections.experiences).toHaveLength(MASTER.experiences.length);
     }
-  });
+  }, 20_000); // 400 CV calculés : lent quand tous les tests tournent ensemble
 });
 
 describe("contrôles", () => {
@@ -202,40 +203,89 @@ describe("contrôles", () => {
   });
 });
 
-describe("titre repris de l'offre", () => {
-  it("nettoie l'intitulé : H/F, CDI, lieu, entreprise, doublon masculin/féminin", () => {
-    expect(cleanOfferTitle("Junior Full-Stack Engineer (Product & Platform)")).toBe("Junior Full-Stack Engineer");
-    expect(cleanOfferTitle("Software Engineer Fullstack - CDI Paris - Theodo Retail")).toBe("Software Engineer Fullstack");
-    expect(cleanOfferTitle("Développeur FullStack Java/React H/F (CDI)")).toBe("Développeur FullStack Java/React");
-    expect(cleanOfferTitle("Développeur Java Fullstack X/ F/H")).toBe("Développeur Java Fullstack");
-    expect(cleanOfferTitle("CDI - Développeur Front-End Applications Web")).toBe("Développeur Front-End Applications Web");
-    expect(cleanOfferTitle("Ingénieur logiciel/Ingénieure logiciel")).toBe("Ingénieur logiciel");
+describe("titre construit (métier de l'offre + technos faites en entreprise)", () => {
+  const titleOf = (title: string, required: string[]) => tailorCv(MASTER, jobFor(title, required.join(", "), required), "deux-colonnes");
+
+  it("offre Java, front, full stack : jamais l'intitulé de l'offre", () => {
+    const java = titleOf("Développeur Java Angular F/H", ["Java", "Angular"]);
+    expect(java.sections.title).toBe("Développeur Java Spring Boot / Vue.js");
+    expect(java.picked.find((p) => p.kind === "title")!.id).toBe(BUILT_TITLE_ID);
+    expect(titleOf("Développeur Frontend Svelte / TypeScript", ["Svelte", "TypeScript"]).sections.title).toBe("Développeur Frontend Vue.js / TypeScript");
+    expect(titleOf("Développeur Full-Stack Java EE / Docker H/F", ["Java", "Docker"]).sections.title).toBe("Développeur Full Stack Vue.js / Java Spring Boot");
+    for (const d of [java, titleOf("Développeur Full-Stack Java EE", ["Java"])]) expect(failed(d)).toEqual([]);
   });
 
-  it("refuse un niveau au-dessus du tien, un contrat qui n'est pas un emploi, ou un autre métier", () => {
-    expect(cleanOfferTitle("Confirmed Software Engineer")).toBeNull();
-    expect(cleanOfferTitle("Développeur Senior Vue.js")).toBeNull();
-    expect(cleanOfferTitle("Tech Lead Java")).toBeNull();
-    expect(cleanOfferTitle("Alternance - Développeur web")).toBeNull();
-    expect(cleanOfferTitle("Consultant(e) DORA / Power Platform")).toBeNull();
-    expect(cleanOfferTitle("Chef de projet digital")).toBeNull();
-  });
-
-  it("reprend l'intitulé si ses compétences sont dans ton CV, sinon le titre du CV complet", () => {
-    const ok = tailorCv(MASTER, jobFor("Développeur Full-Stack Java H/F", "Java, Spring Boot, Vue.js", ["Java", "Spring Boot", "Vue.js"]), "deux-colonnes");
-    expect(ok.sections.title).toBe("Développeur Full-Stack Java | Vue.js, Spring Boot");
-    expect(ok.picked.find((p) => p.kind === "title")!.id).toBe(OFFER_TITLE_ID);
-    expect(failed(ok)).toEqual([]);
-    // Svelte n'est pas dans le CV : l'intitulé n'est pas repris.
-    const ko = tailorCv(MASTER, jobFor("Développeur Svelte / TypeScript", "Svelte, TypeScript", ["Svelte", "TypeScript"]), "deux-colonnes");
-    expect(ko.offerTitle).toBeNull();
-    expect(ko.sections.title).not.toMatch(/Svelte/);
-  });
-
-  it("un titre choisi à la main prime sur l'intitulé de l'offre", () => {
+  it("un titre choisi à la main prime sur le titre construit", () => {
     const d = tailorCv(MASTER, JOBS.java, "deux-colonnes", { add: [], remove: [], variants: {}, titleId: "t-back", order: {} });
-    expect(d.offerTitle).toBeNull();
-    expect(d.sections.title).toMatch(/^Développeur Backend Java Spring Boot/);
+    expect(d.builtTitle).toBeNull();
+    expect(d.sections.title).toBe("Développeur Backend Java Spring Boot");
+  });
+
+  it("contrôle bloquant : techno absente des expériences pro (Java EE, Docker, Angular)", () => {
+    const d = tailorCv(MASTER, JOBS.java, "deux-colonnes");
+    for (const [title, bad] of <Array<[string, string]>>[["Développeur Java EE", "java ee"], ["Développeur Full Stack Docker", "Docker"], ["Développeur Angular / Vue.js", "Angular"], ["Développeur React", "React"]]) {
+      const check = runChecks({ ...d.sections, title }, MASTER, [], title).find((c) => c.id === 9)!;
+      expect(check.ok, title).toBe(false);
+      expect(check.details.join(" ")).toContain(bad);
+      expect(blockingFailures(runChecks({ ...d.sections, title }, MASTER, [], title)).map((c) => c.id)).toContain(9);
+    }
+    expect(runChecks({ ...d.sections, title: "Développeur Java Spring Boot / API REST" }, MASTER, [], "Développeur Java Spring Boot / API REST").find((c) => c.id === 9)!.ok).toBe(true);
+  });
+
+  it("profil incohérent avec le titre : signalé", () => {
+    expect(tailorCv(MASTER, JOBS.front, "deux-colonnes").warnings.join(" ")).toMatch(/Profil « full stack » sous un titre « frontend »/);
+    const input = structuredClone(MASTER_INPUT);
+    input.summaries.push({ id: "s-front", template: "deux-colonnes", jobTypes: ["frontend"], toValidate: false, text: "Développeur frontend diplômé d'un Bac+5." } as never);
+    const d = tailorCv(CvMasterSchema.parse(input), JOBS.front, "deux-colonnes");
+    expect(d.sections.summary).toMatch(/^Développeur frontend/);
+    expect(d.warnings.join(" ")).not.toMatch(/Profil « /);
+  });
+});
+
+describe("projet « toujours » (Job Radar)", () => {
+  it("présent et en premier pour toutes les offres, jamais retiré pour la place", () => {
+    for (const job of Object.values(JOBS)) {
+      for (const tpl of ["une-colonne", "deux-colonnes"] as TemplateId[]) {
+        let d = tailorCv(MASTER, job, tpl);
+        expect(d.sections.projects[0]!.id, job.title).toBe("job-radar");
+        expect(d.sections.projects[0]!.link).toBe("github.com/camille/job-radar");
+        for (let next = shrinkOnce(d, MASTER); next; next = shrinkOnce(d, MASTER)) d = next;
+        expect(d.sections.projects.map((p) => p.id)).toContain("job-radar");
+      }
+    }
+  });
+
+  it("contrôle bloquant s'il manque ; description à valider : pas affiché, signalé", () => {
+    const d = tailorCv(MASTER, JOBS.front, "deux-colonnes");
+    const without = { ...d.sections, projects: d.sections.projects.filter((p) => p.id !== "job-radar") };
+    expect(runChecks(without, MASTER, [], d.builtTitle).find((c) => c.id === 4)!.details).toContain("manque : projet Job Radar");
+    const input = structuredClone(MASTER_INPUT);
+    for (const v of input.projects[0]!.descriptions) v.toValidate = true;
+    const pending = tailorCv(CvMasterSchema.parse(input), JOBS.front, "deux-colonnes");
+    expect(pending.sections.projects.map((p) => p.id)).not.toContain("job-radar");
+    expect(pending.warnings.join(" ")).toMatch(/Job Radar.*à valider/);
+    expect(failed(pending)).toEqual([]);
+  });
+});
+
+describe("compétences en deux niveaux", () => {
+  it("« En entreprise » d'abord (technos pro), puis les technos de projets citées par l'offre ; notions telles quelles", () => {
+    const d = tailorCv(MASTER, jobFor("Développeur Full Stack", "Vue.js, Java, Docker, React, Microservices", ["Vue.js", "Java", "Docker", "React", "Microservices"]), "deux-colonnes");
+    const [pro, other, ...rest] = d.sections.skillGroups;
+    expect([pro!.label, other!.label]).toEqual(["En entreprise", "En projets et formation"]);
+    const levelOf = (id: string) => MASTER.skillGroups.flatMap((g) => g.items).find((i) => i.skillId === id)!.level;
+    expect(pro!.items.every((i) => levelOf(i.skillId) === "pro")).toBe(true);
+    expect(pro!.items.map((i) => i.skillId)).toEqual(expect.arrayContaining(["vue", "typescript", "java", "spring", "rest", "git"]));
+    expect(other!.items.map((i) => i.skillId).sort()).toEqual(["docker", "react"]); // ni Flutter, ni Kotlin, ni Node.js
+    for (const id of ["architecture", "tests", "methodes"]) {
+      const master = MASTER.skillGroups.find((g) => g.id === id)!;
+      expect(rest.find((g) => g.id === id)!.items.map((i) => i.label).sort()).toEqual(master.items.map((i) => i.label).sort());
+    }
+    expect(failed(d)).toEqual([]);
+  });
+
+  it("rien de cité hors entreprise : pas de ligne « En projets et formation »", () => {
+    expect(tailorCv(MASTER, JOBS.front, "deux-colonnes").sections.skillGroups.map((g) => g.id)).not.toContain("projets");
   });
 });
 
@@ -264,9 +314,9 @@ describe("compétences du profil", () => {
     const d = tailorCv(MASTER, job(["Python", "GitLab", "Express", "Rust"]), "deux-colonnes");
     const group = (id: string) => d.sections.skillGroups.find((g) => g.items.some((i) => i.skillId === id))?.id;
     expect(d.fromProfile.sort()).toEqual(["express", "gitlab", "python"]); // Rust : pas dans l'offre
-    expect(group("python")).toBe("backend");
-    expect(group("express")).toBe("backend");
-    expect(group("gitlab")).toBe("outils");
+    expect(group("python")).toBe("projets");
+    expect(group("express")).toBe("projets");
+    expect(group("gitlab")).toBe("projets");
     expect(d.missing.absent).toEqual(["svelte"]);
     expect(d.match.found).toEqual(expect.arrayContaining(["python", "gitlab", "express"]));
     expect(failed(d)).toEqual([]);
