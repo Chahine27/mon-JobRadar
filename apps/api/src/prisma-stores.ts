@@ -92,7 +92,6 @@ const jobSelect = {
   userEditsAt: true,
   applyChannel: true,
   applyCv: true,
-  followedUpAt: true,
   ...jobInclude,
 } as const;
 
@@ -543,9 +542,6 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
         if (r.count === 0) return null;
         const row = await prisma.job.findUnique({ where: { id }, select: jobSelect });
         return row ? toJobRow(row) : null;
-      },
-      async setFollowedUp(id, at) {
-        return (await prisma.job.updateMany({ where: { id }, data: { followedUpAt: at } })).count > 0;
       },
       async setApplyInfo(id, info) {
         return (await prisma.job.updateMany({ where: { id }, data: { applyChannel: info.channel, applyCv: info.cv } })).count > 0;

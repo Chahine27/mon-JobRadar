@@ -77,7 +77,7 @@ export type JobDetail = JobSummary & {
 } & ApplyInfoFields;
 
 /** Candidature : canal d'envoi et CV utilisé (null = pas encore renseigné). */
-export type ApplyInfoFields = { applyChannel: ApplyChannel | null; applyCv: ApplyCv | null; followedUpAt: Date | null };
+export type ApplyInfoFields = { applyChannel: ApplyChannel | null; applyCv: ApplyCv | null };
 
 /** Candidature déjà envoyée pour la même offre (autre site). */
 export type AppliedTwin = { id: string; title: string; company: string | null; city: string | null; appliedAt: Date; sources: string[] };
@@ -309,7 +309,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       const applied = await stores.jobs.appliedDates();
       return (await stores.jobs.list(["APPLIED", "REJECTED"]))
         .filter((j) => j.status === "APPLIED" || (j.status === "REJECTED" && applied.has(j.id)))
-        .map((j) => ({ ...summarize(j), applyChannel: j.applyChannel ?? null, applyCv: j.applyCv ?? null, followedUpAt: j.followedUpAt ?? null, appliedAt: applied.get(j.id) ?? null }))
+        .map((j) => ({ ...summarize(j), applyChannel: j.applyChannel ?? null, applyCv: j.applyCv ?? null, appliedAt: applied.get(j.id) ?? null }))
         .sort((a, b) => (b.appliedAt?.getTime() ?? 0) - (a.appliedAt?.getTime() ?? 0));
     },
 
@@ -362,7 +362,6 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
         appliedTwins: await this.appliedTwins(id),
         applyChannel: job.applyChannel ?? null,
         applyCv: job.applyCv ?? null,
-        followedUpAt: job.followedUpAt ?? null,
       };
     },
 

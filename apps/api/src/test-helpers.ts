@@ -365,12 +365,6 @@ export async function createMemoryStores() {
         }
         return j;
       },
-      setFollowedUp: async (id, at) => {
-        const j = jobs.get(id);
-        if (!j) return false;
-        j.followedUpAt = at;
-        return true;
-      },
       setApplyInfo: async (id, info) => {
         const j = jobs.get(id);
         if (!j) return false;
@@ -383,7 +377,7 @@ export async function createMemoryStores() {
         const before = beforeEdits.get(id) ?? structuredClone(j);
         beforeEdits.set(id, before);
         // Les infos de candidature ne sont pas des corrections de l'offre : gardées.
-        Object.assign(j, structuredClone(before), { userEdits: null, userEditsAt: null, applyChannel: j.applyChannel ?? null, applyCv: j.applyCv ?? null, followedUpAt: j.followedUpAt ?? null });
+        Object.assign(j, structuredClone(before), { userEdits: null, userEditsAt: null, applyChannel: j.applyChannel ?? null, applyCv: j.applyCv ?? null });
         if (edits) applyEdits(j, edits, new Date());
         return j;
       },

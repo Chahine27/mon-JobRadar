@@ -18,7 +18,7 @@ Elle collecte des offres sur plusieurs sites, les note selon mon profil, me pré
    - candidatures spontanées : recherche d'entreprises proches (La Bonne Boîte), lettre et envoi par e-mail ;
    - suivi des réponses reçues dans ma boîte mail (réponse, refus, message d'absence), relance groupée des candidatures spontanées.
 6. **Ajout d'une offre à la main** : je colle une annonce ou son lien (le serveur lit la page), ou je l'envoie en un clic grâce à une extension Chrome/Edge.
-7. **Suivi des candidatures** : statuts, barre de recherche (entreprise, poste, lieu, site, mails), candidature sans nouvelle depuis 14 jours classée « Sans réponse ».
+7. **Suivi des candidatures** : statuts, barre de recherche (entreprise, poste, lieu, site, mails), candidature sur offre sans nouvelle depuis 21 jours classée « Sans réponse » (pas de relance : seules les spontanées se relancent).
 8. **Statistiques** : compétences les plus demandées, expérience exigée, efficacité de chaque source.
 9. **Signaler un souci** : le bouton « Copier l'offre » copie toute l'offre en JSON (sources, description, score détaillé, avis de l'IA) pour la donner à Claude Code.
 
@@ -63,7 +63,7 @@ Le site est adapté au téléphone (barre de navigation en bas, pages compactes)
 - Onglets : sur une offre, spontanées, à relancer, à compléter, refusées, e-mails reconnus.
 - **Barre de recherche** sur toutes les candidatures : entreprise, poste, lieu, site d'annonce, objet et expéditeur des mails.
 - Étapes : envoyée, accusé de réception, entretien, proposition, refusée, relancée. Elles avancent **toutes seules** grâce aux mails reçus.
-- Une candidature sur offre sans nouvelle depuis **14 jours** passe en « Sans réponse ». Elle reprend son étape si une réponse arrive.
+- Une candidature sur offre sans nouvelle depuis **21 jours** passe en « Sans réponse » (une offre ne se relance pas). Elle reprend son étape si une réponse arrive.
 - Un mail rattaché par erreur peut être écarté (« Pas lié »). Un mail incertain est proposé « à vérifier ».
 
 ### Suivi des mails

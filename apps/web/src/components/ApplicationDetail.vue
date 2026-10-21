@@ -122,23 +122,6 @@ async function sendFollowUp(a: SpontaneousItem) {
       <button type="button" class="link" :disabled="busy === app.id" @click="siteOutcome(app, null)">annuler</button>
     </p>
     <p v-if="isJob(app) && app.noAnswer" class="small muted"><Icon name="clock" :size="14" /> Aucune nouvelle depuis {{ daysSince(lastActivity(app)) }} jours : considérée comme refusée. Si une réponse arrive, elle reprendra son vrai statut.</p>
-    <section v-if="isJob(app) && toFollowUp(app)" class="relance">
-      <div class="small">
-        <strong>Relancer {{ app.company ?? "l'entreprise" }}</strong>
-        <span class="muted">
-          · pas de réponse depuis {{ daysSince(lastActivity(app)) }} jours. Relance par le même chemin que ta candidature<template v-if="app.applyChannel">
-          ({{ CHANNEL_LABEL[app.applyChannel] }})</template> : un message court qui rappelle le poste et ta date d'envoi.
-        </span>
-      </div>
-      <div class="row">
-        <button type="button" class="small primary" :disabled="busy === app.id" @click="act(app.id, () => api.setJobFollowedUp(app.id, true))"><Icon name="check" :size="14" />J'ai relancé</button>
-        <span class="small muted">Elle sort de « À relancer » ; sans réponse 14 jours après, elle sera comptée comme refusée.</span>
-      </div>
-    </section>
-    <p v-if="isJob(app) && app.followedUpAt" class="small muted">
-      <Icon name="send" :size="14" /> Relancée {{ timeAgo(app.followedUpAt) }} ·
-      <button type="button" class="link" :disabled="busy === app.id" @click="act(app.id, () => api.setJobFollowedUp(app.id, false))">annuler</button>
-    </p>
     <section v-if="!isJob(app) && toFollowUp(app)" class="relance">
       <div class="small">
         <strong>Relancer {{ app.company }}</strong>

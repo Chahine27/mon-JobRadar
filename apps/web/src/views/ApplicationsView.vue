@@ -56,7 +56,7 @@ api.getLetterKit().then((r) => (firstName.value = r.kit.signature.trim().split(/
  * envoie une par une (pause entre deux) ; la page suit l'avancement chaque seconde.
  */
 const batch = ref<FollowUpBatch | null>(null);
-/** Seules les spontanées se relancent d'un clic (Job Radar connaît leur fil de mail) ; les offres, c'est toi. */
+/** Seules les spontanées se relancent (Job Radar connaît leur fil de mail). */
 const spontaneousToFollow = computed(() => spontaneous.value.filter(toFollowUp));
 const batchError = ref<string | null>(null);
 const batching = computed(() => !!batch.value?.running);
@@ -120,7 +120,7 @@ const kpis = computed<Kpi[]>(() => [
   { label: "En attente de décision", value: waiting.value.length, week: mailsOf(["ACK"]).filter((m) => thisWeek(m.receivedAt)).length, weekLabel: "accusé", icon: "mail", tone: "accent", to: "answered" },
   { label: "Entretiens", value: interviews.value.length, week: mailsOf(["INTERVIEW"]).filter((m) => thisWeek(m.receivedAt)).length, weekLabel: "proposé", icon: "calendar", tone: "good", to: "interview" },
   { label: "Refus reçus", value: rejectedByMail.value.length, week: mailsOf(["REJECTION"]).filter((m) => thisWeek(m.receivedAt)).length, weekLabel: "reçu", icon: "x", tone: "low", to: "rejected" },
-  { label: "Sans réponse", value: rejected.value.length - rejectedByMail.value.length, week: 0, weekLabel: "", icon: "clock", tone: "mid", to: "rejected", hint: "Offres sans nouvelles depuis 14 jours" },
+  { label: "Sans réponse", value: rejected.value.length - rejectedByMail.value.length, week: 0, weekLabel: "", icon: "clock", tone: "mid", to: "rejected", hint: "Offres sans nouvelles depuis 21 jours" },
 ]);
 const weekText = (k: Kpi) => (k.hint ? k.hint : k.week ? `+${k.week} ${k.weekLabel}${k.week > 1 ? "s" : ""} cette semaine` : "Rien de neuf cette semaine");
 

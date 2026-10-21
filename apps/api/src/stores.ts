@@ -70,8 +70,6 @@ export type JobRow = {
   /** Candidature : canal d'envoi et CV utilisé (null = pas encore renseigné). */
   applyChannel?: ApplyChannel | null;
   applyCv?: ApplyCv | null;
-  /** Relance faite après 14 jours sans réponse (null = pas encore relancée). */
-  followedUpAt?: Date | null;
   /** Contrat seulement deviné dans la description par le code (ni la source, ni le titre ne le disent) : l'IA peut l'effacer. */
   contractFromDescription?: boolean;
 };
@@ -93,8 +91,6 @@ export interface JobStore {
   setEdits(id: string, edits: JobEdits | null): Promise<JobRow | null>;
   /** Canal d'envoi et CV utilisé pour la candidature. false si l'offre n'existe pas. */
   setApplyInfo(id: string, info: { channel: ApplyChannel; cv: ApplyCv }): Promise<boolean>;
-  /** Relance faite (null = annulée). false si l'offre n'existe pas. */
-  setFollowedUp(id: string, at: Date | null): Promise<boolean>;
 }
 
 /** Infos corrigées à la main : un champ absent garde la valeur de la source. */

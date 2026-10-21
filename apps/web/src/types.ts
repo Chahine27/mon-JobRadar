@@ -346,13 +346,13 @@ export type ApplyInfo = {
   contractType?: "CDI" | "CDD" | "INTERIM" | "ALTERNANCE" | "STAGE" | "FREELANCE";
 };
 /** Canal et CV enregistrés (null = pas encore renseigné, candidature d'avant la règle). */
-export type ApplyInfoFields = { applyChannel: ApplyInfo["channel"] | null; applyCv: ApplyInfo["cv"] | null; followedUpAt: string | null };
+export type ApplyInfoFields = { applyChannel: ApplyInfo["channel"] | null; applyCv: ApplyInfo["cv"] | null };
 
 /** Candidature sur une offre. */
 export type Application = JobSummary & ApplyInfoFields & {
   appliedAt: string | null;
   stage: ApplicationStage;
-  /** aucune nouvelle depuis 14 jours : considérée refusée */
+  /** aucune nouvelle depuis 21 jours : considérée refusée */
   noAnswer?: boolean;
   mails: ApplicationMail[];
   /** CV adaptés exportés (ceux envoyés si l'offre a été marquée « Postulé » après l'export). */

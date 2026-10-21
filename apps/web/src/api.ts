@@ -264,8 +264,6 @@ export const api = {
    */
   setJobStatus: (id: string, status: JobStatus, extra: Partial<ApplyInfo> & { confirmDuplicate?: boolean } = {}) =>
     request<JobDetail>("POST", `/api/jobs/${encodeURIComponent(id)}/status`, { status, ...extra }),
-  /** Candidature sur offre relancée par toi (done: false = annuler). */
-  setJobFollowedUp: (id: string, done: boolean) => request<{ ok: true }>("POST", `/api/applications/jobs/${encodeURIComponent(id)}/followed-up`, { done }),
   /** Complète une candidature d'avant la règle (canal, CV, contrat). */
   setApplyInfo: (id: string, info: ApplyInfo) => request<JobDetail>("PUT", `/api/jobs/${encodeURIComponent(id)}/application-info`, info),
 };

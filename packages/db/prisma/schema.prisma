@@ -121,8 +121,6 @@ model Job {
   /// Candidature : comment elle est partie (mail | formulaire | linkedin | autre) et quel CV (classique | ats). Demandés à « Postulé ».
   applyChannel      String?
   applyCv           String?
-  /// Relance faite par toi (par le canal d'envoi) après 14 jours sans réponse : une seule est proposée
-  followedUpAt      DateTime?
 
   sources  JobSourceLink[]
   scores   JobScore[]

@@ -34,20 +34,20 @@ describe("applicationStage", () => {
   });
 });
 
-describe("sans réponse depuis 14 jours (offres)", () => {
+describe("sans réponse depuis 21 jours (offres)", () => {
   const now = new Date("2026-10-16T12:00:00Z");
   const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000);
-  it("envoyée ou seulement accusée, rien depuis 14 jours : refusée de fait", () => {
-    expect(noAnswer("SENT", daysAgo(15), [], now)).toBe(true);
-    expect(noAnswer("ACK", daysAgo(30), [{ receivedAt: daysAgo(14) }], now)).toBe(true);
+  it("envoyée ou seulement accusée, rien depuis 21 jours : refusée de fait", () => {
+    expect(noAnswer("SENT", daysAgo(22), [], now)).toBe(true);
+    expect(noAnswer("ACK", daysAgo(40), [{ receivedAt: daysAgo(21) }], now)).toBe(true);
   });
   it("nouvelle récente, entretien, ou date inconnue : non", () => {
     expect(noAnswer("ACK", daysAgo(30), [{ receivedAt: daysAgo(3) }], now)).toBe(false);
-    expect(noAnswer("SENT", daysAgo(13), [], now)).toBe(false);
+    expect(noAnswer("SENT", daysAgo(20), [], now)).toBe(false);
     expect(noAnswer("INTERVIEW", daysAgo(60), [], now)).toBe(false);
     expect(noAnswer("SENT", null, [], now)).toBe(false);
     // Un mail écarté (« Pas lié ») ne compte pas comme une nouvelle.
-    expect(noAnswer("SENT", daysAgo(20), [{ receivedAt: daysAgo(1), dismissed: true }], now)).toBe(true);
+    expect(noAnswer("SENT", daysAgo(25), [{ receivedAt: daysAgo(1), dismissed: true }], now)).toBe(true);
   });
 });
 

@@ -45,11 +45,11 @@ export function applicationStage(
   return best?.kind ?? "SENT";
 }
 
-/** Candidature sur une offre restée sans nouvelles : considérée comme refusée au-delà de ce délai. */
-export const NO_ANSWER_DAYS = 14;
+/** Candidature sur une offre restée sans nouvelles : considérée comme refusée au-delà de ce délai (pas de relance). */
+export const NO_ANSWER_DAYS = 21;
 
 /**
- * Offre sans entretien ni proposition, et sans aucune nouvelle (ni mail, ni candidature) depuis 14 jours : refus de fait,
+ * Offre sans entretien ni proposition, et sans aucune nouvelle (ni mail, ni candidature) depuis 21 jours : refus de fait,
  * affiché « Refusée (sans réponse) ». Une réponse qui arrive ensuite rend son vrai statut à la candidature.
  */
 export function noAnswer(
