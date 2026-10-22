@@ -459,7 +459,14 @@ export type SkillStats = {
     group: "core" | "data" | "devops" | "testing" | "other";
   }>;
   unlock: Array<{ label: string; offers: number; training: number; accessible: number }>;
-  experience: { max: number; known: number; accessible: number; ranges: Array<{ label: string; offers: number; share: number }> };
+  experience: {
+    max: number;
+    known: number;
+    accessible: number;
+    ranges: Array<{ label: string; offers: number; share: number }>;
+    /** Même répartition par groupe d'offres : toutes, CDI, titre junior, au-dessus de ton seuil. */
+    scopes: Array<{ id: "all" | "cdi" | "junior" | "profile"; offers: number; known: number; ranges: Array<{ label: string; offers: number; share: number }> }>;
+  };
   together: Array<{ label: string; offers: number; with: Array<{ label: string; share: number }> }>;
   sources: Array<{ source: string; offers: number; good: number }>;
   /** Fenêtre en jours (null : toute la période) et chiffres clés de la fenêtre d'avant. */

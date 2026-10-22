@@ -1,3 +1,4 @@
+import { detectSeniority } from "@job-radar/scoring";
 import { resolveSkill } from "@job-radar/skills";
 import type { JobSummary } from "./service";
 
@@ -49,6 +50,8 @@ export type SkillStats = {
     known: number;
     accessible: number;
     ranges: Array<{ label: string; offers: number; share: number }>;
+    /** Même répartition par groupe d'offres : toutes, CDI, titre junior, au-dessus de ton seuil (« bonnes offres »). */
+    scopes: Array<{ id: ExperienceScope; offers: number; known: number; ranges: Array<{ label: string; offers: number; share: number }> }>;
   };
   /** Pour tes langages et frameworks les plus demandés : ce qui t'en manque le plus souvent dans leurs offres. */
   together: Array<{ label: string; offers: number; with: Array<{ label: string; share: number }> }>;
@@ -56,7 +59,9 @@ export type SkillStats = {
   sources: Array<{ source: string; offers: number; good: number }>;
 };
 
-type Input = Pick<JobSummary, "matchedSkills" | "missingSkills" | "publishedAt" | "firstSeenAt" | "experienceMinYrs" | "sources"> & {
+export type ExperienceScope = "all" | "cdi" | "junior" | "profile";
+
+type Input = Pick<JobSummary, "title" | "contractType" | "matchedSkills" | "missingSkills" | "publishedAt" | "firstSeenAt" | "experienceMinYrs" | "sources"> & {
   /** L'annonce propose une formation. */
   training?: boolean;
   score: Pick<JobSummary["score"], "final" | "hidden">;
@@ -127,9 +132,24 @@ export function skillStats(jobs: Input[], opts: { experienceMax: number; thresho
     .sort((a, b) => b.offers - a.offers || a.label.localeCompare(b.label));
 
   const years = items.map((j) => j.experienceMinYrs).filter((y): y is number => y !== null);
+  const good = (j: Input) => !j.score.hidden && j.score.final >= opts.threshold;
+  const rangesOf = (ys: number[]) =>
+    RANGES.map((r) => {
+      const n = ys.filter(r.test).length;
+      return { label: r.label, offers: n, share: pct(n, ys.length) };
+    });
+  // Junior : titre seulement (même règle que le score) ; « 0 an demandé » mettrait toutes ces offres dans « 0 à 2 ans ».
+  const SCOPES: Array<[ExperienceScope, (j: Input) => boolean]> = [
+    ["all", () => true],
+    ["cdi", (j) => j.contractType === "CDI"],
+    ["junior", (j) => detectSeniority(j.title) === "junior"],
+    ["profile", good],
+  ];
 
+  // Compétence du profil absente du dictionnaire (« Tests », « IA ») : comptée comme principale pour que le score
+  // la détecte, mais ce n'est pas un langage ni un framework. Ici on veut de vrais langages et frameworks.
   const together = skills
-    .filter((s) => s.owned && s.core)
+    .filter((s) => s.owned && s.core && !resolveSkill(s.label).id.startsWith("custom:"))
     .slice(0, 3)
     .map((s) => {
       const withIt = items.filter((j) => j.matchedSkills.includes(s.label));
@@ -148,11 +168,10 @@ export function skillStats(jobs: Input[], opts: { experienceMax: number; thresho
   // Sources : toutes les offres (une offre vue sur 2 sources compte pour les 2).
   const sources = new Map<string, { offers: number; good: number }>();
   for (const j of jobs) {
-    const good = !j.score.hidden && j.score.final >= opts.threshold;
     for (const source of new Set(j.sources.map((s) => s.source))) {
       const s = sources.get(source) ?? { offers: 0, good: 0 };
       s.offers++;
-      if (good) s.good++;
+      if (good(j)) s.good++;
       sources.set(source, s);
     }
   }
@@ -174,9 +193,11 @@ export function skillStats(jobs: Input[], opts: { experienceMax: number; thresho
       max: opts.experienceMax,
       known: years.length,
       accessible: pct(years.filter((y) => y <= opts.experienceMax).length, years.length),
-      ranges: RANGES.map((r) => {
-        const n = years.filter(r.test).length;
-        return { label: r.label, offers: n, share: pct(n, years.length) };
+      ranges: rangesOf(years),
+      scopes: SCOPES.map(([id, keep]) => {
+        const scoped = items.filter(keep);
+        const ys = scoped.map((j) => j.experienceMinYrs).filter((y): y is number => y !== null);
+        return { id, offers: scoped.length, known: ys.length, ranges: rangesOf(ys) };
       }),
     },
     together,

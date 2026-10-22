@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { api } from "../api";
+import { api, type JobQuery } from "../api";
 import Icon from "../components/Icon.vue";
 import SourceLogo from "../components/SourceLogo.vue";
 import { SOURCE_LABELS } from "../format";
@@ -165,34 +165,112 @@ const TABS = [
   { id: "tips", label: "Recommandations" },
 ] as const;
 const tab = ref<(typeof TABS)[number]["id"]>("categories");
-/** Flèches, Début et Fin : passent d'un onglet à l'autre (navigation clavier des onglets). */
-function onTabKey(e: KeyboardEvent) {
-  const i = TABS.findIndex((t) => t.id === tab.value);
-  const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: TABS.length - 1 }[e.key];
-  if (next === undefined) return;
+/** Flèches, Début et Fin : onglet suivant (navigation clavier des onglets) ; null pour une autre touche. */
+function nextTab<T extends string>(e: KeyboardEvent, ids: readonly T[], current: T): T | null {
+  const i = ids.indexOf(current);
+  const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: ids.length - 1 }[e.key];
+  if (next === undefined) return null;
   e.preventDefault();
-  tab.value = TABS[(next + TABS.length) % TABS.length]!.id;
-  document.getElementById(`tab-${tab.value}`)?.focus();
+  return ids[(next + ids.length) % ids.length]!;
+}
+function onTabKey(e: KeyboardEvent) {
+  const t = nextTab(e, TABS.map((x) => x.id), tab.value);
+  if (!t) return;
+  tab.value = t;
+  document.getElementById(`tab-${t}`)?.focus();
+}
+
+// Expérience demandée par groupe d'offres (période choisie en haut).
+const EXP_SCOPES = [
+  { id: "all", label: "Toutes", text: "offres", hint: "Toutes les offres de la période." },
+  { id: "cdi", label: "CDI", text: "offres en CDI", hint: "Contrat précisé CDI. Un contrat inconnu ne compte pas." },
+  { id: "junior", label: "Junior", text: "offres junior", hint: "Le titre dit junior, jr, débutant ou jeune diplômé." },
+  { id: "profile", label: "Ton profil", text: "bonnes offres", hint: "Offres dont la note dépasse ton seuil de notification et qui ne sont pas masquées. Ce n'est pas la garantie que tu as toutes les compétences demandées." },
+] as const;
+const expScope = ref<(typeof EXP_SCOPES)[number]["id"]>("all");
+const scope = computed(() => stats.value?.experience.scopes.find((x) => x.id === expScope.value));
+const scopeText = computed(() => EXP_SCOPES.find((x) => x.id === expScope.value)!.text);
+function onExpKey(e: KeyboardEvent) {
+  const t = nextTab(e, EXP_SCOPES.map((x) => x.id), expScope.value);
+  if (!t) return;
+  expScope.value = t;
+  document.getElementById(`exp-${t}`)?.focus();
 }
 
 const quality = (s: { offers: number; good: number }) => (s.offers ? Math.round((s.good / s.offers) * 100) : 0);
 const tone = (share: number) => (share >= 10 ? "good" : share >= 4 ? "mid" : "low");
 
-/** Recommandations tirées des chiffres ci-dessus, sans appel IA. */
-const tips = computed(() => {
-  const s = stats.value!;
-  const out: string[] = [];
-  const u = s.unlock.slice(0, 2);
-  if (u.length)
-    out.push(
-      `Apprendre ${u.map((x) => x.label).join(" et ")} t'ouvrirait ${n(u.reduce((sum, x) => sum + x.offers, 0))} offres où c'est la seule techno qui te manque.`,
-    );
+/** Recommandations tirées des chiffres ci-dessus, sans appel IA : constat, chiffres, intérêt, action, limite. */
+type Reco = {
+  title: string;
+  level?: "high" | "mid" | "low";
+  fact: string;
+  /** Chiffres de la période choisie, expirées comprises. */
+  figures: string[];
+  why: string;
+  /** Lien vers la page Offres : `what` complète « N offres actives … ». */
+  link: { query: JobQuery; to: string; what: string };
+  limit: string;
+};
+const recos = computed(() => {
+  const s = stats.value;
+  const out: Reco[] = [];
+  if (!s) return out;
+  const max = years(s.experience.max);
+  for (const u of s.unlock.slice(0, 2))
+    out.push({
+      title: `Apprendre ${u.label}`,
+      level: unlockLevel(u.offers),
+      fact: `${u.label} est le seul langage ou framework qui te manque dans ${n(u.offers)} offres de la période.`,
+      figures: [
+        `${Math.round((u.offers / s.offers) * 100)} % des ${n(s.offers)} offres de la période`,
+        `${n(u.accessible)} demandent ${max} d'expérience ou moins`,
+        ...(u.training ? [`${n(u.training)} proposent une formation`] : []),
+      ],
+      why: "Tu as déjà les autres langages et frameworks de ces offres : c'est la compétence qui en ouvre le plus d'un coup.",
+      link: { query: { missingSkill: u.label }, to: `/?manquante=${encodeURIComponent(u.label)}`, what: `où ${u.label} te manque` },
+      limit: `Seules ${n(u.accessible)} de ces offres sont dans ton expérience, et le lieu, le contrat ou les outils peuvent encore bloquer.`,
+    });
   const t = s.together[0];
-  if (t?.with.length) out.push(`Dans les offres ${t.label}, il te manque surtout ${t.with.slice(0, 2).map((w) => `${w.label} (${w.share} %)`).join(" et ")}.`);
-  const best = s.sources.filter((x) => x.offers >= 20).sort((a, b) => quality(b) - quality(a)).slice(0, 2);
-  if (best.length) out.push(`Tes sources avec le plus de bonnes offres : ${best.map((x) => `${label(x.source)} (${quality(x)} %)`).join(" et ")}.`);
+  const w = t?.with[0];
+  if (t && w)
+    out.push({
+      title: `Ce qui te manque dans les offres ${t.label}`,
+      fact: `Dans les ${n(t.offers)} offres de la période qui demandent ${t.label}, la compétence qui te manque le plus souvent est ${w.label}.`,
+      figures: t.with.map((x) => `${x.label} : ${x.share} % de ces offres`),
+      why: `${t.label} est l'un de tes langages ou frameworks les plus demandés : ces offres te correspondent déjà en partie.`,
+      link: { query: { missingSkill: w.label }, to: `/?manquante=${encodeURIComponent(w.label)}`, what: `où ${w.label} te manque, avec ou sans ${t.label}` },
+      limit: "Une offre peut demander plusieurs de ces compétences : les pourcentages ne s'additionnent pas.",
+    });
+  const best = s.sources.filter((x) => x.offers >= 20).sort((a, b) => quality(b) - quality(a)).slice(0, 3);
+  if (best.length)
+    out.push({
+      title: "Privilégier les meilleures sources",
+      fact: `${label(best[0]!.source)} donne la plus grande part de bonnes offres (${quality(best[0]!)} %).`,
+      figures: best.map((x) => `${label(x.source)} : ${n(x.good)} bonnes sur ${n(x.offers)} (${quality(x)} %)`),
+      why: "Une bonne offre dépasse ton seuil de notification et n'est pas masquée : ce sont celles où postuler.",
+      link: { query: { source: best[0]!.source }, to: `/?source=${encodeURIComponent(best[0]!.source)}`, what: `de la source « ${label(best[0]!.source)} »` },
+      limit: "Sources de moins de 20 offres écartées, trop peu pour comparer. Une petite source peut apporter des offres que les autres n'ont pas.",
+    });
   return out;
 });
+/** Offres actives ouvertes par chaque lien, comptées par la liste des offres elle-même (même calcul, sans tes filtres). */
+const activeCounts = ref<Record<string, number>>({});
+watch([recos, tab], () => {
+  if (tab.value !== "tips" || !stats.value) return;
+  for (const r of recos.value) {
+    if (r.link.to in activeCounts.value) continue;
+    activeCounts.value[r.link.to] = -1; // en cours
+    api
+      .listJobs({ ...r.link.query, status: "active", limit: 1 })
+      .then((res) => (activeCounts.value[r.link.to] = res.total))
+      .catch(() => delete activeCounts.value[r.link.to]);
+  }
+});
+const activeText = (r: Reco) => {
+  const c = activeCounts.value[r.link.to];
+  return c === undefined || c < 0 ? "…" : n(c);
+};
 </script>
 
 
@@ -326,7 +404,7 @@ const tips = computed(() => {
             <span class="icon-box"><Icon name="star" :size="18" /></span>
             <div class="grow">
               <h2>Ce qui te débloquerait le plus d'offres</h2>
-              <p class="muted small">Seul langage ou framework qui te manque dans l'offre.</p>
+              <p class="muted small">Seule techno principale qui te manque dans l'offre.</p>
             </div>
           </div>
           <ol v-if="stats.unlock.length" class="unlock">
@@ -353,15 +431,33 @@ const tips = computed(() => {
             <span class="icon-box"><Icon name="briefcase" :size="18" /></span>
             <div class="grow">
               <h2>Expérience demandée</h2>
-              <p class="muted small">Précisée dans {{ n(stats.experience.known) }} offres sur {{ n(stats.offers) }}.</p>
+              <p v-if="scope" class="muted small">{{ n(scope.offers) }} {{ scopeText }}, expérience précisée dans {{ n(scope.known) }}.</p>
             </div>
           </div>
-          <div class="ranges">
-            <template v-for="r in stats.experience.ranges" :key="r.label">
+          <div class="tabs exp-tabs" role="tablist" aria-label="Groupe d'offres" @keydown="onExpKey">
+            <button
+              v-for="x in EXP_SCOPES"
+              :id="`exp-${x.id}`"
+              :key="x.id"
+              type="button"
+              role="tab"
+              :aria-selected="expScope === x.id"
+              aria-controls="exp-panel"
+              :tabindex="expScope === x.id ? 0 : -1"
+              :class="{ active: expScope === x.id }"
+              :title="x.hint"
+              @click="expScope = x.id"
+            >
+              {{ x.label }}
+            </button>
+          </div>
+          <p v-if="scope && !scope.known" id="exp-panel" role="tabpanel" class="muted small">Aucune offre de ce groupe ne précise l'expérience demandée.</p>
+          <div v-else-if="scope" id="exp-panel" role="tabpanel" :aria-labelledby="`exp-${expScope}`" class="ranges">
+            <template v-for="r in scope.ranges" :key="r.label">
               <span class="small">{{ r.label }}</span>
               <span class="bar"><div class="fill" :style="{ width: `${r.share}%` }" /></span>
               <strong class="small num">{{ r.share }} %</strong>
-              <span class="small muted num">{{ n(r.offers) }} offres</span>
+              <span class="small muted num">{{ n(r.offers) }} offre{{ r.offers > 1 ? "s" : "" }}</span>
             </template>
           </div>
         </section>
@@ -447,9 +543,27 @@ const tips = computed(() => {
       </div>
 
       <div v-else id="panel-tips" role="tabpanel" aria-labelledby="tab-tips">
-        <ul v-if="tips.length" class="tips small">
-          <li v-for="t in tips" :key="t"><Icon name="check" :size="14" class="up" />{{ t }}</li>
-        </ul>
+        <p class="muted small">
+          Chaque carte donne deux nombres qui ne se comparent pas : celui de la période choisie (expirées comprises), puis celui des offres
+          actives aujourd'hui, sans limite de période. Le lien ouvre ces dernières.
+        </p>
+        <ol v-if="recos.length" class="recos">
+          <li v-for="(r, i) in recos" :key="r.title" class="reco">
+            <div class="reco-head">
+              <span class="rank">{{ i + 1 }}</span>
+              <h3>{{ r.title }}</h3>
+              <span v-if="r.level" class="badge" :class="r.level">Priorité {{ UNLOCK_LEVEL[r.level].toLowerCase() }}</span>
+            </div>
+            <p class="small">{{ r.fact }}</p>
+            <ul class="figures small">
+              <li v-for="f in r.figures" :key="f">{{ f }}</li>
+            </ul>
+            <p class="small"><strong>Pour toi :</strong> {{ r.why }}</p>
+            <p class="small muted"><strong>Limite :</strong> {{ r.limit }}</p>
+            <p class="small now"><strong>Aujourd'hui :</strong> {{ activeText(r) }} offres actives {{ r.link.what }}.</p>
+            <RouterLink :to="r.link.to" class="btn small reco-link">Voir ces {{ activeText(r) }} offres</RouterLink>
+          </li>
+        </ol>
         <p v-else class="muted small">Pas encore assez de données pour une recommandation.</p>
       </div>
     </section>
@@ -854,21 +968,61 @@ td :deep(.source-logo) {
   vertical-align: middle;
   margin-right: 0.3rem;
 }
-.tips {
+.exp-tabs {
+  align-self: flex-start;
+}
+.exp-tabs button {
+  padding: 0.2rem 0.6rem;
+  min-height: 0;
+  font-size: 0.8rem;
+}
+#panel-tips {
+  display: grid;
+  gap: 0.75rem;
+}
+.recos {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 0.75rem;
 }
-.tips li {
+.reco {
   display: flex;
-  gap: 0.5rem;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
 }
-.tips :deep(.icon) {
-  flex: none;
-  margin-top: 0.15rem;
+.reco-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.reco-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.reco .rank {
+  background: var(--surface);
+}
+.figures {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.15rem;
+}
+.now {
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--border);
+}
+.reco-link {
+  align-self: flex-start;
+  margin-top: auto;
 }
 
 /* Portable : cartes de chiffres clés étroites, l'icône laisse la place au titre. */

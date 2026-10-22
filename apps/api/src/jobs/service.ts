@@ -22,6 +22,8 @@ export type JobFilters = {
   source?: string | undefined;
   /** Seulement ce type de contrat (CDI, CDD…) ; « unknown » = contrat non précisé. */
   contract?: string | undefined;
+  /** Seulement les offres où cette compétence te manque (lien depuis les recommandations des Statistiques). */
+  missingSkill?: string | undefined;
 };
 
 export type JobSummary = {
@@ -331,6 +333,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       }
       const items = summaries
         .filter((s) => !f.contract || (s.contractType ?? "unknown") === f.contract)
+        .filter((s) => !f.missingSkill || s.missingSkills.includes(f.missingSkill))
         .filter((s) => !f.zone || s.zone === f.zone)
         .filter((s) => s.score.final >= f.minScore)
         .filter((s) => f.status !== "try" || s.chances.tryable)

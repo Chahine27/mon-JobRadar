@@ -4,7 +4,14 @@ import { createTestApp, login } from "./test-helpers";
 
 const now = new Date("2026-10-10T12:00:00Z");
 const daysAgo = (d: number) => new Date(now.getTime() - d * 86_400_000);
-const job = (matched: string[], missing: string[], age: number, o: { exp?: number; source?: string; score?: number; hidden?: boolean; training?: boolean } = {}) => ({
+const job = (
+  matched: string[],
+  missing: string[],
+  age: number,
+  o: { exp?: number; source?: string; score?: number; hidden?: boolean; training?: boolean; title?: string; contract?: string } = {},
+) => ({
+  title: o.title ?? "Développeur",
+  contractType: o.contract ?? null,
   matchedSkills: matched,
   missingSkills: missing,
   publishedAt: daysAgo(age),
@@ -58,7 +65,7 @@ describe("skillStats", () => {
       job([], [], 1, { source: "jooble" }),
     ];
     const s = skillStats(jobs, opts, now);
-    expect(s.experience).toEqual({
+    expect(s.experience).toMatchObject({
       max: 2,
       known: 5,
       accessible: 60,
@@ -69,6 +76,9 @@ describe("skillStats", () => {
       ],
     });
     expect(s.skills.find((k) => k.label === "Vue.js")!.accessible).toBe(60);
+    expect(s.experience.scopes[0]).toEqual({ id: "all", offers: 5, known: 5, ranges: s.experience.ranges });
+    // Bonnes offres : au-dessus du seuil (70) et non masquées.
+    expect(s.experience.scopes.find((x) => x.id === "profile")).toMatchObject({ offers: 2, known: 2, ranges: [{ offers: 1 }, { offers: 0 }, { offers: 1 }] });
     expect(s.skills.find((k) => k.label === "TypeScript")!.accessible).toBeNull(); // moins de 5 offres
     expect(s.together[0]).toEqual({
       label: "Vue.js",
@@ -81,6 +91,33 @@ describe("skillStats", () => {
       { source: "adzuna", offers: 2, good: 1 },
       { source: "jooble", offers: 1, good: 0 },
     ]);
+  });
+});
+
+describe("ce qui te manque autour de tes compétences", () => {
+  it("seulement autour de vrais langages et frameworks, pas d'une compétence hors dictionnaire du profil", () => {
+    const s = skillStats([job(["Tests", "Java"], ["Kubernetes"], 1), job(["Tests", "Java"], [], 1), job(["Tests"], [], 1)], opts, now);
+    expect(s.skills.find((k) => k.label === "Tests")).toMatchObject({ core: true, offers: 3 });
+    expect(s.together.map((t) => t.label)).toEqual(["Java"]);
+    expect(s.together[0]!.with).toEqual([{ label: "Kubernetes", share: 50 }]);
+  });
+});
+
+describe("expérience par groupe d'offres", () => {
+  it("CDI : contrat connu seulement ; junior : d'après le titre", () => {
+    const s = skillStats(
+      [
+        job(["Vue.js"], [], 1, { exp: 0, contract: "CDI", title: "Développeur junior Vue" }),
+        job(["Vue.js"], [], 1, { exp: 3, contract: "CDD", title: "Développeur Vue débutant" }),
+        job(["Vue.js"], [], 1, { exp: 5, title: "Développeur Vue" }), // contrat inconnu : pas un CDI
+        job(["Vue.js"], [], 1, { contract: "CDI", title: "Développeur Vue" }), // expérience non précisée
+      ],
+      opts,
+      now,
+    );
+    const scope = (id: string) => s.experience.scopes.find((x) => x.id === id)!;
+    expect(scope("cdi")).toMatchObject({ offers: 2, known: 1, ranges: [{ offers: 1, share: 100 }, { offers: 0 }, { offers: 0 }] });
+    expect(scope("junior")).toMatchObject({ offers: 2, known: 2, ranges: [{ share: 50 }, { share: 50 }, { share: 0 }] });
   });
 });
 
@@ -103,6 +140,11 @@ describe("GET /api/jobs/stats", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().offers).toBe(4);
     expect((await t.app.inject({ method: "GET", url: "/api/jobs/stats?days=12", cookies })).statusCode).toBe(400);
+    // Lien des recommandations : offres où la compétence te manque.
+    const list = async (q: string) => (await t.app.inject({ method: "GET", url: `/api/jobs?status=all&includeHidden=true&${q}`, cookies })).json();
+    const ruby = await list("missingSkill=Ruby");
+    expect(ruby.items.map((j: { id: string }) => j.id)).toEqual(["j-ruby"]);
+    expect((await list("missingSkill=Inconnue")).total).toBe(0);
     expect((await t.app.inject({ method: "GET", url: "/api/jobs/stats" })).statusCode).toBe(401);
   });
 });

@@ -89,6 +89,8 @@ export type JobQuery = {
   zone?: "" | "local" | "remote" | "unknown"; // "" = toutes les rubriques
   /** Un seul type de contrat (CDI, CDD…, « unknown » = non précisé ; vide = tous). */
   contract?: string;
+  /** Seulement les offres où cette compétence te manque (vide = toutes). */
+  missingSkill?: string;
   limit?: number;
   offset?: number;
 };

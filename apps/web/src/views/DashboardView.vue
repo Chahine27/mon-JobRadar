@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onActivated, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { api, type JobQuery } from "../api";
 import Icon from "../components/Icon.vue";
 import PageHeader from "../components/PageHeader.vue";
@@ -11,7 +12,7 @@ import type { AutoCheckStatus, CollectionStatus, JobSummary } from "../types";
 const FILTERS_KEY = "jobradar.filters";
 
 function loadFilters(): Required<Omit<JobQuery, "q" | "limit" | "offset">> & { q: string } {
-  const defaults = { minScore: 0, status: "active" as const, includeHidden: false, q: "", sort: "score" as const, source: "", zone: "local" as const, contract: "" };
+  const defaults = { minScore: 0, status: "active" as const, includeHidden: false, q: "", sort: "score" as const, source: "", zone: "local" as const, contract: "", missingSkill: "" };
   try {
     const saved = { ...defaults, ...JSON.parse(localStorage.getItem(FILTERS_KEY) ?? "{}") };
     // « Postulé » a sa propre page (Candidatures) : ancien filtre → flux normal.
@@ -23,6 +24,56 @@ function loadFilters(): Required<Omit<JobQuery, "q" | "limit" | "offset">> & { q
 }
 
 const filters = reactive(loadFilters());
+
+// Lien des Statistiques (« /?manquante=Angular », « /?source=adzuna ») : ajoute ce critère aux filtres en place.
+// Seul un statut sans offre active (ignorées, expirées, refusées, « toutes ») repasse sur « actives », le périmètre du lien.
+const FEED_STATUSES = ["active", "try", "NEW", "SEEN", "SAVED"];
+const route = useRoute();
+const router = useRouter();
+/** Critère venu d'un lien, et nombre d'offres actives qui y répondent sans tes autres filtres (comme dans la recommandation). */
+const linkNote = ref<{ kind: "skill" | "source"; value: string; text: string; total: number } | null>(null);
+watch(
+  () => route.query,
+  (q) => {
+    const missingSkill = typeof q.manquante === "string" ? q.manquante : "";
+    const source = typeof q.source === "string" ? q.source : "";
+    if (!missingSkill && !source) return;
+    if (missingSkill) filters.missingSkill = missingSkill;
+    else filters.source = source;
+    if (!FEED_STATUSES.includes(filters.status)) filters.status = "active";
+    void router.replace({ query: {} });
+    linkNote.value = null;
+    const query = missingSkill ? { missingSkill } : { source };
+    api
+      .listJobs({ ...query, status: "active", limit: 1 })
+      .then((r) => {
+        linkNote.value = missingSkill
+          ? { kind: "skill", value: missingSkill, text: `où ${missingSkill} te manque`, total: r.total }
+          : { kind: "source", value: source, text: `de la source « ${SOURCE_LABELS[source] ?? source} »`, total: r.total };
+      })
+      .catch(() => {});
+  },
+  { immediate: true },
+);
+/** Le critère du lien est encore appliqué (sinon la note n'a plus de sens). */
+const linkActive = computed(() => {
+  const l = linkNote.value;
+  return !!l && (l.kind === "skill" ? filters.missingSkill === l.value : filters.source === l.value);
+});
+/** Ne garde que le critère du lien : la liste montre alors le même nombre que la recommandation. */
+function keepOnlyLink() {
+  const l = linkNote.value!;
+  Object.assign(filters, {
+    q: "",
+    minScore: 0,
+    zone: "",
+    contract: "",
+    status: "active",
+    includeHidden: false,
+    missingSkill: l.kind === "skill" ? l.value : "",
+    source: l.kind === "source" ? l.value : "",
+  });
+}
 const jobs = ref<JobSummary[]>([]);
 const loading = ref(true);
 /** Téléphone : filtres repliés derrière un bouton (toujours visibles sur PC). */
@@ -405,6 +456,9 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
         </button>
       </div>
       </div>
+      <button v-if="filters.missingSkill" type="button" class="chip skill-filter" title="Retirer ce filtre" @click="filters.missingSkill = ''">
+        Compétence manquante : {{ filters.missingSkill }} <Icon name="x" :size="13" />
+      </button>
       <button type="button" class="small filters-toggle" :aria-expanded="showFilters" @click="showFilters = !showFilters">
         <Icon name="sliders" :size="15" />{{ showFilters ? "Masquer les filtres" : "Contrat, recherche, score, tri…" }}
       </button>
@@ -446,6 +500,14 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
     <p v-if="error" class="alert"><Icon name="alert" :size="16" />{{ error }}</p>
     <p v-else-if="!loading" class="muted small count">
       <strong>{{ total }}</strong> offre(s) · {{ jobs.length }} affichée(s)
+      <span v-if="linkActive && !loading" class="link-note">
+        <Icon name="info" :size="14" />
+        <template v-if="linkNote!.total === total">Les {{ linkNote!.total }} offres actives {{ linkNote!.text }}, comme dans la recommandation.</template>
+        <template v-else>
+          La recommandation compte {{ linkNote!.total }} offres actives {{ linkNote!.text }} ; tes autres filtres en gardent {{ total }}.
+          <button type="button" class="ghost small" @click="keepOnlyLink">Les retirer</button>
+        </template>
+      </span>
       <span v-if="check?.pending.length" class="ai-status"><Icon name="sparkle" :size="14" class="spin-slow" />L'IA vérifie {{ check.pending.length }} offre(s) à {{ check.threshold }} % et plus…</span>
       <span v-else-if="check?.offline" class="ai-status off" :title="check.message ?? ''"><Icon name="sparkle" :size="14" />IA éteinte : scores non vérifiés (nouvel essai dans 1 min)</span>
       <span v-else-if="checkMessage" class="ai-status off"><Icon name="check" :size="14" />{{ checkMessage }}</span>
@@ -528,6 +590,10 @@ const badgeOf = (s: CollectionStatus["sources"][number]) =>
 </template>
 
 <style scoped>
+/* Filtre venu des Statistiques : bien visible, un clic le retire. */
+.link-note { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0.3rem; color: var(--accent); }
+.link-note button { min-height: 0; padding: 0.1rem 0.5rem; color: var(--accent); text-decoration: underline; }
+.skill-filter { justify-self: start; align-self: start; min-height: 0; cursor: pointer; background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 .ai-status { display: inline-flex; align-items: center; gap: 0.35rem; margin-left: 0.8rem; color: var(--accent); font-weight: 550; }
 .ai-status.off { color: var(--muted); font-weight: 400; }
 .ai-btn { margin-left: 0.6rem; }

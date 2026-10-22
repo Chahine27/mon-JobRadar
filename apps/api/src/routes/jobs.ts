@@ -28,6 +28,8 @@ const ListQuery = z.object({
   source: z.string().trim().max(40).regex(/^[a-z0-9:-]*$/).optional(),
   /** Seulement ce type de contrat (« unknown » = non précisé) ; absent = tous. */
   contract: z.enum([...MANUAL_CONTRACTS, "unknown"]).optional(),
+  /** Seulement les offres où cette compétence te manque (« Angular »). */
+  missingSkill: z.string().trim().max(80).optional(),
   /** Pagination : 20 offres par page par défaut. */
   limit: z.coerce.number().int().min(1).max(200).default(20),
   offset: z.coerce.number().int().min(0).default(0),
