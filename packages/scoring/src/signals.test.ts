@@ -220,6 +220,15 @@ describe("trainingOffered", () => {
     ["A structured mentoring program for new hires.", true],
     ["You will be mentored by senior engineers.", true],
     ["Un tuteur dédié vous suivra.", true],
+    ["Python, sur lequel tu seras accompagné(e) pour monter en compétence.", true],
+    ["Nous vous accompagnons dans votre montée en compétences.", true],
+    ["Formation continue assurée sur nos outils.", true],
+    ["Contribuer à la montée en compétences collective.", false],
+    ["l'accompagnement et la montée en compétence des équipes clientes", false],
+    ["Une forte appétence pour monter en compétence sur Kubernetes.", false],
+    ["Forte envie de monter en compétence sur Go, montée en compétence rapide.", false],
+    ["Formation continue : Accès à Udemy Business.", false],
+    ["Accompagnement sur mesure avec votre people manager, parcours d'intégration sur 9 mois.", false],
   ])("« %s » → %s", (text, expected) => expect(trainingOffered(text)).toBe(expected));
 });
 
