@@ -60,7 +60,7 @@ export type ScoringRules = {
 };
 
 export const DEFAULT_RULES: ScoringRules = {
-  version: "2026-10-22.1",
+  version: "2026-10-22.2",
   neutral: 60,
   technicalPoints: 80,
   titleWeight: 3,

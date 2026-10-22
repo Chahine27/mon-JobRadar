@@ -214,6 +214,12 @@ describe("trainingOffered", () => {
     ["Vous serez formé à nos outils.", true],
     ["Formation : Bac+5 en informatique.", false],
     ["Un onboarding soigné.", false],
+    ["Mid carries more ownership of application design, and internal mentoring / task coordination.", false],
+    ["Vous assurerez le mentorat des juniors.", false],
+    ["Vous bénéficierez d'un mentorat personnalisé.", true],
+    ["A structured mentoring program for new hires.", true],
+    ["You will be mentored by senior engineers.", true],
+    ["Un tuteur dédié vous suivra.", true],
   ])("« %s » → %s", (text, expected) => expect(trainingOffered(text)).toBe(expected));
 });
 

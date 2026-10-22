@@ -171,9 +171,11 @@ export function detectSideRole(title: string): string | null {
 /**
  * L'annonce propose-t-elle de te former (« formation interne », « vous serez formé », « montée en compétences ») ?
  * « Formation Angular assurée » compte ; « Formation : Bac+5 » (diplôme demandé) et « onboarding » seul ne comptent pas.
+ * Le mentorat compte seulement s'il est pour toi (« vous bénéficierez d'un mentorat », « mentoring program ») :
+ * « internal mentoring » dans les missions veut dire que c'est toi qui encadres.
  */
 export function trainingOffered(text: string): boolean {
-  return /\b(formations? (en )?interne|formations? (assuree|proposee|prevue|offerte|complete|continue|dediee|adaptee|personnalisee)s?|formations? ([\w+#.-]+ ){1,2}(assuree|proposee|prevue|offerte|dediee|adaptee|personnalisee)s?|nous (vous )?formons|vous (serez|etes) forme|(serez|etre|sera|seras) formee?s?|formee?s? (a|aux|sur) |parcours (de formation|d'integration)|programme de formation|montee en competences?|monter en competences?|mentorat|mentoring|tutorat|accompagnee? (par|dans|tout au long))/.test(
+  return /\b(formations? (en )?interne|formations? (assuree|proposee|prevue|offerte|complete|continue|dediee|adaptee|personnalisee)s?|formations? ([\w+#.-]+ ){1,2}(assuree|proposee|prevue|offerte|dediee|adaptee|personnalisee)s?|nous (vous )?formons|vous (serez|etes) forme|(serez|etre|sera|seras) formee?s?|formee?s? (a|aux|sur) |parcours (de formation|d'integration)|programme de formation|montee en competences?|monter en competences?|(beneficie\w*|profite\w*) d.(un|une) (mentor|tut)\w*|(mentorat|tutorat|mentoring|mentorship) (program\w*|dedie|personnalise|provided|offered)|(etre|serez|sera|seras) (mentore|tutore|parraine)e?s?|(be|get|will be) mentored|mentoring (from|by)|(mentor|tuteur|tutrice|parrain|marraine) (dedie|attitre)e?|accompagnee? (par|dans|tout au long))/.test(
     normalizeText(text),
   );
 }
