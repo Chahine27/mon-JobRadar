@@ -229,6 +229,13 @@ describe("trainingOffered", () => {
     ["Forte envie de monter en compétence sur Go, montée en compétence rapide.", false],
     ["Formation continue : Accès à Udemy Business.", false],
     ["Accompagnement sur mesure avec votre people manager, parcours d'intégration sur 9 mois.", false],
+    ["Plan de formation interne et individuel (certifications),", false],
+    ["Avantages : un centre de formation interne, un programme de mobilité.", false],
+    ["Une communauté d'experts qui vous accompagne dans votre parcours.", false],
+    ["Formation interne assurée à votre arrivée.", true],
+    ["Chaque Theodoer est accompagné par un coach interne.", true],
+    ["Tu seras accompagné dans ta montée en compétences.", true],
+    ["Tout au long de tes projets, tu seras accompagné pour monter en compétences.", true],
   ])("« %s » → %s", (text, expected) => expect(trainingOffered(text)).toBe(expected));
 });
 
