@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_PROFILE } from "@job-radar/shared";
 import { getSkill } from "@job-radar/skills";
 import { hashProfile } from "./profile-hash";
-import { consultingFirm, contractFromText, contractFromTitle, contractOfJob, detectNonDevRole, detectRemote, detectSeniority, looksLikeItTitle, normalizeContract, masteryRequired, parseExperienceYears, trainingOffered
+import { consultingFirm, contractFromText, contractFromTitle, contractOfJob, detectNonDevRole, detectRemote, detectSeniority, looksLikeItTitle, normalizeContract, masteryRequired, parseExperienceYears, trainingOffered,
+  hireAfterInternship, internshipOpenToGraduates, jobseekerScheme, studentOnlyInternship,
 } from "./signals";
 
 describe("detectSeniority", () => {
@@ -216,6 +217,43 @@ describe("trainingOffered", () => {
   ])("« %s » → %s", (text, expected) => expect(trainingOffered(text)).toBe(expected));
 });
 
+describe("stages : réservé aux étudiants, débouché, POEI / PMSMP", () => {
+  it.each([
+    ["Étudiant(e) en École d'Ingénieur, tu recherches un stage de fin d'études.", "etudiant(e) en ecole"],
+    ["Vous préparez un diplôme de niveau Bac+5.", "vous preparez un diplome"],
+    ["Tous nos stages sont conventionnés.", "stages sont conventionnes"],
+    ["Currently pursuing a Master's degree (M1 or M2).", "currently pursuing"],
+    ["Vous êtes actuellement en Bac+4 ou Bac+5.", "actuellement en bac"],
+    ["Stage de 6 mois en React, rejoins une équipe de 10 personnes.", null],
+    ["Une première expérience en développement.", null],
+  ])("studentOnlyInternship « %s » → %s", (text, expected) => expect(studentOnlyInternship(text)).toBe(expected));
+
+  it.each([
+    ["Étudiant(e), en reconversion ou autodidacte : c'est ce que tu sais faire qui compte.", true],
+    ["Currently pursuing or recently graduated in Computer Science.", true],
+    ["Étudiant en école d'ingénieur.", false],
+  ])("internshipOpenToGraduates « %s » → %s", (text, expected) => expect(internshipOpenToGraduates(text)).toBe(expected));
+
+  it.each([
+    ["Si ton stage se passe bien, nous sommes ouverts à poursuivre en CDI avec toi !", "poursuivre en cdi"],
+    ["Vous recherchez un stage de pré embauche.", "pre embauche"],
+    ["Une vraie perspective d'embauche à la clé.", "perspective d'embauche"],
+    ["Commitment: Internship-to-hire.", "internship-to-hire"],
+    ["High conversion rate to full time employee.", "conversion rate to full time"],
+    ["Toutes les décisions d'embauche demeurent entre les mains du recrutement.", null],
+    ["We're proud of the diversity of perspectives.", null],
+    ["Télétravail jusqu'à 2 jours pour les contrats en CDI.", null],
+  ])("hireAfterInternship « %s » → %s", (text, expected) => expect(hireAfterInternship(text)).toBe(expected));
+
+  it.each([
+    ["Poste ouvert en POEI avec France Travail.", "POEI"],
+    ["Préparation opérationnelle à l'emploi individuelle avant embauche.", "POEI"],
+    ["Une PMSMP de 2 semaines pour découvrir l'équipe.", "PMSMP"],
+    ["Recrutement via une AFPR.", "AFPR"],
+    ["Stage de 6 mois.", null],
+  ])("jobseekerScheme « %s » → %s", (text, expected) => expect(jobseekerScheme(text)).toBe(expected));
+});
+
 describe("masteryRequired : des années ne comptent que reliées à la techno", () => {
   const angular = getSkill("angular")!;
   it.each([
@@ -239,4 +277,21 @@ describe("consultingFirm", () => {
     ["Rejoignez notre ESN à taille humaine.", true],
     ["Nous développons notre propre produit SaaS.", false],
   ])("« %s » → %s", (text, expected) => expect(consultingFirm(text)).toBe(expected));
+});
+
+describe("stages : formulations vues dans les vraies annonces", () => {
+  it.each([
+    ["Vous êtes étudiant·e en études supérieures, de niveau Bac+4.", "vous etes etudiante"],
+    ["Vous préparez en tant qu'étudiant(e), un bac+ 5.", "en tant qu'etudiant"],
+    ["Vous préparez un niveau d'études Bac+5.", "vous preparez un niveau"],
+    ["You are a 5th-year student (or equivalent).", "5th-year student"],
+    ["Master's or engineering-school student looking for an internship.", "school student"],
+    ["L'expérience « CANAL+ STUDENT CLUB ».", null],
+    ["Formation Bac +4/5 (école d'ingénieurs, master informatique).", null],
+  ])("studentOnlyInternship « %s » → %s", (text, expected) => expect(studentOnlyInternship(text)).toBe(expected));
+
+  it("« convention de stage obligatoire » l'emporte sur « jeune diplômé »", () => {
+    expect(internshipOpenToGraduates("Étudiant(e) ou jeune diplômé(e). Convention de stage obligatoire.")).toBe(false);
+    expect(internshipOpenToGraduates("Étudiant(e) ou jeune diplômé(e) en informatique.")).toBe(true);
+  });
 });

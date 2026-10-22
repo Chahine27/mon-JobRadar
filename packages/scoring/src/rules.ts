@@ -49,10 +49,18 @@ export type ScoringRules = {
   hideOffTopic: boolean;
   /** Masquer les offres hors de la zone du profil (départements + rayon). Le télétravail et les lieux inconnus ne sont jamais masqués. */
   hideOutOfZone: boolean;
+  /** Plafond d'un stage réservé aux étudiants (convention, fin d'études, diplôme en cours) : tu es diplômé. */
+  studentOnlyInternshipCap: number;
+  /** Même stage, mais l'annonce prévoit une embauche : plafond relevé (à proposer en POEI à l'entreprise). */
+  studentOnlyHireCap: number;
+  /** Bonus d'un stage qui débouche sur un CDI / CDD (« pré-embauche », « poursuivre en CDI »). */
+  hireAfterInternshipPoints: number;
+  /** Bonus quand l'annonce cite une POEI / POEC / AFPR / PMSMP (France Travail, ouverts aux demandeurs d'emploi). */
+  jobseekerSchemePoints: number;
 };
 
 export const DEFAULT_RULES: ScoringRules = {
-  version: "2026-10-21.6",
+  version: "2026-10-22.1",
   neutral: 60,
   technicalPoints: 80,
   titleWeight: 3,
@@ -73,4 +81,8 @@ export const DEFAULT_RULES: ScoringRules = {
   offTopicCap: 15,
   hideOffTopic: true,
   hideOutOfZone: true,
+  studentOnlyInternshipCap: 25,
+  studentOnlyHireCap: 45,
+  hireAfterInternshipPoints: 10,
+  jobseekerSchemePoints: 10,
 };

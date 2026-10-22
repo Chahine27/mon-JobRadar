@@ -178,6 +178,52 @@ export function trainingOffered(text: string): boolean {
   );
 }
 
+/** Texte normalisé, espaces insécables et retours à la ligne ramenés à une espace (« vous êtes étudiant »). */
+const flat = (text: string) => normalizeText(text.replace(/\s+/g, " "));
+
+/**
+ * Stage réservé aux étudiants (convention, fin d'études, diplôme en cours) : renvoie la phrase trouvée, sinon null.
+ * Une annonce ouverte aussi aux reconversions, autodidactes ou jeunes diplômés ne compte pas (cf. internshipOpenToGraduates).
+ */
+export function studentOnlyInternship(text: string): string | null {
+  const m = flat(text).match(
+    /\b(convention de stage|stages? (sont )?conventionnes?|sous convention|convention (obligatoire|tripartite|d'ecole)|stages? de fin d'etudes?|fin d'etudes?|pfe|cesure|final[- ]year|derniere annee|(vous preparez|tu prepares|preparant|en preparation d')( un| une| votre| ton)? (diplome|master|bac|formation|cursus|niveau)|en tant qu'etudiant|(actuellement|vous etes|tu es) (etudiant(\(e\)|·e|e)?s?|en (bac|master|m1|m2|ecole|derniere))|etudiant(\(e\)|·e|e)?s? (en|de) (ecole|master|universite|bac|m1|m2|informatique|niveau|derniere|etudes)|en formation (bac|master|m1|m2|ecole|d'ingenieur)|en cours de (formation|cursus|scolarite|diplome)|pour valider (ton|votre) diplome|currently (pursuing|enrolled|studying)|enrolled in|\d+(st|nd|rd|th)[- ]year students?|(master'?s?|engineering|bachelor'?s?|university|school) students?)\b/,
+  );
+  return m?.[0] ?? null;
+}
+
+/**
+ * L'annonce accepte-t-elle aussi des candidats qui ne sont plus étudiants (« en reconversion », « recently graduated ») ?
+ * « Convention de stage obligatoire » l'emporte : sans école, pas de stage.
+ */
+export function internshipOpenToGraduates(text: string): boolean {
+  const t = flat(text);
+  return (
+    !/\bconvention (de stage )?obligatoire\b/.test(t) &&
+    /\b(en reconversion|reconversion professionnelle|autodidacte|jeunes? diplomee?s?|(ou|or) (recemment |recently )?(diplomee?|graduated)|recent(ly)? graduat(e|ed)|demandeurs? d'emploi)\b/.test(t)
+  );
+}
+
+/** Le stage débouche-t-il sur un CDI / CDD (« pré-embauche », « poursuivre en CDI », « internship-to-hire ») ? Phrase trouvée ou null. */
+export function hireAfterInternship(text: string): string | null {
+  const m = flat(text).match(
+    /\b(pre-? ?embauche|(embauche|recrutement|poursuivre|continuer|rejoindre|transformer|transformation|convertir|evoluer)[^.;•]{0,40}\b(cdi|cdd)|(cdi|cdd) a la cle|(perspectives?|possibilites?|opportunites?) (d'|de |reelle d'|d'une )?(embauche|recrutement)|deboucher sur (une embauche|un cdi|un cdd|un poste)|intern(ship)?[- ]to[- ]hire|conver(t|sion)[^.;•]{0,30}(full[- ]time|permanent)|return offer)\b/,
+  );
+  return m?.[0] ?? null;
+}
+
+/**
+ * Dispositif France Travail pour demandeur d'emploi cité dans l'annonce : POEI / POEC / AFPR (formation avant embauche)
+ * ou PMSMP (immersion en entreprise). Ouverts sans être étudiant.
+ */
+export function jobseekerScheme(text: string): string | null {
+  const t = flat(text);
+  if (/\b(poei|poec|preparation operationnelle a l'emploi)\b/.test(t)) return "POEI";
+  if (/\bafpr\b|action de formation prealable au recrutement/.test(t)) return "AFPR";
+  if (/\bpmsmp\b|mise en situation en milieu professionnel|immersion professionnelle/.test(t)) return "PMSMP";
+  return null;
+}
+
 /** « 3 ans (d'expérience) sur / en / d' » juste avant la techno (« sur Java et Angular » : les deux). */
 const YEARS_BEFORE =
   /(\d{1,2})\s*\+?\s*(?:ans?|annees?|years?)\b(?:\s+(?:d'experience|of experience|minimum|min\.?|au moins|professionnelle?s?|confirmee?s?))*\s*(?:sur|en|avec|dans|de|d'|du|des|on|with|in|using)\s*(?:le |la |l'|les )?(?:[\w.#+-]+\s*(?:,|\/|et|ou|and|or)\s*){0,2}$/;

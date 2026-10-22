@@ -11,7 +11,11 @@ import {
   alternativeSkills,
   fluentEnglishRequired,
   foreignLanguageRequired,
+  hireAfterInternship,
+  internshipOpenToGraduates,
+  jobseekerScheme,
   looksLikeItTitle,
+  studentOnlyInternship,
   masteryRequired,
   normalizeContract,
   productExperienceRequired,
@@ -349,12 +353,13 @@ function scoreExperience(input: ScoringInput, profile: Profile, rules: ScoringRu
   if (seniority === "junior") bySeniority = 100;
   else if (seniority === "senior") bySeniority = 30;
   else if (seniority === "lead") bySeniority = 15;
-  else if (seniority === "intern") bySeniority = 20;
+  // Un stage ne demande pas d'expérience : c'est sous ta cible, pas au-dessus. Réservé aux étudiants : plafond dans scoreJob.
+  else if (seniority === "intern") bySeniority = 100;
 
   if (seniority === "junior" && byYears === null) part.reasons.push("Poste junior");
   if (seniority === "senior") part.warnings.push("Poste indiqué senior / confirmé");
   if (seniority === "lead") part.warnings.push("Poste de lead / architecte / manager");
-  if (seniority === "intern") part.warnings.push("Annonce de stage");
+  if (seniority === "intern" && byYears === null) part.reasons.push("Stage : pas d'expérience exigée");
 
   const known = [byYears, bySeniority].filter((n): n is number => n !== null);
   if (known.length === 0) {
@@ -522,6 +527,14 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
   const side = detectSideRole(input.title);
   if (side) adjustments.push({ label: `Fonction à vérifier : ${side}`, points: rules.sideRolePoints });
   adjustments.push(...userRuleAdjustments(input, profile.scoreRules));
+  // Stage : réservé aux étudiants (tu es diplômé) ? Débouche sur un CDI ? POEI / PMSMP (ouverts aux demandeurs d'emploi) ?
+  const text = `${input.title}\n${input.description}`;
+  const internship = contractOfJob(input) === "STAGE" || titleSeniority(input, profile) === "intern";
+  const scheme = jobseekerScheme(text);
+  const hire = internship ? hireAfterInternship(text) : null;
+  const studentOnly = internship && !scheme && !internshipOpenToGraduates(text) ? studentOnlyInternship(text) : null;
+  if (scheme) adjustments.push({ label: `${scheme} citée : accessible sans être étudiant`, points: rules.jobseekerSchemePoints });
+  if (hire) adjustments.push({ label: `Stage qui débouche sur un CDI / CDD (« ${hire} »)`, points: rules.hireAfterInternshipPoints });
 
   const base = Math.round((breakdown.technical * rules.technicalPoints) / 100);
   let final = clamp(base + adjustments.reduce((a, x) => a + x.points, 0));
@@ -545,6 +558,12 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
   // Langue étrangère exigée (autre que l'anglais) : aussi bloquant qu'une techno principale absente.
   const language = foreignLanguageRequired(input.description, input.aiSkills?.required ?? []);
   if (language) cap(rules.missingMainTechCap, `${language} exigé`);
+  // Embauche prévue : l'entreprise peut accepter une POEI à la place du stage, ça vaut d'être tenté.
+  if (studentOnly)
+    cap(
+      hire ? rules.studentOnlyHireCap : rules.studentOnlyInternshipCap,
+      hire ? `stage réservé aux étudiants (« ${studentOnly} »), mais embauche prévue : à proposer en POEI` : `stage réservé aux étudiants (« ${studentOnly} »)`,
+    );
   // Adéquation faible vérifiée par le code (le petit modèle d'IA s'y trompe) : compétences exigées manquantes, domaine IA.
   const weakFit: string[] = [];
   if (tech.missingRequired.length >= 2) weakFit.push(`compétences exigées manquantes : ${tech.missingRequired.join(", ")}`);
@@ -579,8 +598,7 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
   const all = Object.values(parts);
   const warnings = all.flatMap((p) => p.warnings);
   if (english) warnings.push("Anglais courant exigé");
-  if (language) warnings.push(`Langue exigée : ${language}`);
-  if (capLabel) warnings.unshift(`Score plafonné à ${final} % : ${capLabel}`);
+  if (language) warnings.push(`Langue exigée : ${language}`);  if (capLabel) warnings.unshift(`Score plafonné à ${final} % : ${capLabel}`);
   return {
     final,
     base,

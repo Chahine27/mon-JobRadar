@@ -23,7 +23,7 @@ describe(`scores figés — règles ${DEFAULT_RULES.version}`, () => {
   });
 
   it("version des règles attendue", () => {
-    expect(DEFAULT_RULES.version).toBe("2026-10-21.6");
+    expect(DEFAULT_RULES.version).toBe("2026-10-22.1");
   });
 });
 
@@ -608,5 +608,44 @@ describe("trajet selon le mode", () => {
     const r = score({ ...PERFECT, travelMinutes: 55, travelMode: "car" });
     expect(r.adjustments).toContainEqual({ label: "55 min en voiture", points: -5 });
     expect(r.breakdown.transport).toBe(65);
+  });
+});
+
+describe("stages", () => {
+  const profile = { ...DEFAULT_PROFILE, contracts: ["CDI", "Stage"] };
+  const stage = (description: string) =>
+    score({ ...PERFECT, title: "Stage - Développeur Full Stack Vue.js / Node.js", contractType: "STAGE", experienceMinYears: null, description: `Vue 3, TypeScript, Node.js. ${description}` }, profile);
+  const hasLabel = (r: ReturnType<typeof stage>, re: RegExp) => r.adjustments.some((a) => re.test(a.label));
+
+  it("un stage n'est pas « au-dessus de ta cible » : pas d'expérience exigée", () => {
+    const r = stage("Rejoins une équipe de 10 personnes.");
+    expect(r.breakdown.experience).toBe(100);
+    expect(hasLabel(r, /au-dessus/)).toBe(false);
+    expect(r.reasons).toContain("Stage : pas d'expérience exigée");
+    expect(r.capLabel).toBeNull();
+  });
+
+  it("réservé aux étudiants : plafonné, relevé si l'annonce prévoit une embauche", () => {
+    const student = stage("Étudiant(e) en école d'ingénieur, tu recherches un stage de fin d'études.");
+    expect(student.final).toBe(DEFAULT_RULES.studentOnlyInternshipCap);
+    expect(student.capLabel).toContain("stage réservé aux étudiants");
+
+    const hire = stage("Étudiant(e) en école d'ingénieur. Si ton stage se passe bien, nous sommes ouverts à poursuivre en CDI avec toi.");
+    expect(hire.final).toBe(DEFAULT_RULES.studentOnlyHireCap);
+    expect(hire.capLabel).toContain("à proposer en POEI");
+  });
+
+  it("ouvert aux reconversions, ou POEI citée : pas de plafond étudiant", () => {
+    expect(stage("Étudiant(e) en école d'ingénieur, en reconversion ou autodidacte.").capLabel).toBeNull();
+    const poei = stage("Étudiant(e) en école d'ingénieur. Possible en POEI avec France Travail.");
+    expect(poei.capLabel).toBeNull();
+    expect(hasLabel(poei, /POEI citée/)).toBe(true);
+  });
+
+  it("débouché sur un CDI : bonus", () => {
+    const base = stage("Rejoins une équipe de 10 personnes.");
+    const hire = stage("Rejoins une équipe de 10 personnes. Stage de pré-embauche.");
+    expect(hasLabel(hire, /débouche sur un CDI/)).toBe(true);
+    expect(hire.final).toBeGreaterThan(base.final);
   });
 });
