@@ -52,7 +52,8 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
   // Lien de l'annonce elle-même (pas le lien partenaire de France Travail : il peut être commun à plusieurs offres).
   const key = urlKey(n.sourceUrl);
   // Description perdue : vide, ou simple extrait (Adzuna, Jooble) plus court que le texte déjà connu (venu d'une autre source).
-  const fromExcerpt = ABRIDGED_SOURCES.includes(n.source);
+  // Annonce relue sur sa page (Free-Work pour Adzuna, cf. completeFreeWorkAds) : texte entier, plus un extrait.
+  const fromExcerpt = ABRIDGED_SOURCES.includes(n.source) && (n.rawData as Record<string, unknown> | null)?.detailFetched !== true;
   const lostDescription = (old: string) =>
     (!n.description.trim() && old.trim() !== "") || (fromExcerpt && n.description.trim().length < old.trim().length);
   // Texte plus complet que l'extrait connu : une source qui donne l'annonce entière remplace l'extrait.

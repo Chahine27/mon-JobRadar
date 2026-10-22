@@ -243,12 +243,12 @@ export async function linkedinJobIsOpen(sourceJobId: string, fetchImpl: typeof f
   }
 }
 
-const BROWSER_HEADERS = {
+export const BROWSER_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   "Accept-Language": "fr-FR,fr;q=0.9",
 };
 
-export type PageDetails = { description: string | null; postedAt: Date | null };
+export type PageDetails = { description: string | null; postedAt: Date | null; company?: string | null };
 
 const AGE_UNITS: Array<[RegExp, number]> = [
   [/^(minute|min)/, 60_000],
@@ -276,14 +276,16 @@ export function detailsFromPage(html: string, now = new Date()): PageDetails {
     try {
       const data: unknown = JSON.parse(m[1]!);
       const items = (Array.isArray(data) ? data : [data]).flatMap((d) => (d && typeof d === "object" && "@graph" in d ? (d["@graph"] as unknown[]) : [d]));
-      const posting = items.find((d): d is { description?: unknown; datePosted?: unknown } =>
+      const posting = items.find((d): d is { description?: unknown; datePosted?: unknown; hiringOrganization?: { name?: unknown } } =>
         !!d && typeof d === "object" && (d as { "@type"?: unknown })["@type"] === "JobPosting",
       );
       if (!posting) continue;
       const posted = typeof posting.datePosted === "string" ? new Date(posting.datePosted) : null;
+      const company = posting.hiringOrganization?.name;
       return {
         description: typeof posting.description === "string" && posting.description.trim() ? posting.description : null,
         postedAt: posted && !Number.isNaN(posted.getTime()) ? posted : null,
+        company: typeof company === "string" && company.trim() ? company.trim() : null,
       };
     } catch {
       // JSON invalide : on essaie le bloc suivant.

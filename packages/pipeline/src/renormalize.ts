@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@job-radar/db";
-import { type NormalizedJob, normalize } from "@job-radar/job-normalizer";
+import { type NormalizedJob, comparable, normalize, withoutFreeWorkIntro } from "@job-radar/job-normalizer";
 
 /**
  * Champs que les règles tirent du texte de l'annonce et dont le score dépend : les seuls réécrits.
@@ -19,6 +19,35 @@ export function ruleFieldsOf(n: NormalizedJob, current: { remoteType: string }):
   return out;
 }
 
+/** Texte comparable d'une description (sans la présentation Free-Work des extraits Adzuna). */
+const descriptionKey = (text: string) => comparable(withoutFreeWorkIntro(text)).replace(/ /g, "");
+
+/** Même annonce : même texte, ou même début (une source coupe la fin, l'autre non). */
+export function sameDescription(a: string, b: string): boolean {
+  const ka = descriptionKey(a);
+  const kb = descriptionKey(b);
+  return ka !== "" && (ka === kb || (ka.length >= 300 && kb.length >= 300 && ka.slice(0, 300) === kb.slice(0, 300)));
+}
+
+/**
+ * Offre à plusieurs sources : les champs viennent de la source dont la description est celle de l'offre (c'est elle qui
+ * l'a écrite, cf. ingestJob). null si aucune source ne correspond, ou si plusieurs correspondent sans donner la même chose.
+ * Une valeur connue (venue d'une autre source : « CDI » de WTTJ) n'est pas effacée par « inconnu » de cette source.
+ */
+export function ownerFields(
+  description: string,
+  normalized: NormalizedJob[],
+  current: { remoteType: string } & Partial<Record<RuleField, unknown>>,
+): Pick<NormalizedJob, RuleField> | null {
+  const owners = normalized.filter((n) => sameDescription(n.description, description)).map((n) => ruleFieldsOf(n, current));
+  if (!owners.length) return null;
+  const first = JSON.stringify(owners[0]);
+  if (!owners.every((o) => JSON.stringify(o) === first)) return null;
+  const out = { ...owners[0]! } as Record<RuleField, unknown>;
+  for (const k of RULE_FIELDS) if (out[k] === null && current[k] !== null && current[k] !== undefined) out[k] = current[k];
+  return out as Pick<NormalizedJob, RuleField>;
+}
+
 /**
  * Réapplique les règles actuelles aux offres déjà en base, depuis les données brutes de leur source. Sans ça, une
  * règle corrigée (ex. « Niveau senior » de LinkedIn ignoré) ne touchait que les offres collectées après : les autres
@@ -26,8 +55,8 @@ export function ruleFieldsOf(n: NormalizedJob, current: { remoteType: string }):
  * chaque changement de règle) et par « pnpm jobs:renormalize ».
  * Le score est recalculé à chaque affichage ; l'IA refait l'analyse si ce qu'elle lit change (cf. analysisFitsJob).
  * Corrections faites à la main et annonces collées : rangées à part, elles priment toujours.
- * ponytail: offres d'une seule source et sans ajout manuel (1 537 sur 1 793) ; plusieurs sources = valeurs fusionnées
- * à la collecte, qu'on ne sait pas refaire sans risque. À étendre si une règle doit aussi les corriger.
+ * Plusieurs sources : relues depuis celle qui a écrit la description (cf. ownerFields ; 452 sur 459 au 23/10/2026).
+ * ponytail: offres avec un ajout manuel jamais relues ; à étendre si une règle doit aussi les corriger.
  */
 export async function renormalizeJobs(opts: {
   prisma: PrismaClient;
@@ -39,7 +68,7 @@ export async function renormalizeJobs(opts: {
   const jobs = await prisma.job.findMany({
     where: { sources: { none: { source: "manual" } } },
     select: {
-      id: true, remoteType: true, contractType: true, experienceText: true, experienceMinYrs: true, experienceMaxYrs: true,
+      id: true, description: true, remoteType: true, contractType: true, experienceText: true, experienceMinYrs: true, experienceMaxYrs: true,
       technologies: true, salaryMin: true, salaryMax: true, salaryPeriod: true, salaryText: true,
       sources: { select: { source: true, sourceJobId: true, rawData: true, firstSeenAt: true } },
     },
@@ -48,12 +77,13 @@ export async function renormalizeJobs(opts: {
   let checked = 0;
   let changed = 0;
   for (const job of jobs) {
-    if (job.sources.length !== 1) continue;
-    const link = job.sources[0]!;
-    const n = normalize({ source: link.source, sourceJobId: link.sourceJobId, data: link.rawData, collectedAt: link.firstSeenAt });
-    if (!n) continue;
+    const all = job.sources
+      .map((l) => normalize({ source: l.source, sourceJobId: l.sourceJobId, data: l.rawData, collectedAt: l.firstSeenAt }))
+      .filter((n): n is NormalizedJob => n !== null);
+    if (all.length !== job.sources.length || all.length === 0) continue;
+    const next = all.length === 1 ? ruleFieldsOf(all[0]!, job) : ownerFields(job.description, all, job);
+    if (!next) continue;
     checked++;
-    const next = ruleFieldsOf(n, job);
     const diff = RULE_FIELDS.filter((k) => JSON.stringify(next[k]) !== JSON.stringify(job[k]));
     if (diff.length === 0) continue;
     changed++;

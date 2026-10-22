@@ -78,13 +78,17 @@ export const hasNoDescription = (j: { description: string }) => j.description.tr
 /** Texte coupé par la source (« … obtenir des... ») : la marque des extraits Adzuna / Jooble. */
 const looksCut = (description: string) => /(…|\.\.\.)\s*$/.test(description.trim());
 
+/** Les extraits Adzuna / Jooble font 500 caractères au plus (mesuré sur 558 offres). */
+const EXCERPT_MAX = 500;
+
 /**
  * Annonce incomplète (source à extraits, ou aucune description), annonce complète pas encore collée :
  * son score n'est que provisoire. Vue aussi sur une autre source mais texte coupé : c'est encore l'extrait.
+ * Source à extraits mais texte entier et non coupé : annonce relue sur sa page (Free-Work), plus un extrait.
  */
 export const isAbridged = (j: { sources: Array<{ source: string }>; fullTextAt: Date | null; description: string }) =>
   !j.fullTextAt &&
   j.sources.length > 0 &&
-  (j.sources.every((s) => ABRIDGED_SOURCES.includes(s.source)) ||
+  ((j.sources.every((s) => ABRIDGED_SOURCES.includes(s.source)) && (looksCut(j.description) || j.description.trim().length <= EXCERPT_MAX)) ||
     hasNoDescription(j) ||
     (j.sources.some((s) => ABRIDGED_SOURCES.includes(s.source)) && looksCut(j.description)));

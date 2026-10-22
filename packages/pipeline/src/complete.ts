@@ -1,7 +1,9 @@
 import type { PrismaClient } from "@job-radar/db";
-import { htmlToText, normalize } from "@job-radar/job-normalizer";
+import { comparable, htmlToText, normalize } from "@job-radar/job-normalizer";
 import { outOfZone } from "@job-radar/shared";
+import { FREE_WORK_COMPANY } from "@job-radar/source-connectors";
 import { ingestJob } from "./ingest";
+import { sameDescription } from "./renormalize";
 
 /** Description (HTML) et date de publication lues sur la page publique d'une offre (null : page illisible). */
 export type DetailsFetcher = (link: { source: string; sourceJobId: string; sourceUrl: string }) => Promise<{
@@ -97,5 +99,108 @@ export async function completeJobScraperDescriptions(opts: {
     if (n && (await ingestJob(prisma, n)) === "updated") completed++;
   }
   if (links.length) log(`Offres JobScraper complétées (description, date) : ${completed} sur ${links.length}`);
+  return { checked: links.length, completed };
+}
+
+/** Recherche et lecture des annonces Free-Work (cf. searchFreeWork / fetchFreeWorkAd ; remplaçables dans les tests). */
+export type FreeWorkClient = {
+  search: (query: string) => Promise<string[] | null>;
+  ad: (link: string) => Promise<{ description: string | null; company?: string | null; url: string } | null>;
+};
+
+/** Titre Adzuna → recherche Free-Work : sans le contrat ajouté par Adzuna (« (CDI) ») ni « H/F ». */
+export function freeWorkQuery(title: string): string {
+  return title
+    .replace(/\((cdi|cdd|freelance|stage|alternance|interim)\)/gi, " ")
+    .replace(/\b[hfx]\s*\/\s*[hfx](\s*\/\s*[hfx])?\b/gi, " ")
+    .replace(/[()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[\s\-–|]+$/, "");
+}
+
+const textKey = (text: string) => comparable(text).replace(/ /g, "");
+
+/**
+ * Offres Adzuna reprises de Free-Work (entreprise « Free-Work », extrait de 500 caractères dont la moitié présente
+ * le site) : annonce retrouvée par la recherche de Free-Work, puis remplacée par le texte entier et l'employeur réel.
+ * Une annonce n'est prise que si elle contient le début de l'extrait Adzuna : même titre chez un autre client = refusée
+ * (testé le 23/10/2026 : 10 annonces retrouvées sur 12, aucune fausse). Pas trouvée : nouvel essai dans 1 jour.
+ * Seulement les offres encore utiles, dont la description est encore l'extrait Adzuna (pas un texte venu d'ailleurs).
+ */
+export async function completeFreeWorkAds(opts: {
+  prisma: PrismaClient;
+  freeWork: FreeWorkClient;
+  /** Offres au plus par passage (jusqu'à 2 recherches et `pages` annonces lues pour chacune). */
+  max?: number;
+  pages?: number;
+  sleep?: (ms: number) => Promise<void>;
+  log?: (m: string) => void;
+  zone?: Set<string>;
+}): Promise<{ checked: number; completed: number }> {
+  const { prisma, log = () => {}, pages = 4 } = opts;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const links = (
+    await prisma.jobSourceLink.findMany({
+      where: { source: "adzuna", job: { fullTextAt: null, company: FREE_WORK_COMPANY, status: { in: ["NEW", "SEEN", "SAVED"] } } },
+      select: { id: true, source: true, sourceJobId: true, sourceUrl: true, rawData: true, firstSeenAt: true, job: { select: { title: true, description: true, department: true, remoteType: true } } },
+      orderBy: { firstSeenAt: "desc" },
+    })
+  )
+    .filter((l) => !opts.zone || !outOfZone(l.job, opts.zone))
+    .filter((l) => {
+      const raw = (l.rawData ?? {}) as Record<string, unknown>;
+      const tried = raw[DETAIL_TRIED_AT];
+      return raw[DETAIL_FETCHED] !== true && (typeof tried !== "string" || Date.now() - Date.parse(tried) > 86_400_000);
+    })
+    .slice(0, opts.max ?? 8);
+  let completed = 0;
+  let requests = 0;
+  const pause = () => (requests++ > 0 ? sleep(1500) : Promise.resolve());
+  for (const link of links) {
+    const n = normalize({ source: link.source, sourceJobId: link.sourceJobId, data: link.rawData, collectedAt: link.firstSeenAt });
+    // Texte venu d'une autre source (LinkedIn, Indeed…) : déjà complet, rien à chercher.
+    if (!n || !sameDescription(n.description, link.job.description)) continue;
+    const excerpt = textKey(n.description).slice(0, 50);
+    let found: { description: string; company?: string | null; url: string } | null = null;
+    let refused = false;
+    if (excerpt.length >= 40) {
+      const core = freeWorkQuery(link.job.title);
+      for (const query of [...new Set([core, core.split(" ").slice(0, 5).join(" ")])]) {
+        await pause();
+        const ads = await opts.freeWork.search(query);
+        if (!ads) {
+          refused = true;
+          break;
+        }
+        for (const ad of ads.slice(0, pages)) {
+          await pause();
+          const page = await opts.freeWork.ad(ad);
+          if (page?.description && textKey(htmlToText(page.description)).includes(excerpt)) {
+            found = { description: page.description, company: page.company ?? null, url: page.url };
+            break;
+          }
+        }
+        if (found) break;
+      }
+    }
+    const raw = (link.rawData ?? {}) as Record<string, unknown>;
+    if (!found) {
+      await prisma.jobSourceLink.update({ where: { id: link.id }, data: { rawData: { ...raw, [DETAIL_TRIED_AT]: new Date().toISOString() } } });
+      if (refused) break; // Free-Work refuse : on arrête ce passage (insister prolonge un blocage).
+      continue;
+    }
+    const company = (raw.company ?? {}) as Record<string, unknown>;
+    const data = {
+      ...raw,
+      description: found.description,
+      ...(found.company ? { company: { ...company, display_name: found.company } } : {}),
+      freeWorkUrl: found.url,
+      [DETAIL_FETCHED]: true,
+    };
+    const next = normalize({ source: link.source, sourceJobId: link.sourceJobId, data, collectedAt: link.firstSeenAt });
+    if (next && (await ingestJob(prisma, next)) === "updated") completed++;
+  }
+  if (links.length) log(`Offres Adzuna / Free-Work complétées (annonce entière, employeur) : ${completed} sur ${links.length}`);
   return { checked: links.length, completed };
 }

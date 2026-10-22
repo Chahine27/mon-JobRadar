@@ -7,6 +7,13 @@ import { htmlToText } from "./html";
 import { comparable, fingerprintOf, sha, titleCase } from "./text";
 import type { NormalizedJob } from "./types";
 
+/**
+ * Annonces Free-Work reprises par Adzuna : l'extrait de 500 caractères commence par la présentation du site
+ * (« Free-Work est une plateforme… ») au lieu de l'annonce. Retirée ici ; l'annonce entière est relue sur Free-Work
+ * (cf. completeFreeWorkAds).
+ */
+export const withoutFreeWorkIntro = (text: string) => text.replace(/^\s*Free-Work est une plateforme[^.]*\.[^.]*\.\s*/i, "");
+
 export function normalizeAdzuna(raw: RawJob): NormalizedJob | null {
   const parsed = AdzunaJobSchema.safeParse(raw.data);
   if (!parsed.success) return null;
@@ -14,7 +21,7 @@ export function normalizeAdzuna(raw: RawJob): NormalizedJob | null {
   const title = a.title ? htmlToText(a.title) : "";
   if (!title || !a.redirect_url) return null;
 
-  const description = htmlToText(a.description ?? "");
+  const description = withoutFreeWorkIntro(htmlToText(a.description ?? ""));
   const company = a.company?.display_name?.trim() || null;
   const area = a.location?.area ?? [];
   const city = area.length > 2 ? titleCase(area[area.length - 1]!) : null;

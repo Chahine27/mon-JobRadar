@@ -10,4 +10,8 @@ describe("isAbridged", () => {
     expect(isAbridged(job(["france-travail"], "Une phrase qui finit par..."))).toBe(false);
     expect(isAbridged({ ...job(["adzuna"], "x..."), fullTextAt: new Date() })).toBe(false);
   });
+  it("annonce Adzuna relue sur Free-Work (texte entier, plus long qu'un extrait) : complète", () => {
+    expect(isAbridged(job(["adzuna"], "Contexte de la mission. ".repeat(30)))).toBe(false);
+    expect(isAbridged(job(["adzuna"], `${"Contexte de la mission. ".repeat(30)}…`))).toBe(true);
+  });
 });

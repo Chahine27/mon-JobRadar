@@ -10,7 +10,7 @@ import {
   notifyNewMatches,
   notifyNotice,
 } from "@job-radar/notifications";
-import { type CollectReport, CollectionRunner, type RunnerOptions, completeJobScraperDescriptions, renormalizeJobs, splitMergedAds, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
+import { type CollectReport, CollectionRunner, type RunnerOptions, completeFreeWorkAds, completeJobScraperDescriptions, renormalizeJobs, splitMergedAds, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
 import { OsrmRoutingService, PrimRoutingService, ensureTravelTimes, fillDepartments, geocode } from "@job-radar/routing";
 import { scoreJob, scoringInputFromJob } from "@job-radar/scoring";
 import { parseProfile, zoneDepartments } from "@job-radar/shared";
@@ -23,7 +23,9 @@ import {
   JOOBLE_DEFAULTS,
   JoobleSource,
   JOBSCRAPER_SOURCE_NAMES,
+  fetchFreeWorkAd,
   fetchJobScraperDetails,
+  searchFreeWork,
   linkedinJobIsOpen,
   LaBonneBoiteClient,
 } from "@job-radar/source-connectors";
@@ -200,6 +202,14 @@ const runner = new CollectionRunner({
         (await prisma.companyTarget.findMany()).map((c) => ({ ...c, ats: c.ats as AtsKind })),
     }),
   ],
+  // Offres Adzuna reprises de Free-Work : annonce entière et employeur réel lus sur Free-Work, avant trajets, IA et mails.
+  onFinished: async (report) => {
+    const zone = await currentZone();
+    const completed = await completeFreeWorkAds({ prisma, freeWork: { search: (q) => searchFreeWork(q), ad: (l) => fetchFreeWorkAd(l) }, ...(zone ? { zone } : {}), log: (m) => log(m) })
+      .then((r) => r.completed)
+      .catch((err) => (log(`Annonces Free-Work : ${String(err)}`), 0));
+    await afterCollect(report, report.created + report.updated + completed > 0);
+  },
 });
 
 // File JobScraper à part : planifiée seule (jamais par « Actualiser »), elle ne bloque pas les sources API

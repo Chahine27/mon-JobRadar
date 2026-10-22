@@ -9,3 +9,4 @@ export * from "./careers/source";
 export * from "./labonneboite";
 export * from "./jooble";
 export * from "./jobscraper";
+export * from "./free-work";

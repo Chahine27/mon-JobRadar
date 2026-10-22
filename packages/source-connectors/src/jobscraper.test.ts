@@ -92,6 +92,11 @@ describe("description lue sur la page publique", () => {
     expect(detailsFromPage('<div class="show-more-less-html__markup relative">\n<strong>Quel est le projet</strong>\n</div>').description).toBe("<strong>Quel est le projet</strong>");
   });
 
+  it("JobPosting : employeur réel (hiringOrganization), utile pour Free-Work", () => {
+    const page = `<script type="application/ld+json">{"@type":"JobPosting","description":"<p>Mission</p>","hiringOrganization":{"@type":"Organization","name":" Digistrat consulting "}}</script>`;
+    expect(detailsFromPage(page).company).toBe("Digistrat consulting");
+  });
+
   it("rien de reconnaissable → null", () => {
     expect(detailsFromPage("<html><body>Connexion requise</body></html>")).toEqual({ description: null, postedAt: null });
   });
