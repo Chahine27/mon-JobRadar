@@ -1,7 +1,7 @@
 import { normalize, withoutFreeWorkIntro } from "@job-radar/job-normalizer";
 import { describe, expect, it } from "vitest";
 import { freeWorkQuery } from "./complete";
-import { ownerFields, sameDescription } from "./renormalize";
+import { oldestSalary, ownerFields, sameDescription } from "./renormalize";
 
 const INTRO =
   "Free-Work est une plateforme qui s'adresse à tous les professionnels des métiers de l'informatique. Ses contenus et son jobboard IT sont mis à disposition 100% gratuitement pour les indépendants et les salariés du secteur. ";
@@ -44,5 +44,12 @@ describe("offres à plusieurs sources : source qui a écrit la description", () 
     expect(ownerFields(text, [owner, raw("3", text, "contract")], { remoteType: "unknown" })).toBeNull();
     // Contrat inconnu de la source propriétaire : le CDI venu d'une autre source reste.
     expect(ownerFields(text, [raw("4", text, "")], { remoteType: "unknown", contractType: "CDI" })?.contractType).toBe("CDI");
+  });
+
+  it("salaires contradictoires : celui de la plus ancienne annonce (Talan 36 k€, copie à 70–100 k€)", () => {
+    const paid = (id: string, min: number | null, max: number | null) => ({ ...raw(id, text, "permanent"), salaryMin: min, salaryMax: max, salaryPeriod: min ? "year" as const : null });
+    expect(oldestSalary([paid("1", 36000, 36000), paid("2", 70000, 100000)])?.salaryMin).toBe(36000);
+    expect(oldestSalary([paid("1", null, null), paid("2", 50000, 70000), paid("3", 90000, 130000)])?.salaryMax).toBe(70000);
+    expect(oldestSalary([paid("1", 40000, 45000), paid("2", 45000, 50000)])).toBeNull();
   });
 });

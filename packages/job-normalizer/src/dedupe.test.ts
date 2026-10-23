@@ -89,9 +89,9 @@ describe("même offre ou presque (avant de postuler)", () => {
   });
 });
 
-describe("sameSalary : même texte, autre salaire", () => {
+describe("sameSalary : deux annonces de la même offre", () => {
   const s = (salaryMin: number | null, salaryMax: number | null, salaryPeriod: string | null = "year") => ({ salaryMin, salaryMax, salaryPeriod });
-  it("salaires qui ne se recoupent pas → deux offres (Talan 36 k€ / 70–100 k€)", () => {
+  it("salaires qui ne se recoupent pas → contradiction (Talan 36 k€ / copie à 70–100 k€)", () => {
     expect(sameSalary(s(36000, 36000), s(70000, 100000))).toBe(false);
   });
   it("fourchettes qui se recoupent, salaire inconnu ou autre période → rien à conclure", () => {

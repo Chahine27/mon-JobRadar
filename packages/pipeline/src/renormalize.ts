@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@job-radar/db";
-import { type NormalizedJob, comparable, normalize, withoutFreeWorkIntro } from "@job-radar/job-normalizer";
+import { type NormalizedJob, comparable, normalize, sameSalary, withoutFreeWorkIntro } from "@job-radar/job-normalizer";
 
 /**
  * Champs que les règles tirent du texte de l'annonce et dont le score dépend : les seuls réécrits.
@@ -49,13 +49,26 @@ export function ownerFields(
 }
 
 /**
+ * Annonces d'une offre aux salaires qui se contredisent (Talan à 36 k€ sur l'Apec, recopiée à « 70–100 k€ » par un
+ * agrégateur) : celui de la plus ancienne qui en donne un, l'annonce d'origine ; les copies arrivent après.
+ * null si les salaires s'accordent. `all` : annonces de la plus ancienne à la plus récente.
+ */
+export function oldestSalary(all: NormalizedJob[]): Pick<NormalizedJob, "salaryMin" | "salaryMax" | "salaryPeriod" | "salaryText"> | null {
+  const paid = all.filter((n) => n.salaryMin !== null || n.salaryMax !== null);
+  if (paid.every((a) => paid.every((b) => sameSalary(a, b)))) return null;
+  const o = paid[0]!;
+  return { salaryMin: o.salaryMin, salaryMax: o.salaryMax, salaryPeriod: o.salaryPeriod, salaryText: o.salaryText };
+}
+
+/**
  * Réapplique les règles actuelles aux offres déjà en base, depuis les données brutes de leur source. Sans ça, une
  * règle corrigée (ex. « Niveau senior » de LinkedIn ignoré) ne touchait que les offres collectées après : les autres
  * gardaient l'ancienne valeur, et le score qui en dépend restait faux. Lancée au démarrage de l'API (rien à faire à
  * chaque changement de règle) et par « pnpm jobs:renormalize ».
  * Le score est recalculé à chaque affichage ; l'IA refait l'analyse si ce qu'elle lit change (cf. analysisFitsJob).
  * Corrections faites à la main et annonces collées : rangées à part, elles priment toujours.
- * Plusieurs sources : relues depuis celle qui a écrit la description (cf. ownerFields ; 452 sur 459 au 23/10/2026).
+ * Plusieurs sources : relues depuis celle qui a écrit la description (cf. ownerFields ; 452 sur 459 au 23/10/2026) ;
+ * salaires contradictoires : celui de la plus ancienne annonce (cf. oldestSalary).
  * ponytail: offres avec un ajout manuel jamais relues ; à étendre si une règle doit aussi les corriger.
  */
 export async function renormalizeJobs(opts: {
@@ -70,7 +83,7 @@ export async function renormalizeJobs(opts: {
     select: {
       id: true, description: true, remoteType: true, contractType: true, experienceText: true, experienceMinYrs: true, experienceMaxYrs: true,
       technologies: true, salaryMin: true, salaryMax: true, salaryPeriod: true, salaryText: true,
-      sources: { select: { source: true, sourceJobId: true, rawData: true, firstSeenAt: true } },
+      sources: { select: { source: true, sourceJobId: true, rawData: true, firstSeenAt: true }, orderBy: { firstSeenAt: "asc" } },
     },
   });
   const fields: Partial<Record<RuleField, number>> = {};
@@ -81,7 +94,9 @@ export async function renormalizeJobs(opts: {
       .map((l) => normalize({ source: l.source, sourceJobId: l.sourceJobId, data: l.rawData, collectedAt: l.firstSeenAt }))
       .filter((n): n is NormalizedJob => n !== null);
     if (all.length !== job.sources.length || all.length === 0) continue;
-    const next = all.length === 1 ? ruleFieldsOf(all[0]!, job) : ownerFields(job.description, all, job);
+    const owned = all.length === 1 ? ruleFieldsOf(all[0]!, job) : ownerFields(job.description, all, job);
+    const salary = all.length > 1 ? oldestSalary(all) : null;
+    const next = salary ? { ...(owned ?? (job as unknown as Pick<NormalizedJob, RuleField>)), ...salary } : owned;
     if (!next) continue;
     checked++;
     const diff = RULE_FIELDS.filter((k) => JSON.stringify(next[k]) !== JSON.stringify(job[k]));

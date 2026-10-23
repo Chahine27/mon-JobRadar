@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@job-radar/db";
-import { type NormalizedJob, dedupeKeyOf, type OfferSalary, sameAdText, sameOffer, sameSalary, urlKey } from "@job-radar/job-normalizer";
+import { type NormalizedJob, type OfferSalary, dedupeKeyOf, sameAdText, sameOffer, sameSalary, urlKey } from "@job-radar/job-normalizer";
 import { ABRIDGED_SOURCES } from "@job-radar/shared";
 
 export type IngestOutcome = "created" | "updated" | "unchanged" | "duplicate";
@@ -47,7 +47,7 @@ const json = (v: unknown) => (v ?? undefined) as Prisma.InputJsonValue | undefin
 export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = new Date()): Promise<IngestOutcome> {
   const link = await prisma.jobSourceLink.findUnique({
     where: { source_sourceJobId: { source: n.source, sourceJobId: n.sourceJobId } },
-    select: { id: true, jobId: true, rawData: true, job: { select: { contentHash: true, description: true, publishedAt: true } } },
+    select: { id: true, jobId: true, rawData: true, firstSeenAt: true, job: { select: { contentHash: true, description: true, publishedAt: true, salaryMin: true, salaryMax: true, salaryPeriod: true, salaryText: true } } },
   });
   // Lien de l'annonce elle-même (pas le lien partenaire de France Travail : il peut être commun à plusieurs offres).
   const key = urlKey(n.sourceUrl);
@@ -59,6 +59,10 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
   // Texte plus complet que l'extrait connu : une source qui donne l'annonce entière remplace l'extrait.
   const improvesDescription = (old: string) => !fromExcerpt && n.description.trim().length > old.trim().length + 50;
   const dedupeKey = dedupeKeyOf(n.company, n.title);
+  // Salaire qui contredit celui d'une annonce plus ancienne de la même offre (copie d'agrégateur à « 70–100 k€ ») :
+  // l'offre garde le sien (cf. oldestSalary, qui fait pareil pour les offres déjà en base).
+  const keptSalary = (job: OfferSalary & { salaryText: string | null }) =>
+    sameSalary(job, n) ? {} : { salaryMin: job.salaryMin, salaryMax: job.salaryMax, salaryPeriod: job.salaryPeriod, salaryText: job.salaryText };
 
   if (link) {
     // Annonce complétée depuis sa page (completeJobScraperDescriptions) : la collecte, qui n'en donne qu'un résumé
@@ -66,6 +70,7 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
     const keepDetail = (link.rawData as Record<string, unknown> | null)?.detailFetched === true &&
       (n.rawData as Record<string, unknown> | null)?.detailFetched !== true;
     const changed = link.job.contentHash !== n.contentHash && !lostDescription(link.job.description) && !keepDetail;
+    const older = changed && (await prisma.jobSourceLink.count({ where: { jobId: link.jobId, firstSeenAt: { lt: link.firstSeenAt } } })) > 0;
     // Date de publication : une date connue n'est jamais effacée par « inconnue » (JobScraper n'en donne pas,
     // elle vient de la page de l'offre), et une offre qui gagne sa date est mise à jour même si le texte est le même.
     const publishedAt = n.publishedAt ?? link.job.publishedAt;
@@ -82,7 +87,7 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
       prisma.job.update({
         where: { id: link.jobId },
         data: changed
-          ? { ...jobFields(n), publishedAt, lastSeenAt: now }
+          ? { ...jobFields(n), ...(older ? keptSalary(link.job) : {}), publishedAt, lastSeenAt: now }
           : { lastSeenAt: now, ...(gainsDate ? { publishedAt } : {}), ...(dedupeKey ? { dedupeKey } : {}) },
       }),
       ...(changed
@@ -103,14 +108,16 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
   };
 
   const byUrl = key ? await prisma.jobSourceLink.findFirst({ where: { canonicalUrl: key }, select: { jobId: true } }) : null;
-  // Offre qui a déjà une annonce de cette source : seulement si c'est le même texte et un salaire compatible (cf. sameAdText, sameSalary).
-  const fitsSource = async (job: { id: string; description: string } & OfferSalary) =>
+  // Offre qui a déjà une annonce de cette source : seulement si c'est le même texte (cf. sameAdText).
+  const fitsSource = async (job: { id: string; description: string }) =>
     n.source === "manual" ||
-    (sameAdText(job.description, n.description) && sameSalary(job, n)) ||
+    sameAdText(job.description, n.description) ||
     (await prisma.jobSourceLink.count({ where: { jobId: job.id, source: n.source } })) === 0;
-  let same: ({ id: string; description: string } & OfferSalary) | null = await prisma.job.findUnique({
+  type Known = { id: string; description: string } & OfferSalary & { salaryText: string | null };
+  const salarySelect = { salaryMin: true, salaryMax: true, salaryPeriod: true, salaryText: true } as const;
+  let same: Known | null = await prisma.job.findUnique({
     where: byUrl ? { id: byUrl.jobId } : { fingerprint: n.fingerprint },
-    select: { id: true, description: true, salaryMin: true, salaryMax: true, salaryPeriod: true },
+    select: { id: true, description: true, ...salarySelect },
   });
   const fingerprintTaken = !byUrl && same !== null;
   if (same && !byUrl && !(await fitsSource(same))) same = null;
@@ -118,7 +125,7 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
   if (!same && dedupeKey) {
     const candidates = await prisma.job.findMany({
       where: { dedupeKey },
-      select: { id: true, description: true, salaryMin: true, salaryMax: true, salaryPeriod: true, title: true, city: true, department: true },
+      select: { id: true, description: true, ...salarySelect, title: true, city: true, department: true },
       orderBy: { firstSeenAt: "asc" },
     });
     for (const c of candidates) {
@@ -133,7 +140,7 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
     const fill = (!same.description.trim() && n.description.trim() !== "") || improvesDescription(same.description);
     await prisma.$transaction([
       prisma.jobSourceLink.create({ data: { ...sourceLink, jobId: same.id } }),
-      prisma.job.update({ where: { id: same.id }, data: fill ? { ...jobFields(n), lastSeenAt: now } : { lastSeenAt: now } }),
+      prisma.job.update({ where: { id: same.id }, data: fill ? { ...jobFields(n), ...keptSalary(same), lastSeenAt: now } : { lastSeenAt: now } }),
       prisma.jobEvent.create({ data: { jobId: same.id, type: "SOURCE_ADDED", toValue: n.source } }),
     ]);
     return "duplicate";

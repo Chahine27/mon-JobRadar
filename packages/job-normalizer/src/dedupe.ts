@@ -63,9 +63,9 @@ export function sameAdText(a: string, b: string): boolean {
 export type OfferSalary = { salaryMin: number | null; salaryMax: number | null; salaryPeriod: string | null };
 
 /**
- * Deux annonces d'une même source au même texte sont deux offres si leurs salaires ne se recoupent pas : Talan publie
- * « Développeur Junior Java / Angular » avec la même description à 36 k€ puis à 70–100 k€. Salaire inconnu d'un côté
- * ou période différente : rien à conclure.
+ * Salaires compatibles : fourchettes qui se recoupent. Sinon une des annonces se trompe : Talan publie « Développeur
+ * Junior Java / Angular » à 36 k€ (Apec), recopié par un agrégateur (StudentJob, JobLeads) à « 70–100 k€ ». Salaire
+ * inconnu d'un côté ou période différente : rien à conclure.
  */
 export function sameSalary(a: OfferSalary, b: OfferSalary): boolean {
   const amin = a.salaryMin ?? a.salaryMax;
