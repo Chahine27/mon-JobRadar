@@ -20,7 +20,7 @@ const HELP: Record<string, string> = {
   "france-travail": "Identifiants FRANCE_TRAVAIL_CLIENT_ID / SECRET dans .env.",
   adzuna: "Crée une clé gratuite sur developer.adzuna.com, puis ADZUNA_APP_ID / ADZUNA_APP_KEY dans .env. Quota : 250 appels par jour.",
   "company-careers": "Ajoute des entreprises ci-dessous.",
-  jooble: "Crée une clé gratuite sur fr.jooble.org/api/about, puis JOOBLE_API_KEY dans .env. Une collecte par jour au plus.",
+  jooble: "Crée une clé gratuite sur fr.jooble.org/api/about, puis JOOBLE_API_KEY dans .env. Trois collectes par jour au plus (8 h, 13 h, 18 h).",
   "jobscraper:linkedin": "Installe le dépôt JobScraper et son environnement Python. Active JOBSCRAPER_ENABLED=true dans .env ; 15 min minimum entre deux collectes, indépendant du bouton « Actualiser ».",
   "jobscraper:hellowork": "Installe le dépôt JobScraper et son environnement Python. Active JOBSCRAPER_ENABLED=true dans .env ; 15 min minimum entre deux collectes, indépendant du bouton « Actualiser ».",
   "jobscraper:wttj": "Installe le dépôt JobScraper et son environnement Python. Active JOBSCRAPER_ENABLED=true dans .env ; 15 min minimum entre deux collectes, indépendant du bouton « Actualiser ».",

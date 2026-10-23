@@ -3,7 +3,7 @@ import { normalize } from "@job-radar/job-normalizer";
 import type { Profile } from "@job-radar/shared";
 import { FT_SOURCE, type JobSource, type RawJob, type SearchParams, SourceUnavailableError } from "@job-radar/source-connectors";
 import { ingestJob } from "./ingest";
-import { minIntervalFor } from "./quota";
+import { JOOBLE_CHECK_MINUTES, minIntervalFor } from "./quota";
 import { computeNextRunAt } from "./schedule";
 
 export type CollectOptions = {
@@ -181,10 +181,11 @@ export async function collectOnce(opts: CollectOptions): Promise<CollectReport> 
     const ok = sr.status === "OK";
     const now = new Date();
     const state = await prisma.sourceState.findUnique({ where: { source: source.name } });
-    const interval = Math.max(
-      state?.intervalMinutes ?? opts.defaultIntervalMinutes ?? 5,
-      minIntervalFor(source.name, queries.length),
-    );
+    // Jooble : intervalle fixe (l'ancien 1440 min en base ferait manquer deux créneaux sur trois).
+    const interval =
+      source.name === "jooble"
+        ? JOOBLE_CHECK_MINUTES
+        : Math.max(state?.intervalMinutes ?? opts.defaultIntervalMinutes ?? 5, minIntervalFor(source.name, queries.length));
     const failures = ok ? 0 : (state?.failures ?? 0) + 1;
     let next = computeNextRunAt(now, interval, failures);
     // Relance à la main : un échec ne ralentit pas les collectes automatiques (rien ne change) ; une réussite efface

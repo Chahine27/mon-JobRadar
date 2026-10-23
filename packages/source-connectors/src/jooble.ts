@@ -18,19 +18,29 @@ export const JOOBLE_SOURCE = "jooble";
  * Clé gratuite, propre à chaque pays : celle de fr.jooble.org ne sert que pour la France.
  * ⚠️ Offre gratuite : 500 appels AU TOTAL par clé (pas par jour ni par mois). Tout est fait pour économiser :
  *  - une seule recherche par zone, qui regroupe toutes les recherches du profil ;
- *  - au plus une collecte toutes les 20 h, même avec le bouton « Actualiser » ;
+ *  - au plus une collecte par créneau (8 h, 13 h, 18 h, heure de Paris), même avec le bouton « Actualiser » ;
  *  - arrêt à 480 appels (réserve pour les tests).
  */
 export const JOOBLE_DEFAULTS = {
   baseUrl: "https://fr.jooble.org/api",
   lifetimeLimit: 500,
   stopAt: 480,
-  minHoursBetweenRuns: 20,
+  slotHours: [8, 13, 18],
   resultsPerPage: 50,
   minDelayMs: 1500,
 };
 
-export const JoobleJobSchema = z.looseObject({
+const PARIS = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Paris", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", hourCycle: "h23" });
+
+/** Numéro du créneau de collecte (jour de Paris × 3 + créneaux déjà commencés) : change à 8 h, 13 h et 18 h. */
+export function joobleSlot(ms: number): number {
+  const p = Object.fromEntries(PARIS.formatToParts(ms).map((x) => [x.type, Number(x.value)]));
+  const day = Date.UTC(p.year!, p.month! - 1, p.day!) / 86_400_000;
+  const n = JOOBLE_DEFAULTS.slotHours.length;
+  return day * n + JOOBLE_DEFAULTS.slotHours.filter((h) => h <= p.hour!).length;
+}
+
+export const JoobleJobSchema =z.looseObject({
   id: z.union([z.string(), z.number()]).optional(),
   title: z.string().optional(),
   location: z.string().optional(),
@@ -131,8 +141,8 @@ export class JoobleSource implements JobSource {
 
     const { used, lastCallAt } = await this.opts.quota.get();
     const now = this.now();
-    if (lastCallAt && now - lastCallAt.getTime() < JOOBLE_DEFAULTS.minHoursBetweenRuns * 3_600_000) {
-      return { jobs: [], errors: [], skipped: "déjà interrogé il y a moins de 20 h (quota limité)" };
+    if (lastCallAt && joobleSlot(lastCallAt.getTime()) >= joobleSlot(now)) {
+      return { jobs: [], errors: [], skipped: "déjà interrogé dans ce créneau (8 h, 13 h, 18 h ; quota limité)" };
     }
     if (used + byZone.size > JOOBLE_DEFAULTS.stopAt) {
       throw new SourceUnavailableError(

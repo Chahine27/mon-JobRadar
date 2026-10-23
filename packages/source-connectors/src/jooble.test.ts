@@ -60,17 +60,23 @@ describe("Jooble", () => {
     expect(quota.used).toBe(2);
   });
 
-  it("au plus une collecte toutes les 20 h (même avec le bouton Actualiser)", async () => {
-    let t = Date.parse("2026-09-29T10:00:00Z");
+  it("au plus une collecte par créneau 8 h / 13 h / 18 h de Paris (même avec le bouton Actualiser)", async () => {
+    let t = Date.parse("2026-09-29T06:10:00Z"); // 8 h 10 à Paris (été)
     let calls = 0;
     const { jooble } = source(async () => (calls++, json({ jobs: [job(1)] })), memoryJoobleQuota(), () => t);
-    await jooble.searchAll([{ keywords: "dev", department: "60" }]);
-    t += 5 * 3_600_000;
-    const second = await jooble.searchAll([{ keywords: "dev", department: "60" }]);
-    expect(second.skipped).toMatch(/20 h/);
-    t += 16 * 3_600_000;
-    await jooble.searchAll([{ keywords: "dev", department: "60" }]);
-    expect(calls).toBe(2);
+    const run = () => jooble.searchAll([{ keywords: "dev", department: "60" }]);
+    await run();
+    t += 3 * 3_600_000; // 11 h 10 : même créneau
+    expect((await run()).skipped).toMatch(/créneau/);
+    t += 2 * 3_600_000; // 13 h 10 : créneau suivant
+    await run();
+    t += 5 * 3_600_000; // 18 h 10
+    await run();
+    t += 13 * 3_600_000; // 7 h 10 le lendemain : toujours le créneau de 18 h
+    expect((await run()).skipped).toMatch(/créneau/);
+    t += 3_600_000; // 8 h 10
+    await run();
+    expect(calls).toBe(4);
   });
 
   it("s'arrête avant d'épuiser la clé", async () => {
