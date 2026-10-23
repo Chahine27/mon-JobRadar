@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dedupeKeyOf, sameAdText, sameOffer, similarOffer } from "./dedupe";
+import { dedupeKeyOf, sameAdText, sameOffer, sameSalary, similarOffer } from "./dedupe";
 
 const offer = (title: string, city: string | null = "Paris", department: string | null = "75") => ({ title, city, department });
 
@@ -86,5 +86,17 @@ describe("même offre ou presque (avant de postuler)", () => {
     expect(similarOffer(freeWork, { ...adzuna, company: "Acme" })).toBe(false);
     expect(similarOffer({ ...freeWork, company: null }, { ...adzuna, company: null })).toBe(false);
     expect(similarOffer(freeWork, { ...adzuna, city: "Lyon" })).toBe(false);
+  });
+});
+
+describe("sameSalary : même texte, autre salaire", () => {
+  const s = (salaryMin: number | null, salaryMax: number | null, salaryPeriod: string | null = "year") => ({ salaryMin, salaryMax, salaryPeriod });
+  it("salaires qui ne se recoupent pas → deux offres (Talan 36 k€ / 70–100 k€)", () => {
+    expect(sameSalary(s(36000, 36000), s(70000, 100000))).toBe(false);
+  });
+  it("fourchettes qui se recoupent, salaire inconnu ou autre période → rien à conclure", () => {
+    expect(sameSalary(s(40000, 45000), s(45000, 50000))).toBe(true);
+    expect(sameSalary(s(null, null, null), s(70000, 100000))).toBe(true);
+    expect(sameSalary(s(450, 450, "day"), s(70000, 100000))).toBe(true);
   });
 });

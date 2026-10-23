@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from "@job-radar/db";
-import { type NormalizedJob, dedupeKeyOf, sameAdText, sameOffer, urlKey } from "@job-radar/job-normalizer";
+import { type NormalizedJob, dedupeKeyOf, type OfferSalary, sameAdText, sameOffer, sameSalary, urlKey } from "@job-radar/job-normalizer";
 import { ABRIDGED_SOURCES } from "@job-radar/shared";
 
 export type IngestOutcome = "created" | "updated" | "unchanged" | "duplicate";
@@ -103,14 +103,14 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
   };
 
   const byUrl = key ? await prisma.jobSourceLink.findFirst({ where: { canonicalUrl: key }, select: { jobId: true } }) : null;
-  // Offre qui a déjà une annonce de cette source : seulement si c'est le même texte (cf. sameAdText).
-  const fitsSource = async (job: { id: string; description: string }) =>
+  // Offre qui a déjà une annonce de cette source : seulement si c'est le même texte et un salaire compatible (cf. sameAdText, sameSalary).
+  const fitsSource = async (job: { id: string; description: string } & OfferSalary) =>
     n.source === "manual" ||
-    sameAdText(job.description, n.description) ||
+    (sameAdText(job.description, n.description) && sameSalary(job, n)) ||
     (await prisma.jobSourceLink.count({ where: { jobId: job.id, source: n.source } })) === 0;
-  let same: { id: string; description: string } | null = await prisma.job.findUnique({
+  let same: ({ id: string; description: string } & OfferSalary) | null = await prisma.job.findUnique({
     where: byUrl ? { id: byUrl.jobId } : { fingerprint: n.fingerprint },
-    select: { id: true, description: true },
+    select: { id: true, description: true, salaryMin: true, salaryMax: true, salaryPeriod: true },
   });
   const fingerprintTaken = !byUrl && same !== null;
   if (same && !byUrl && !(await fitsSource(same))) same = null;
@@ -118,7 +118,7 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
   if (!same && dedupeKey) {
     const candidates = await prisma.job.findMany({
       where: { dedupeKey },
-      select: { id: true, description: true, title: true, city: true, department: true },
+      select: { id: true, description: true, salaryMin: true, salaryMax: true, salaryPeriod: true, title: true, city: true, department: true },
       orderBy: { firstSeenAt: "asc" },
     });
     for (const c of candidates) {

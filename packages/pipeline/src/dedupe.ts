@@ -1,9 +1,9 @@
 import type { PrismaClient } from "@job-radar/db";
-import { dedupeKeyOf, normalize, sameAdText, sameOffer } from "@job-radar/job-normalizer";
+import { dedupeKeyOf, normalize, type OfferSalary, sameAdText, sameOffer, sameSalary } from "@job-radar/job-normalizer";
 import { jobFields } from "./ingest";
 
 /** Offre déjà en base, avec ce qui compte pour choisir celle qu'on garde. */
-type Row = {
+type Row = OfferSalary & {
   id: string;
   title: string;
   company: string | null;
@@ -27,10 +27,10 @@ function keeperRank(j: Row): number {
   return statusRank(j.status) * 10 + (j._count.mails > 0 ? 8 : 0) + (j.coverLetter ? 4 : 0) + (j.fullText ? 2 : 0);
 }
 
-/** Une source commune (hors ajout manuel) : seulement si c'est le même texte d'annonce (cf. sameAdText). */
+/** Une source commune (hors ajout manuel) : seulement si c'est le même texte d'annonce et un salaire compatible (cf. sameAdText, sameSalary). */
 function sameSourceFits(a: Row, b: Row): boolean {
   const shared = a.sources.some((s) => s.source !== "manual" && b.sources.some((t) => t.source === s.source));
-  return !shared || sameAdText(a.description, b.description);
+  return !shared || (sameAdText(a.description, b.description) && sameSalary(a, b));
 }
 
 /** Regroupe les offres qui sont la même ; la 1ʳᵉ de chaque groupe est celle à garder. */
@@ -96,7 +96,7 @@ export async function dedupeJobs(prisma: PrismaClient, opts: { apply: boolean } 
   const rows: Row[] = await prisma.job.findMany({
     select: {
       id: true, title: true, company: true, city: true, department: true, status: true, firstSeenAt: true, fullText: true,
-      description: true, sources: { select: { source: true } },
+      description: true, salaryMin: true, salaryMax: true, salaryPeriod: true, sources: { select: { source: true } },
       coverLetter: { select: { id: true } },
       _count: { select: { mails: true } },
     },
@@ -127,7 +127,7 @@ export async function dedupeJobs(prisma: PrismaClient, opts: { apply: boolean } 
 
 /**
  * Défait les fusions à tort : une offre qui porte plusieurs annonces d'une même source au texte différent (agence qui
- * publie le même titre dans la même ville pour plusieurs clients). Chaque annonce différente redevient une offre, lue
+ * publie le même titre dans la même ville pour plusieurs clients, ou même texte à un autre salaire). Chaque annonce différente redevient une offre, lue
  * depuis ses données brutes ; l'offre d'origine garde la plus ancienne (et ton statut, ta lettre, tes mails).
  * Lancée au démarrage de l'API ; rien à faire si tout est déjà propre.
  * ponytail: la description de l'offre d'origine n'est pas recalculée si elle venait d'une annonce déplacée (rare).
@@ -150,10 +150,10 @@ export async function splitMergedAds(opts: { prisma: PrismaClient; apply?: boole
     for (const links of bySource.values()) {
       if (links.length < 2) continue;
       const read = links.map((l) => ({ l, n: normalize({ source: l.source, sourceJobId: l.sourceJobId, data: l.rawData, collectedAt: l.firstSeenAt }) }));
-      // Annonces regroupées par texte ; le 1er groupe (la plus ancienne) reste sur l'offre.
+      // Annonces regroupées par texte et salaire ; le 1er groupe (la plus ancienne) reste sur l'offre.
       const clusters: Array<typeof read> = [];
       for (const r of read) {
-        const home = clusters.find((c) => sameAdText(c[0]!.n?.description ?? "", r.n?.description ?? ""));
+        const home = clusters.find((c) => sameAdText(c[0]!.n?.description ?? "", r.n?.description ?? "") && (!c[0]!.n || !r.n || sameSalary(c[0]!.n, r.n)));
         if (home) home.push(r);
         else clusters.push([r]);
       }

@@ -60,7 +60,21 @@ export function sameAdText(a: string, b: string): boolean {
   return cb.slice(0, 400).includes(ca.slice(0, 60)) || ca.slice(0, 400).includes(cb.slice(0, 60));
 }
 
-export type OfferPlace = { title: string; city: string | null; department: string | null };
+export type OfferSalary = { salaryMin: number | null; salaryMax: number | null; salaryPeriod: string | null };
+
+/**
+ * Deux annonces d'une même source au même texte sont deux offres si leurs salaires ne se recoupent pas : Talan publie
+ * « Développeur Junior Java / Angular » avec la même description à 36 k€ puis à 70–100 k€. Salaire inconnu d'un côté
+ * ou période différente : rien à conclure.
+ */
+export function sameSalary(a: OfferSalary, b: OfferSalary): boolean {
+  const amin = a.salaryMin ?? a.salaryMax;
+  const bmin = b.salaryMin ?? b.salaryMax;
+  if (amin == null || bmin == null || a.salaryPeriod !== b.salaryPeriod) return true;
+  return amin <= (b.salaryMax ?? bmin) && bmin <= (a.salaryMax ?? amin);
+}
+
+export type OfferPlace ={ title: string; city: string | null; department: string | null };
 
 /**
  * Deux offres de même clé sont-elles la même ?
