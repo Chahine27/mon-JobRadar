@@ -197,7 +197,8 @@ export async function jobRoutes(
     const missing = [
       !b.channel && "le canal d'envoi",
       !b.cv && "le CV utilisé",
-      !row.contractType && !b.contractType && "le type de contrat",
+      // Contrat lu par l'IA compris : c'est celui que la page affiche.
+      !(await jobs.contractOf(id)) && !b.contractType && "le type de contrat",
     ].filter(Boolean);
     const info = ApplyInfo.safeParse(b);
     if (missing.length || !info.success) {

@@ -392,6 +392,12 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
         .map(summarize);
     },
 
+    /** Contrat affiché de l'offre : celui lu par l'IA s'il y en a un, sinon celui de l'annonce (cf. withAiInfo). */
+    async contractOf(id: string): Promise<string | null> {
+      const job = await stores.jobs.get(id);
+      return job ? withAiInfo(job, (await loadVerdicts())(job)).contractType : null;
+    },
+
     async get(userId: string, id: string): Promise<JobDetail | null> {
       const job = await stores.jobs.get(id);
       if (!job) return null;

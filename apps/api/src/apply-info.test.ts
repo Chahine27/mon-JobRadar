@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { analysisHash } from "./ai-context";
 import { createTestApp, job, login } from "./test-helpers";
 
 async function setup() {
@@ -31,6 +32,16 @@ describe("canal, CV et contrat obligatoires à chaque candidature", () => {
     expect(refused.json().message).toBe("Pour enregistrer la candidature, indique le type de contrat.");
     const ok = (await req("POST", "/api/jobs/sans-contrat/status", { status: "APPLIED", channel: "mail", cv: "classique", contractType: "CDI" })).json();
     expect(ok).toMatchObject({ status: "APPLIED", contractType: "CDI", applyChannel: "mail", userEdits: { contractType: "CDI" } });
+  });
+
+  it("contrat absent de l'annonce mais lu par l'IA (celui affiché) : rien à demander", async () => {
+    const { req, jobs, analysisRows } = await setup();
+    const row = jobs.get("sans-contrat")!;
+    const inputHash = analysisHash(row, {} as Parameters<typeof analysisHash>[1], "fake-model");
+    analysisRows.set("sans-contrat", { inputHash, model: "fake-model", result: { adequation: "forte", contrat: "CDI" }, createdAt: new Date() });
+    expect((await req("GET", "/api/jobs/sans-contrat")).json().contractType).toBe("CDI");
+    const ok = await req("POST", "/api/jobs/sans-contrat/status", { status: "APPLIED", channel: "linkedin", cv: "ats" });
+    expect(ok.statusCode).toBe(200);
   });
 
   it("anciennes candidatures : complétées après coup ; remise en attente après un refus sans rien redemander", async () => {
