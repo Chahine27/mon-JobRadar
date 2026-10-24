@@ -98,6 +98,8 @@ export type JobEdits = {
   title?: string;
   company?: string;
   city?: string;
+  /** Adresse précise du lieu de travail : le trajet est recalculé jusqu'à elle. */
+  address?: string;
   department?: string;
   contractType?: string;
   remoteType?: RemoteType;

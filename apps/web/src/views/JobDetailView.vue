@@ -162,7 +162,7 @@ const resetFull = () =>
 const CONTRACTS = ["CDI", "CDD", "INTERIM", "ALTERNANCE", "STAGE", "FREELANCE"];
 const editing = ref(false);
 const editError = ref<string | null>(null);
-const form = ref({ title: "", company: "", city: "", department: "", contractType: "", remoteType: "" as RemoteType | "", salaryMin: "", salaryMax: "", experienceMinYrs: "" });
+const form = ref({ title: "", company: "", city: "", address: "", department: "", contractType: "", remoteType: "" as RemoteType | "", salaryMin: "", salaryMax: "", experienceMinYrs: "" });
 
 /** Valeurs affichées actuellement : seules celles que tu changes deviennent des corrections. */
 function currentValues(j: JobDetail) {
@@ -171,6 +171,7 @@ function currentValues(j: JobDetail) {
     title: j.title,
     company: j.company ?? "",
     city: j.city ?? "",
+    address: j.address ?? "",
     department: j.department ?? "",
     contractType: j.contractType ?? "",
     remoteType: j.remoteType === "unknown" ? "" : j.remoteType,
@@ -199,8 +200,14 @@ async function saveEdits(reset = false) {
   busy.value = true;
   editError.value = null;
   try {
+    const addressChanged = edits.address !== job.value!.userEdits?.address;
     job.value = { ...(await api.editJob(props.id, edits as JobEdits)), travelIssue: job.value?.travelIssue ?? null };
     editing.value = false;
+    // Nouvelle adresse : l'ouverture de l'offre recalcule le trajet jusqu'à elle.
+    if (addressChanged) {
+      job.value = await api.getJob(props.id);
+      if (job.value.travelPending) void waitForTravel();
+    }
   } catch (e) {
     editError.value = errorMessage(e, "Enregistrement impossible.");
   } finally {
@@ -328,6 +335,7 @@ const ruleLabel = (r: ScoreRule) =>
         <label class="wide">Intitulé<input v-model="form.title" /></label>
         <label>Entreprise<input v-model="form.company" /></label>
         <label>Ville<input v-model="form.city" /></label>
+        <label class="wide">Adresse<input v-model="form.address" placeholder="ex. 78 Av. des Champs-Élysées, 75008 Paris" /></label>
         <label>Département<input v-model="form.department" placeholder="ex. 60" maxlength="3" /></label>
         <label>Contrat
           <select v-model="form.contractType"><option value="">Non précisé</option><option v-for="c in CONTRACTS" :key="c" :value="c">{{ c }}</option></select>

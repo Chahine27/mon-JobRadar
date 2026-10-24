@@ -9,6 +9,7 @@ export type JobEdits = Partial<{
   title: string;
   company: string;
   city: string;
+  address: string;
   department: string;
   contractType: string;
   remoteType: RemoteType;

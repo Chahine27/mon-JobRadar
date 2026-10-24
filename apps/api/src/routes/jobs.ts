@@ -59,6 +59,7 @@ const EditsBody = z
     title: z.string().trim().min(1).max(300),
     company: z.string().trim().min(1).max(200),
     city: z.string().trim().min(1).max(120),
+    address: z.string().trim().min(5).max(300),
     department: z.string().trim().regex(/^(\d{2,3}|2[AB])$/i, "Département : numéro (ex. 60)").transform((d) => d.toUpperCase()),
     contractType: z.enum(["CDI", "CDD", "INTERIM", "ALTERNANCE", "STAGE", "FREELANCE"]),
     remoteType: z.enum(["remote", "hybrid", "onsite", "unknown"]),

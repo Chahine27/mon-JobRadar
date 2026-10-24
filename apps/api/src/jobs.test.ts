@@ -216,8 +216,9 @@ describe("corriger les infos d'une offre à la main", () => {
     const { get, cookies, app } = await setup();
     const put = (payload: object) => app.inject({ method: "PUT", url: "/api/jobs/j-vue/edits", cookies, payload });
     const before = (await get("/api/jobs/j-vue")).json();
-    const edited = (await put({ company: "Acme", department: "60", contractType: "CDI", salaryMin: 38000, experienceMinYrs: 2 })).json();
-    expect(edited).toMatchObject({ company: "Acme", department: "60", zone: "local", contractType: "CDI", salaryMin: 38000, salaryMax: 38000, experienceText: "2 ans minimum" });
+    const address = "78 Av. des Champs-Élysées, 75008 Paris";
+    const edited = (await put({ company: "Acme", address, department: "60", contractType: "CDI", salaryMin: 38000, experienceMinYrs: 2 })).json();
+    expect(edited).toMatchObject({ company: "Acme", address, department: "60", zone: "local", contractType: "CDI", salaryMin: 38000, salaryMax: 38000, experienceText: "2 ans minimum" });
     expect(edited.userEditsAt).not.toBeNull();
     expect((await put({ salaryMin: 50000, salaryMax: 40000 })).statusCode).toBe(400);
     expect((await put({ department: "Oise" })).statusCode).toBe(400);

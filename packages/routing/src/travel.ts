@@ -62,7 +62,7 @@ export async function ensureTravelTimes(opts: {
     // `not: "99"` seul exclurait aussi les départements inconnus (NULL en SQL) : la ville ne serait jamais localisée.
     where: { id: { in: opts.jobIds }, remoteType: { not: "remote" }, OR: [{ department: null }, { department: { not: "99" } }] },
     select: {
-      id: true, company: true, latitude: true, longitude: true, city: true, department: true, address: true, locationPrecision: true,
+      id: true, company: true, latitude: true, longitude: true, city: true, department: true, address: true, locationPrecision: true, userEdits: true,
       travel: { select: { mode: true, originKey: true, provider: true } },
     },
   });
@@ -88,7 +88,15 @@ export async function ensureTravelTimes(opts: {
 
     let dest: Point | null = null;
     let precision: "address" | "city_centroid" = "city_centroid";
-    if (job.latitude != null && job.longitude != null && job.locationPrecision === "address") {
+    // Adresse saisie à la main (page de l'offre) : prime sur tout, sans toucher aux coordonnées de la source.
+    const userAddress = (job.userEdits as { address?: string } | null)?.address?.trim();
+    if (userAddress) {
+      const r = await cachedPoint(prisma, userAddress, async () => (await geocode(userAddress))[0] ?? null, "address");
+      if (r.fresh) report.geocoded++;
+      dest = r.point;
+    }
+    if (dest) precision = "address";
+    else if (job.latitude != null && job.longitude != null && job.locationPrecision === "address") {
       dest = { lat: job.latitude, lng: job.longitude };
       precision = "address";
     }
@@ -106,7 +114,7 @@ export async function ensureTravelTimes(opts: {
       if (r.fresh) report.geocoded++;
       if (r.point) [dest, precision] = [r.point, "address"];
     }
-    if (dest && precision === "address" && job.locationPrecision !== "address") {
+    if (dest && !userAddress && precision === "address" && job.locationPrecision !== "address") {
       await prisma.job.update({ where: { id: job.id }, data: { latitude: dest.lat, longitude: dest.lng, locationPrecision: "address" } });
     }
     // Sinon : coordonnées déjà connues (centre de la ville), ou la commune à localiser.

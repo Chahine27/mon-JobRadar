@@ -563,11 +563,14 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
         return (await prisma.job.updateMany({ where: { id }, data: { applyChannel: info.channel, applyCv: info.cv } })).count > 0;
       },
       async setEdits(id, edits) {
-        const r = await prisma.job.updateMany({
+        const old = await prisma.job.findUnique({ where: { id }, select: { userEdits: true } });
+        if (!old) return null;
+        await prisma.job.update({
           where: { id },
           data: edits ? { userEdits: edits as object, userEditsAt: new Date() } : { userEdits: Prisma.DbNull, userEditsAt: null },
         });
-        if (r.count === 0) return null;
+        // Adresse corrigée (ou retirée) : le trajet est refait à la prochaine ouverture de l'offre.
+        if ((old.userEdits as JobEdits | null)?.address !== edits?.address) await prisma.travelEstimate.deleteMany({ where: { jobId: id } });
         const row = await prisma.job.findUnique({ where: { id }, select: jobSelect });
         return row ? toJobRow(row) : null;
       },
