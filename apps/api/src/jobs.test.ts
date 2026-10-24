@@ -218,6 +218,8 @@ describe("corriger les infos d'une offre à la main", () => {
     const before = (await get("/api/jobs/j-vue")).json();
     const address = "78 Av. des Champs-Élysées, 75008 Paris";
     const edited = (await put({ company: "Acme", address, department: "60", contractType: "CDI", salaryMin: 38000, experienceMinYrs: 2 })).json();
+    // Adresse seule : son code postal donne le département.
+    expect((await put({ address })).json()).toMatchObject({ address, department: "75" });
     expect(edited).toMatchObject({ company: "Acme", address, department: "60", zone: "local", contractType: "CDI", salaryMin: 38000, salaryMax: 38000, experienceText: "2 ans minimum" });
     expect(edited.userEditsAt).not.toBeNull();
     expect((await put({ salaryMin: 50000, salaryMax: 40000 })).statusCode).toBe(400);

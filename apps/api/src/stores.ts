@@ -1,6 +1,6 @@
 import type { LetterReview } from "@job-radar/ai";
 import type { TailoredCvDraft } from "@job-radar/cv-tailor";
-import type { ApplyChannel, ApplyCv, CvMaster, CvOverrides, JobStatus, LetterKit, Profile, RemoteType, TemplateId } from "@job-radar/shared";
+import { departmentFromText, type ApplyChannel, type ApplyCv, type CvMaster, type CvOverrides, type JobStatus, type LetterKit, type Profile, type RemoteType, type TemplateId } from "@job-radar/shared";
 
 /**
  * Accès aux données dont l'API a besoin.
@@ -114,6 +114,8 @@ export const yearsText = (n: number) => (n === 0 ? "débutant accepté" : `${n} 
 /** Applique les corrections à la main sur l'offre lue (score et IA recalculés grâce au contentHash). */
 export function applyEdits(row: JobRow, edits: JobEdits, at: Date) {
   Object.assign(row, edits);
+  // Adresse saisie sans département : son code postal le donne (« 75008 Paris » → 75), comme pour le trajet.
+  if (edits.address && !edits.department) row.department = departmentFromText(edits.address) ?? row.department;
   if (edits.salaryMin !== undefined && edits.salaryMax === undefined) row.salaryMax = edits.salaryMin;
   if (edits.experienceMinYrs !== undefined) {
     row.experienceText = yearsText(edits.experienceMinYrs);

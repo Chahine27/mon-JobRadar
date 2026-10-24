@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@job-radar/db";
-import { IDF_DEPARTMENTS, parseProfile } from "@job-radar/shared";
+import { IDF_DEPARTMENTS, departmentFromText, parseProfile } from "@job-radar/shared";
 import { findCompanySite } from "./company";
 import { geocode } from "./geocode";
 import type { Point, RoutingService } from "./types";
@@ -71,7 +71,10 @@ export async function ensureTravelTimes(opts: {
   let calls = 0;
 
   for (const job of jobs) {
-    const mode = travelModeOf(job.department);
+    // Corrections à la main (page de l'offre) : elles décident du mode, comme à l'affichage (même règle qu'applyEdits).
+    const edits = job.userEdits as { address?: string; department?: string } | null;
+    const userAddress = edits?.address?.trim();
+    const mode = travelModeOf(edits?.department ?? departmentFromText(userAddress) ?? job.department);
     const { routing, origin, missing } = modes[mode];
     if (!origin) {
       report.skipped = missing;
@@ -88,8 +91,7 @@ export async function ensureTravelTimes(opts: {
 
     let dest: Point | null = null;
     let precision: "address" | "city_centroid" = "city_centroid";
-    // Adresse saisie à la main (page de l'offre) : prime sur tout, sans toucher aux coordonnées de la source.
-    const userAddress = (job.userEdits as { address?: string } | null)?.address?.trim();
+    // Adresse saisie à la main : prime sur tout, sans toucher aux coordonnées de la source.
     if (userAddress) {
       const r = await cachedPoint(prisma, userAddress, async () => (await geocode(userAddress))[0] ?? null, "address");
       if (r.fresh) report.geocoded++;
