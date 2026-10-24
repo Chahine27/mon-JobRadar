@@ -10,9 +10,10 @@ import Icon from "../components/Icon.vue";
 import ScoreBadge from "../components/ScoreBadge.vue";
 import SourceLogo from "../components/SourceLogo.vue";
 import { SOURCE_LABELS, REMOTE_LABELS, STATUS_LABELS, formatSalary, linkLabel, mapsUrl, safeUrl, skillRuleKind, timeAgo } from "../format";
-import type { ApplyInfo, JobDetail, JobEdits, JobStatus, RemoteType } from "../types";
+import type { ApplyInfo, JobDetail, JobStatus, RemoteType } from "../types";
 import type { ScoreRule } from "@job-radar/shared";
 import { goBack } from "../router";
+import { mergeEdits } from "../job-edits";
 
 const props = defineProps<{ id: string }>();
 const job = ref<JobDetail | null>(null);
@@ -188,20 +189,12 @@ function startEdit() {
 }
 
 async function saveEdits(reset = false) {
-  const before = currentValues(job.value!);
-  const edits: Record<string, string | number> = reset ? {} : { ...job.value!.userEdits };
-  if (!reset) {
-    for (const [k, v] of Object.entries(form.value) as Array<[keyof typeof before, string]>) {
-      const value = v.trim();
-      if (value === before[k] || !value) continue; // inchangé, ou vidé : garde la valeur de la source
-      edits[k] = ["salaryMin", "salaryMax", "experienceMinYrs"].includes(k) ? Number(value) : value;
-    }
-  }
+  const edits = reset ? {} : mergeEdits(form.value, currentValues(job.value!), job.value!.userEdits);
   busy.value = true;
   editError.value = null;
   try {
     const addressChanged = edits.address !== job.value!.userEdits?.address;
-    job.value = { ...(await api.editJob(props.id, edits as JobEdits)), travelIssue: job.value?.travelIssue ?? null };
+    job.value = { ...(await api.editJob(props.id, edits)), travelIssue: job.value?.travelIssue ?? null };
     editing.value = false;
     // Nouvelle adresse : l'ouverture de l'offre recalcule le trajet jusqu'à elle.
     if (addressChanged) {
