@@ -148,7 +148,7 @@ const isManual = (j: { sources: Array<{ source: string }> }) => j.sources.some((
 
 type Verdict = AiVerdict | null;
 const aiSkillsOf = (v: Verdict) =>
-  v && v.required.length + v.bonus.length > 0 ? { required: v.required, bonus: v.bonus, atWork: v.atWork ?? [], inProjects: v.inProjects ?? [] } : null;
+  v && v.required.length + v.bonus.length > 0 ? { required: v.required, bonus: v.bonus, atWork: v.atWork ?? [], inProjects: v.inProjects ?? [], level: v.level ?? "inconnu" } : null;
 
 /**
  * Quand l'IA a lu l'annonce (analyse à jour), c'est SA lecture qui compte pour le score et l'affichage : les règles se
@@ -221,6 +221,9 @@ export function urlKey(url: string): string | null {
 /** Rubrique du flux : télétravail complet, lieu connu (dans ta zone, ou masquée si hors zone), lieu non précisé. */
 const zoneOf = (job: JobRow): Zone => (job.remoteType === "remote" ? "remote" : job.department || job.latitude !== null ? "local" : "unknown");
 
+/** Note maximale de l'IA quand la techno principale n'est vue qu'en projets (milieu de la fourchette « moyenne »). */
+const PROJECT_ONLY_NOTE_CAP = 60;
+
 function toSummary(job: JobRow, s: ScoreResult, v: Verdict = null): JobSummary {
   // Adéquation faible vérifiée par le code : l'avis de l'IA ne peut pas dire mieux. Techno principale vue seulement en
   // projets : au mieux « moyenne » (règle de la consigne, que le petit modèle oublie).
@@ -228,7 +231,9 @@ function toSummary(job: JobRow, s: ScoreResult, v: Verdict = null): JobSummary {
     v && s.weakFit.length ? { ...v, adequation: "faible" as const } : v?.adequation === "forte" && s.notStrong.length ? { ...v, adequation: "moyenne" as const } : v;
   const cap = verdict ? AI_SCORE_CAPS[verdict.adequation] : 100;
   // Note de l'IA : remplace la note par mots-clés. Mêmes bonus / malus, et les plafonds du code (contrat, langue…) restent.
-  const note = verdict ? checkNote(verdict.note ?? null, verdict.adequation) : null;
+  // Techno principale vue seulement en projets : la note de l'IA ne dépasse pas le milieu de « moyenne » (comme le plafond de la note technique).
+  const checked = verdict ? checkNote(verdict.note ?? null, verdict.adequation) : null;
+  const note = checked !== null && s.notStrong.length ? Math.min(checked, PROJECT_ONLY_NOTE_CAP) : checked;
   const points = s.adjustments.reduce((a, x) => a + x.points, 0);
   const withNote = note === null ? s.final : Math.min(Math.max(0, Math.min(100, note + points)), s.capLabel ? s.final : 100);
   const final = Math.min(withNote, cap);
@@ -272,7 +277,7 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
 
   function scoreOf(job: JobRow, profile: Profile, profileHash: string, v: Verdict = null): ScoreResult {
     const aiSkills = aiSkillsOf(v);
-    const aiKey = aiSkills ? `${aiSkills.required.join("|")}#${aiSkills.bonus.join("|")}#${aiSkills.atWork.join("|")}#${aiSkills.inProjects.join("|")}` : "-";
+    const aiKey = aiSkills ? `${aiSkills.required.join("|")}#${aiSkills.bonus.join("|")}#${aiSkills.atWork.join("|")}#${aiSkills.inProjects.join("|")}#${aiSkills.level}` : "-";
     const home = homes.get(profile) ?? null;
     const km = home && job.latitude !== null && job.longitude !== null ? distanceKm(home, { lat: job.latitude, lng: job.longitude }) : null;
     const key = `${job.id}:${job.contentHash}:${job.department ?? "-"}:${job.experienceMinYrs ?? "-"}:${job.contractType ?? "-"}:${job.salaryMin ?? "-"}-${job.salaryMax ?? "-"}:${job.travelMinutes ?? "-"}:${job.travelMode ?? "-"}:${aiKey}:${profileHash}:${rules.version}:${km === null ? "-" : Math.round(km)}`;

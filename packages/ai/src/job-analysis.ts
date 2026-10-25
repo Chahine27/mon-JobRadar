@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AI_DOMAIN, DEFAULT_RULES, contractOfJob, detectSeniority, masteryRequired, normalizeContract, productionRequired, trainingOffered } from "@job-radar/scoring";
+import { AI_DOMAIN, DEFAULT_RULES, contractOfJob, detectSeniority, masteryRequired, normalizeContract, parseExperienceYears, productionRequired, trainingOffered } from "@job-radar/scoring";
 import { extractSkills, getSkill, normalizeText, resolveSkill } from "@job-radar/skills";
 import { toFields } from "./job-reading";
 import type { OllamaClient } from "./ollama";
@@ -139,17 +139,17 @@ Règles :
 - N'invente rien. Ce qui n'est pas écrit dans l'annonce : liste vide, "inconnu" ou null.
 - resume : 2 phrases maximum. Ce que fait le poste et pour qui (l'entreprise, ou son client).
 - missions : les 3 à 5 missions principales, en phrases courtes.
-- competences_obligatoires : les technologies et compétences exigées (« maîtrise », « requis », « indispensable », « expert », « X ans de … »). UNIQUEMENT des noms courts (1 à 3 mots) : « React », « Java », « SQL ». Jamais de phrase, jamais de durée (les années vont dans experience_min_ans). Si l'annonce dit « A ou B », écris un seul élément « A ou B ».
+- competences_obligatoires : les technologies et compétences exigées (« maîtrise », « requis », « indispensable », « expert », « X ans de … »). UNIQUEMENT des noms courts (1 à 3 mots) : « React », « Java », « SQL ». Jamais de phrase, jamais de durée (les années vont dans experience_min_ans). Si l'annonce dit « A ou B », ou « maîtrise d'au moins une de ces technologies : A, B ou C », écris UN SEUL élément « A ou B ou C » : il est rempli dès que le candidat en a une. Les formats et protocoles cités en passant (JSON, XML, REST/SOAP) ne sont pas des compétences à ranger en manquantes.
 - competences_bonus : celles présentées comme un plus (« apprécié », « souhaité », « un plus », « idéalement », « nice to have »).
 - niveau : junior, confirme ou senior. Si le TITRE du poste dit « junior », « confirmé » ou « senior », c'est le titre qui compte ; si le texte dit autre chose, signale la contradiction dans points_attention. Sinon, d'après l'expérience demandée ; inconnu si rien ne l'indique.
-- experience_min_ans : le MINIMUM d'années d'expérience demandées AU CANDIDAT (« 1 à 2 ans » → 1, « > 1 an » → 1, « junior / débutant accepté » → 0). Jamais l'âge de l'entreprise ni l'expérience d'une personne de l'équipe (« notre CTO a 12 ans d'expérience »). Rien d'écrit → null. Si l'annonce se contredit (fiche du site « Expérience : 1 à 2 ans » mais texte « au moins 5 ans »), prends ce que dit le texte rédigé par le recruteur (profil recherché) et signale la contradiction dans points_attention.
+- experience_min_ans : le MINIMUM d'années d'expérience demandées AU CANDIDAT (« 1 à 2 ans » → 1, « > 1 an » → 1, « junior / débutant accepté » → 0). Jamais l'âge de l'entreprise ni l'expérience d'une personne de l'équipe (« notre CTO a 12 ans d'expérience »). Rien d'écrit → null. Si l'annonce se contredit (fiche du site « Expérience : 1 à 2 ans » mais texte « au moins 5 ans »), prends ce que dit le texte rédigé par le recruteur (profil recherché) et signale la contradiction dans points_attention. Le nombre d'années cité dans avis est TOUJOURS celui de experience_min_ans.
 - employeur : esn_ou_cabinet si c'est une ESN, un cabinet ou une mission chez un client (« pour l'un de nos clients », « en mission chez ») ; direct si l'entreprise recrute pour elle-même ; sinon inconnu.
 - Si l'annonce est marquée EXTRAIT : ce n'est que le début du texte. Ne déduis rien de ce qui manque, et mets « Annonce incomplète : ouvre l'annonce complète pour vérifier les exigences » dans points_attention.
 - Le candidat a deux niveaux de compétences : EN ENTREPRISE (expérience professionnelle) et SEULEMENT EN PROJETS (projets personnels ou de formation, aucune expérience professionnelle). Une compétence vue seulement en projets n'est JAMAIS une « solide base », une « maîtrise », une « bonne connaissance » ni une « expérience » : écris « vue en projets ».
 - exigees_en_entreprise / exigees_en_projets / exigees_manquantes : range chaque élément de competences_obligatoires dans une seule de ces 3 listes, d'après le PROFIL DU CANDIDAT.
 - Technologie À APPRENDRE : une technologie absente de son profil qui est dans sa liste « peut apprendre vite », OU n'importe quelle technologie absente quand l'annonce propose une formation (formation interne, « vous serez formé », montée en compétences, mentorat) ou vise un junior / débutant. SAUF si l'annonce exige une maîtrise ou des années d'expérience sur elle : elle manque alors vraiment. Une technologie à apprendre n'est jamais à elle seule une raison de « faible », même si c'est la technologie principale ; dans avis et points_attention, écris « à apprendre (formation proposée) », pas « te manque ».
 - Ce qui correspond au parcours du candidat (secteur où il a déjà travaillé, technologie de son CV) est un ATOUT : cite-le dans avis, jamais dans points_attention.
-- Type de contrat : compare-le aux « Contrats souhaités » du candidat. Si le contrat est connu et non souhaité, indique-le dans points_attention et considère l'adéquation comme faible. S'il est souhaité, ne le mets pas dans points_attention.
+- Type de contrat : compare-le aux « Contrats souhaités » du candidat. Si le contrat est connu et non souhaité, indique-le dans points_attention et considère l'adéquation comme faible. S'il est souhaité, ne le mets pas dans points_attention. Si l'annonce propose PLUSIEURS contrats (« CDI ou Freelance ») dont au moins un est souhaité, le contrat convient : ne le mets ni dans points_attention ni dans avis.
 - points_attention : les pièges concrets pour le candidat (poste senior, mission chez un client, astreintes, déplacements, anglais exigé, habilitation, salaire non indiqué, technologie principale absente de son profil…). 5 maximum.
 - adequation : compare l'annonce au PROFIL DU CANDIDAT donné, y compris le contrat souhaité.
   forte = il a EN ENTREPRISE la plupart des compétences exigées, dont la technologie principale, ET l'expérience demandée ne dépasse pas la sienne.
@@ -346,11 +346,13 @@ function checkNiveau(r: JobAnalysisResult, title: string): JobAnalysisResult["ni
 /** « Contrat CDD » alors que le candidat accepte les CDD : pas un piège. */
 function wantedContract(point: string, contracts: string[]): boolean {
   const p = point.trim();
-  if (p.length > 70 || !/contrat|^(cdd|cdi|int[ée]rim|freelance|alternance|stage)\b/i.test(p)) return false;
+  const choice = /\s(ou|or)\s/i.test(p); // « CDI ou Freelance » : une seule option souhaitée suffit
+  if (p.length > (choice ? 160 : 70) || !/contrat|^(cdd|cdi|int[ée]rim|freelance|alternance|stage)\b/i.test(p)) return false;
   const types = [...p.matchAll(/\b(cdd|cdi|int[ée]rim|freelance|alternance|stage|apprentissage|professionnalisation)\b/giu)]
     .map((m) => normalizeContract(m[1]!))
     .filter((kind): kind is NonNullable<typeof kind> => kind !== null);
-  return types.length > 0 && types.every((kind) => contracts.some((c) => normalizeContract(c) === kind));
+  const wanted = (kind: (typeof types)[number]) => contracts.some((c) => normalizeContract(c) === kind);
+  return types.length > 0 && (choice ? types.some(wanted) : types.every(wanted));
 }
 
 const BEGINNER = /\b(junior|jr|d[ée]butant(e|s)?|jeune dipl[ôo]m[ée]e?|sans exp[ée]rience|entry[- ]level|graduate|no experience required)\b/i;
@@ -378,8 +380,10 @@ export async function analyzeJobWithAi(
     if (parsed.success) {
       const required = skillNames(parsed.data.competences_obligatoires);
       const classes = classifyRequired(required, profile);
+      // Les années écrites dans le texte (la plus élevée : « au moins 4 ans » et fiche « 3 à 5 ans » → 4) l'emportent sur un nombre plus bas lu par l'IA.
+      const written = parseExperienceYears(`${job.title}\n${job.description}`)?.min ?? null;
+      const e = written !== null && written > (parsed.data.experience_min_ans ?? -1) ? written : parsed.data.experience_min_ans;
       // « 0 an » sans « junior / débutant » écrit : rien n'est précisé (« early in your career » n'est pas une exigence).
-      const e = parsed.data.experience_min_ans;
       const r = { ...parsed.data, ...classes, experience_min_ans: e === 0 && !BEGINNER.test(`${job.title}\n${job.description}`) ? null : e };
       const adequation = checkAdequation({ ...r, niveau: checkNiveau(r, job.title) }, job, profile);
       return {

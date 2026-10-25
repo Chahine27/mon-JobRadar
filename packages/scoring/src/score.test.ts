@@ -566,6 +566,18 @@ describe("critère Technique calculé sur les compétences lues par l'IA", () =>
     expect(stale.final).toBe(DEFAULT_RULES.missingMainTechCap);
   });
 
+  it("poste senior lu par l'IA dans le texte (titre sans « senior », aucune année écrite) : adéquation faible, plafonné (cas Lùkla)", () => {
+    const input: ScoringInput = { ...PERFECT, title: "Chef d'équipe développement", experienceMinYears: null };
+    const ai = { required: ["Java"], bonus: [] };
+    expect(scoreJob({ ...input, aiSkills: ai }, DEFAULT_PROFILE).weakFit).toEqual([]);
+    const senior = scoreJob({ ...input, aiSkills: { ...ai, level: "senior" } }, DEFAULT_PROFILE);
+    expect(senior.weakFit).toEqual(["poste senior (lu par l'IA)"]);
+    expect(senior.final).toBeLessThanOrEqual(DEFAULT_RULES.weakFitCap);
+    // Années écrites dans ta cible : ce n'est plus « au-dessus de ta cible ».
+    const inTarget = scoreJob({ ...input, experienceMinYears: DEFAULT_PROFILE.experienceMax, aiSkills: { ...ai, level: "senior" } }, DEFAULT_PROFILE);
+    expect(inTarget.weakFit).toEqual([]);
+  });
+
   it("sans liste de l'IA : calcul habituel sur le texte", () => {
     const s1 = scoreJob(PERFECT, DEFAULT_PROFILE);
     const s2 = scoreJob({ ...PERFECT, aiSkills: { required: [], bonus: [] } }, DEFAULT_PROFILE);

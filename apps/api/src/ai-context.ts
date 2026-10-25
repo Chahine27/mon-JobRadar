@@ -83,6 +83,8 @@ export type AiVerdict = {
   inProjects?: string[];
   /** Note sur 100 de l'IA (null : ancienne analyse, sans note). Remplace le score par mots-clés. */
   note?: number | null;
+  /** Niveau lu par l'IA dans le titre et le texte (« inconnu » : rien d'écrit). */
+  level?: "junior" | "confirme" | "senior" | "inconnu";
 };
 
 /** Lit l'adéquation et l'avis dans une analyse enregistrée (null si illisible). */
@@ -103,6 +105,7 @@ export function readVerdict(
     exigees_en_entreprise?: unknown;
     exigees_en_projets?: unknown;
     note?: unknown;
+    niveau?: unknown;
   } | null;
   if (!r || typeof r !== "object") return null;
   if (r.adequation !== "forte" && r.adequation !== "moyenne" && r.adequation !== "faible") return null;
@@ -121,5 +124,6 @@ export function readVerdict(
     atWork: strings(r.exigees_en_entreprise),
     inProjects: strings(r.exigees_en_projets),
     note: typeof r.note === "number" && r.note >= 0 && r.note <= 100 ? Math.round(r.note) : null,
+    level: r.niveau === "junior" || r.niveau === "confirme" || r.niveau === "senior" ? r.niveau : "inconnu",
   };
 }

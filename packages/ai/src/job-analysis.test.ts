@@ -100,6 +100,24 @@ describe("IA locale (Ollama)", () => {
     expect(result.points_attention.filter((x) => /incompl/i.test(x))).toHaveLength(1);
   });
 
+  it("années : le texte du recruteur (« au moins 4 ans ») l'emporte sur 3 lu par l'IA ; contrat « CDI ou Freelance » souhaité = pas un piège (cas ICARE, FEKRA)", async () => {
+    const job = { ...JOB, description: "Fiche : 3 à 5 ans d'expérience. Profil : au moins 4 ans d'expérience en Java. Type de contrat : CDI ou Freelance." };
+    const answer = { ...GOOD, experience_min_ans: 3, adequation: "moyenne", points_attention: ["Le contrat indiqué est CDI ou Freelance : le freelance n'est pas dans tes contrats souhaités", "Salaire non indiqué"] };
+    const client = new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify(answer) } }) });
+    const { result } = await analyzeJobWithAi(client, job, PROFILE);
+    expect(result.experience_min_ans).toBe(4);
+    expect(result.points_attention).toEqual(["Salaire non indiqué"]);
+    // Plusieurs contrats dont aucun n'est souhaité : le piège reste.
+    const none = await analyzeJobWithAi(client, job, { ...PROFILE, contracts: ["CDD"] });
+    expect(none.result.points_attention).toContain(answer.points_attention[0]);
+  });
+
+  it("consigne : « au moins une de A, B ou C » en un seul élément ; avis et années d'accord", () => {
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("au moins une de ces technologies");
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("« CDI ou Freelance »");
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("TOUJOURS celui de experience_min_ans");
+  });
+
   it("consigne : tutoiement et « A ou B » en un seul élément", () => {
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("TUTOYANT");
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("« A ou B »");
@@ -152,7 +170,7 @@ describe("points d'attention sur le contrat", () => {
   ] as const)("le contrat %s influence l'adéquation et les points d'attention", async (contractType, title, label) => {
     const answer = { ...GOOD, experience_min_ans: null, adequation: "forte", points_attention: [], competences_obligatoires: ["Vue.js"] };
     const client = new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify(answer) } }) });
-    const job = { ...JOB, title, contractType };
+    const job = { ...JOB, title, contractType, description: "Développeur Vue.js pour un produit interne." }; // sans années écrites (« 5 ans minimum » ferait « faible »)
 
     const wanted = await analyzeJobWithAi(client, job, { ...PROFILE, contracts: [label] });
     expect(wanted.result.adequation).toBe("forte");

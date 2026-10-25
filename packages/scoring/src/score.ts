@@ -56,7 +56,7 @@ export type ScoringInput = {
    * `atWork` / `inProjects` : compétences exigées que l'analyse a rangées « en entreprise » / « en projets » ; elles
    * peuvent lever un plafond dû à une techno que le code croit absente (cf. liftedCaps).
    */
-  aiSkills?: { required: string[]; bonus: string[]; atWork?: string[]; inProjects?: string[] } | null;
+  aiSkills?: { required: string[]; bonus: string[]; atWork?: string[]; inProjects?: string[]; level?: "junior" | "confirme" | "senior" | "inconnu" } | null;
 };
 
 /** Sous-notes de 0 à 100, affichées et utilisées pour masquer ; seule `technical` est la base du score. */
@@ -567,6 +567,8 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
   // Adéquation faible vérifiée par le code (le petit modèle d'IA s'y trompe) : compétences exigées manquantes, domaine IA.
   const weakFit: string[] = [];
   if (tech.missingRequired.length >= 2) weakFit.push(`compétences exigées manquantes : ${tech.missingRequired.join(", ")}`);
+  // Poste senior / lead lu par l'IA dans le texte (« Tech Lead Java Senior » sous un titre sans « senior ») : au-dessus de ta cible, même sans nombre d'années écrit.
+  if (input.aiSkills?.level === "senior" && (input.experienceMinYears === null || input.experienceMinYears > profile.experienceMax)) weakFit.push("poste senior (lu par l'IA)");
   const inProjects = new Set((profile.projectSkills ?? []).map((p) => normalizeText(p)));
   const aiAtWork = profile.skills.some((x) => !inProjects.has(normalizeText(x)) && AI_DOMAIN.test(normalizeText(x)));
   if (AI_DOMAIN.test(normalizeText(input.title)) && !aiAtWork) weakFit.push("poste orienté IA / LLM, domaine absent de ton expérience en entreprise");
