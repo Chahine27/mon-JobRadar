@@ -59,7 +59,7 @@ export function analysisFitsJob(a: { inputHash: string; model: string }, job: Jo
 
 export type Adequation = "forte" | "moyenne" | "faible";
 
-/** Score maximum selon l'avis de l'IA : elle ne fait que baisser un score trop optimiste, jamais le monter. */
+/** Score maximum selon l'adéquation de l'IA (aussi pour sa note : 90 avec « faible » reste à 40). */
 export const AI_SCORE_CAPS: Record<Adequation, number> = { forte: 100, moyenne: 75, faible: 40 };
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 20) : []);
@@ -81,6 +81,8 @@ export type AiVerdict = {
   /** Compétences exigées rangées « en entreprise » / « en projets » par l'analyse. */
   atWork?: string[];
   inProjects?: string[];
+  /** Note sur 100 de l'IA (null : ancienne analyse, sans note). Remplace le score par mots-clés. */
+  note?: number | null;
 };
 
 /** Lit l'adéquation et l'avis dans une analyse enregistrée (null si illisible). */
@@ -100,6 +102,7 @@ export function readVerdict(
     employeur?: unknown;
     exigees_en_entreprise?: unknown;
     exigees_en_projets?: unknown;
+    note?: unknown;
   } | null;
   if (!r || typeof r !== "object") return null;
   if (r.adequation !== "forte" && r.adequation !== "moyenne" && r.adequation !== "faible") return null;
@@ -117,5 +120,6 @@ export function readVerdict(
     consulting: r.employeur === "esn_ou_cabinet" ? true : r.employeur === "direct" ? false : null,
     atWork: strings(r.exigees_en_entreprise),
     inProjects: strings(r.exigees_en_projets),
+    note: typeof r.note === "number" && r.note >= 0 && r.note <= 100 ? Math.round(r.note) : null,
   };
 }

@@ -447,7 +447,7 @@ export async function createTestApp(extra: Partial<AppOptions> = {}) {
   const lbbSearches: unknown[] = [];
   /** Fausse IA : compte les appels, peut simuler Ollama éteint. */
   const aiCalls: Array<{ title: string; skills: string[] }> = [];
-  const aiState: { online: boolean; adequation: "forte" | "moyenne" | "faible"; badFormat?: boolean } = { online: true, adequation: "forte" };
+  const aiState: { online: boolean; adequation: "forte" | "moyenne" | "faible"; badFormat?: boolean; note?: number } = { online: true, adequation: "forte" };
   const notifiers: Notifier[] = [
     { channel: "email", isConfigured: () => true, sendAlerts: async () => {}, sendTest: async () => void tests.push("email") },
     {
@@ -533,6 +533,7 @@ export async function createTestApp(extra: Partial<AppOptions> = {}) {
             exigees_en_projets: [],
             exigees_manquantes: [],
             adequation: aiState.adequation,
+            note: aiState.note ?? null,
             avis: "Ça colle.",
             contrat: "inconnu",
             salaire_min: null,

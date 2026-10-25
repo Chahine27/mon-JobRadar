@@ -52,16 +52,16 @@ export class ClaudeClient implements AiClient {
   }
 
   async chatJson(system: string, user: string | ChatTurn[], jsonSchema: object, opts: ChatOptions = {}): Promise<unknown> {
-    // cache : la consigne et la première demande (CV, annonce) sont relues à 10 % du prix pendant 5 minutes.
+    // cache : la consigne (et avec true la première demande : CV, annonce) est relue à 10 % du prix pendant 5 minutes.
     const messages: Anthropic.MessageParam[] = toTurns(user).map((t, i) =>
-      i === 0 && opts.cache ? { role: t.role, content: [{ type: "text", text: t.content, cache_control: { type: "ephemeral" } }] } : t,
+      i === 0 && opts.cache === true ? { role: t.role, content: [{ type: "text", text: t.content, cache_control: { type: "ephemeral" } }] } : t,
     );
     let res: Anthropic.Message;
     try {
       res = await this.client.messages.create({
         model: this.model,
         max_tokens: 16_000,
-        system,
+        system: opts.cache ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }] : system,
         messages,
         output_config: {
           effort: this.effort,

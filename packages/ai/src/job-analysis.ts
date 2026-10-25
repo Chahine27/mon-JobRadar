@@ -10,6 +10,8 @@ import type { OllamaClient } from "./ollama";
  * (cf. analysisFitsJob dans l'API).
  * Pas changé pour contrat / salaire / adresse (2026-10-19) : les anciens avis restent bons, ils n'ont juste pas ces infos.
  * 2026-10-21 : technos « à apprendre » (formation proposée, poste junior, liste du candidat) jamais une raison de « faible ».
+ * Pas changé pour la note sur 100 (2026-10-25) : réanalyser toutes les offres coûterait des crédits Claude. Seules les
+ * nouvelles analyses ont une note ; les anciennes gardent le score du code.
  */
 export const ANALYSIS_PROMPT_VERSION = "2026-10-21.1";
 
@@ -35,6 +37,8 @@ export const JobAnalysisSchema = z.object({
   exigees_en_projets: list(15, 60).default([]),
   exigees_manquantes: list(15, 60).default([]),
   adequation: z.enum(["forte", "moyenne", "faible"]),
+  /** Note sur 100 : remplace le score par mots-clés (cf. toSummary dans l'API). Absente des analyses d'avant le 2026-10-25. */
+  note: z.number().transform((n) => Math.round(n)).nullable().default(null),
   avis: z.string().trim().min(1).max(400),
   /** Infos lues dans le texte : corrigent ce que la source ou le code ont mal lu (vérifiées par le code, cf. checkInfos). */
   contrat: z.enum(["CDI", "CDD", "INTERIM", "ALTERNANCE", "STAGE", "FREELANCE", "inconnu"]).default("inconnu"),
@@ -61,6 +65,7 @@ export const JOB_ANALYSIS_JSON_SCHEMA = {
     exigees_en_projets: { type: "array", items: { type: "string" } },
     exigees_manquantes: { type: "array", items: { type: "string" } },
     adequation: { type: "string", enum: ["forte", "moyenne", "faible"] },
+    note: { type: "integer" },
     avis: { type: "string" },
     contrat: { type: "string", enum: ["CDI", "CDD", "INTERIM", "ALTERNANCE", "STAGE", "FREELANCE", "inconnu"] },
     salaire_min: { type: ["number", "null"] },
@@ -81,6 +86,7 @@ export const JOB_ANALYSIS_JSON_SCHEMA = {
     "exigees_en_projets",
     "exigees_manquantes",
     "adequation",
+    "note",
     "avis",
     "contrat",
     "salaire_min",
@@ -151,28 +157,35 @@ Règles :
   Développer AVEC des agents de code IA (Claude Code, Cursor, Copilot, Codex) est une méthode de travail, pas un domaine : traite-le comme une compétence (en entreprise, en projets ou manquante), jamais à lui seul comme une raison de « faible ». S'il est demandé ou cité (IA appliquée au développement, agentic engineering…), mets-le dans les compétences, exigées ou bonus, avec les mots de l'annonce.
   Technologie principale vue seulement en projets, ou à apprendre : au mieux moyenne.
   moyenne = entre les deux.
+- note : sur 100, à quel point l'offre convient au candidat, d'après TOUT le contexte (missions, stack, niveau, contrat, secteur, ce qu'il a en entreprise ou en projets). Elle doit rester dans la fourchette de l'adequation : forte = 75 à 100, moyenne = 45 à 74, faible = 0 à 40. Dans la fourchette, place-la selon le nombre de compétences exigées qu'il a et l'importance de ce qui manque. Ne tiens pas compte du lieu, du trajet ni du salaire.
 - avis : une phrase directe, en TUTOYANT le candidat (« tu », jamais « vous »), qui dit pourquoi ça colle ou pas, en distinguant ce qu'il a en entreprise, ce qu'il n'a vu qu'en projets et ce qui lui manque. Même règle pour points_attention.
 - contrat / salaire_min / salaire_max / salaire_periode / adresse : ce que dit VRAIMENT le texte de l'annonce, même si les champs « Contrat » ou « Salaire » au-dessus disent autre chose (ils viennent d'un robot qui se trompe parfois).
   contrat : CDI, CDD, INTERIM, ALTERNANCE, STAGE, FREELANCE (freelance / portage / TJM), sinon inconnu.
   salaire : seulement un montant écrit pour CE poste, en euros, tel qu'écrit (« 45k€ » → 45000), avec sa période ; un seul montant → min = max ; rien d'écrit → null et inconnu. Jamais le chiffre d'affaires ni une « estimation » du site.
   adresse : l'adresse du lieu de travail si elle est écrite (« 48 Boulevard des Batignolles, 75017 Paris »), sinon null. Jamais le siège d'un groupe cité en passant.`;
 
-export function buildAnalysisPrompt(job: AnalysisJobInput, profile: AnalysisProfileInput): string {
+/**
+ * Consigne + profil (même texte d'une offre à l'autre, mis en cache chez Claude : relu à 10 % du prix) et annonce à part.
+ * Le cache ne reconnaît que le début identique : le profil placé avant l'annonce dans le même message n'était jamais relu.
+ */
+export function buildAnalysisPrompt(job: AnalysisJobInput, profile: AnalysisProfileInput): { system: string; user: string } {
   const salary =
     job.salaryMin || job.salaryMax
       ? `${job.salaryMin ?? "?"} à ${job.salaryMax ?? "?"} € brut par an`
       : "non indiqué";
   const place = [job.city, job.department ? `(${job.department})` : null].filter(Boolean).join(" ") || "non indiqué";
   const { atWork, inProjects } = levels(profile);
-  return `PROFIL DU CANDIDAT
+  const system = `${ANALYSIS_SYSTEM_PROMPT}
+
+PROFIL DU CANDIDAT
 - Compétences EN ENTREPRISE : ${atWork.join(", ") || "non renseignées"}
 - Compétences vues SEULEMENT EN PROJETS (pas en entreprise) : ${inProjects.join(", ") || "aucune"}
 - Technologies qu'il peut APPRENDRE VITE (absentes de son profil, choisies par lui) : ${profile.learnableSkills?.join(", ") || "aucune"}
 - Expérience visée : ${profile.experienceMin} à ${profile.experienceMax} ans
 - Contrats souhaités : ${profile.contracts.join(", ") || "non renseignés"}
 - Zones : ${profile.locations.join(", ") || "non renseignées"}
-${profile.cv ? `\nCV DU CANDIDAT\n"""\n${profile.cv.slice(0, MAX_CV)}\n"""\n` : ""}
-ANNONCE
+${profile.cv ? `\nCV DU CANDIDAT\n"""\n${profile.cv.slice(0, MAX_CV)}\n"""\n` : ""}`;
+  const user = `ANNONCE
 Titre : ${job.title}
 Entreprise : ${job.company ?? "non indiquée"}
 Lieu : ${place}
@@ -184,6 +197,7 @@ Texte de l'annonce${job.abridged ? " (EXTRAIT : l'annonce complète est plus lon
 """
 ${job.description.slice(0, profile.cv ? MAX_DESCRIPTION_WITH_CV : MAX_DESCRIPTION)}
 """`;
+  return { system, user };
 }
 
 /** Compétences du profil par niveau : en entreprise, ou seulement en projets. */
@@ -310,6 +324,16 @@ ${job.description}`,
   };
 }
 
+/** Fourchette de la note selon l'adéquation (celle de la consigne). */
+export const NOTE_RANGES: Record<JobAnalysisResult["adequation"], [number, number]> = { forte: [75, 100], moyenne: [45, 74], faible: [0, 40] };
+
+/** Note ramenée dans la fourchette de l'adéquation vérifiée par le code (le petit modèle se contredit, ou le code a corrigé l'adéquation). */
+export function checkNote(note: number | null, adequation: JobAnalysisResult["adequation"]): number | null {
+  if (note === null) return null;
+  const [min, max] = NOTE_RANGES[adequation];
+  return Math.min(max, Math.max(min, note));
+}
+
 /** Le niveau écrit dans le titre (« Développeur junior … ») l'emporte sur ce que le modèle a déduit. */
 function checkNiveau(r: JobAnalysisResult, title: string): JobAnalysisResult["niveau"] {
   const t = title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -349,7 +373,7 @@ export async function analyzeJobWithAi(
       : null;
   let lastError = "";
   for (let attempt = 0; attempt < 2; attempt++) {
-    const raw = await client.chatJson(ANALYSIS_SYSTEM_PROMPT, prompt, JOB_ANALYSIS_JSON_SCHEMA);
+    const raw = await client.chatJson(prompt.system, prompt.user, JOB_ANALYSIS_JSON_SCHEMA, { cache: "system" });
     const parsed = JobAnalysisSchema.safeParse(raw);
     if (parsed.success) {
       const required = skillNames(parsed.data.competences_obligatoires);
@@ -357,6 +381,7 @@ export async function analyzeJobWithAi(
       // « 0 an » sans « junior / débutant » écrit : rien n'est précisé (« early in your career » n'est pas une exigence).
       const e = parsed.data.experience_min_ans;
       const r = { ...parsed.data, ...classes, experience_min_ans: e === 0 && !BEGINNER.test(`${job.title}\n${job.description}`) ? null : e };
+      const adequation = checkAdequation({ ...r, niveau: checkNiveau(r, job.title) }, job, profile);
       return {
         result: {
           ...r,
@@ -375,7 +400,8 @@ export async function analyzeJobWithAi(
             .filter((p) => !wantedContract(p, profile.contracts))
             .slice(0, 6),
           niveau: checkNiveau(r, job.title),
-          adequation: checkAdequation({ ...r, niveau: checkNiveau(r, job.title) }, job, profile),
+          adequation,
+          note: checkNote(r.note, adequation),
         },
         model: client.model,
         durationMs: Date.now() - started,

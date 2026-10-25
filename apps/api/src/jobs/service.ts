@@ -1,6 +1,7 @@
 import { type ApplyChannel, type ApplyCv, JOB_STATUSES, type JobStatus, type Profile } from "@job-radar/shared";
 import { similarOffer } from "@job-radar/job-normalizer";
 import { DEFAULT_RULES, consultingFirm, detectSeniority, hashProfile, scoreJob, scoringInputFromJob, trainingOffered, type ScoreResult, type ScoringRules } from "@job-radar/scoring";
+import { checkNote } from "@job-radar/ai";
 import { distanceKm } from "../routes/leads";
 import { AI_SCORE_CAPS, type Adequation, type AiVerdict, analysisFitsJob, isAbridged, readVerdict } from "../ai-context";
 import { type JobEdits, type JobRow, type Stores, yearsText } from "../stores";
@@ -54,8 +55,8 @@ export type JobSummary = {
   training: boolean;
   /** Tes chances (sans IA), à côté de la note de compatibilité qu'elles ne changent pas. */
   chances: Chances;
-  /** Avis de l'IA locale (analyse à jour) ; `before` = score avant correction quand l'IA l'a baissé. */
-  ai: { adequation: Adequation; avis: string; before: number | null } | null;
+  /** Avis de l'IA (analyse à jour) ; `before` = score des mots-clés quand l'IA l'a changé ; `note` = sa note sur 100 (null : ancienne analyse). */
+  ai: { adequation: Adequation; avis: string; before: number | null; note: number | null } | null;
 };
 
 export type JobDetail = JobSummary & {
@@ -226,7 +227,11 @@ function toSummary(job: JobRow, s: ScoreResult, v: Verdict = null): JobSummary {
   const verdict =
     v && s.weakFit.length ? { ...v, adequation: "faible" as const } : v?.adequation === "forte" && s.notStrong.length ? { ...v, adequation: "moyenne" as const } : v;
   const cap = verdict ? AI_SCORE_CAPS[verdict.adequation] : 100;
-  const final = Math.min(s.final, cap);
+  // Note de l'IA : remplace la note par mots-clés. Mêmes bonus / malus, et les plafonds du code (contrat, langue…) restent.
+  const note = verdict ? checkNote(verdict.note ?? null, verdict.adequation) : null;
+  const points = s.adjustments.reduce((a, x) => a + x.points, 0);
+  const withNote = note === null ? s.final : Math.min(Math.max(0, Math.min(100, note + points)), s.capLabel ? s.final : 100);
+  const final = Math.min(withNote, cap);
   return {
     id: job.id,
     title: job.title,
@@ -248,7 +253,7 @@ function toSummary(job: JobRow, s: ScoreResult, v: Verdict = null): JobSummary {
     matchedSkills: s.matchedSkills,
     missingSkills: s.missingSkills,
     preferredSkills: s.preferredSkills,
-    ai: verdict ? { adequation: verdict.adequation, avis: verdict.avis, before: final < s.final ? s.final : null } : null,
+    ai: verdict ? { adequation: verdict.adequation, avis: verdict.avis, before: final !== s.final ? s.final : null, note } : null,
     abridged: isAbridged(job),
     training: textSignalsOf(job).training,
     chances: chancesOf(job, s, verdict, final),
@@ -406,19 +411,24 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       const scored = withAiInfo(job, verdict);
       const s = scoreOf(scored, profile, hash, verdict);
       const summary = toSummary(scored, s, verdict);
-      // Détail du calcul : note technique, bonus/malus, plafonds (règles, puis avis de l'IA), score final.
+      // Détail du calcul : note technique (ou note de l'IA), bonus/malus, plafonds (règles, puis avis de l'IA), score final.
+      const note = summary.ai?.note ?? null;
       const scoreSteps: ScoreStep[] = [
-        { kind: "base", label: `Technique ${s.breakdown.technical} % (stack principale)`, value: s.base },
+        note === null
+          ? { kind: "base", label: `Technique ${s.breakdown.technical} % (stack principale)`, value: s.base }
+          : { kind: "base", label: `Note de l'IA (mots-clés : ${s.final} %)`, value: note },
         ...s.adjustments.map((a) => ({ kind: "adjust" as const, label: a.label, value: a.points })),
       ];
       for (const l of s.liftedCaps) scoreSteps.push({ kind: "cap", label: `Plafond levé par la lecture de l'IA : ${l}`, value: s.final });
       if (s.capLabel) scoreSteps.push({ kind: "cap", label: `Plafond : ${s.capLabel}`, value: s.final });
-      if (summary.ai?.before != null) scoreSteps.push({ kind: "cap", label: `Plafond IA : adéquation ${summary.ai.adequation}`, value: summary.score.final });
+      if (note === null && summary.ai?.before != null) scoreSteps.push({ kind: "cap", label: `Plafond IA : adéquation ${summary.ai.adequation}`, value: summary.score.final });
       scoreSteps.push({ kind: "total", label: "Score", value: summary.score.final });
       const aiWarning =
-        summary.ai?.before != null
-          ? [`Score ramené de ${summary.ai.before} à ${summary.score.final} % par l'IA (adéquation ${summary.ai.adequation}) : ${summary.ai.avis}`]
-          : [];
+        summary.ai?.before == null
+          ? []
+          : note === null
+            ? [`Score ramené de ${summary.ai.before} à ${summary.score.final} % par l'IA (adéquation ${summary.ai.adequation}) : ${summary.ai.avis}`]
+            : [`Score de l'IA : ${summary.score.final} % au lieu de ${summary.ai.before} % par mots-clés (adéquation ${summary.ai.adequation}) : ${summary.ai.avis}`];
       return {
         ...summary,
         description: job.description,

@@ -56,7 +56,7 @@ export type JobSummary = {
   /** Tes chances (sans IA) : signaux affichés en étiquettes, `tryable` = onglet « À tenter ». */
   chances: { points: number; tags: string[]; tryable: boolean };
   /** Avis de l'IA locale ; `before` = score avant correction quand l'IA l'a baissé. */
-  ai: { adequation: "forte" | "moyenne" | "faible"; avis: string; before: number | null } | null;
+  ai: { adequation: "forte" | "moyenne" | "faible"; avis: string; before: number | null; note: number | null } | null;
 };
 
 /** Vérification automatique des meilleures offres affichées. */

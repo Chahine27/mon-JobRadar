@@ -15,6 +15,11 @@ const JOB = {
   description: "Pour l'un de nos clients, nous recherchons un développeur Java / Angular. 5 ans minimum. Kubernetes apprécié.",
 };
 const PROFILE = { skills: ["Vue.js", "TypeScript"], experienceMin: 0, experienceMax: 3, contracts: ["CDI"], locations: ["Oise (60)"] };
+/** Profil + annonce envoyés à l'IA, sans la consigne fixe. */
+const fullPrompt = (...a: Parameters<typeof buildAnalysisPrompt>) => {
+  const p = buildAnalysisPrompt(...a);
+  return p.system.replace(ANALYSIS_SYSTEM_PROMPT, "") + p.user;
+};
 const GOOD = {
   resume: "Développeur Java / Angular en mission chez un client d'Open.",
   missions: ["Développer en Java", "Développer en Java", "Faire les interfaces Angular"],
@@ -30,12 +35,22 @@ const GOOD = {
 
 describe("IA locale (Ollama)", () => {
   it("consigne : profil + annonce, sans rien inventer", () => {
-    const p = buildAnalysisPrompt(JOB, PROFILE);
+    const p = fullPrompt(JOB, PROFILE);
     expect(p).toContain("Compétences EN ENTREPRISE : Vue.js, TypeScript");
     expect(p).toContain("Compétences vues SEULEMENT EN PROJETS (pas en entreprise) : aucune");
     expect(p).toContain("Lieu : Levallois-Perret (92)");
     expect(p).toContain("Salaire : non indiqué");
     expect(p).toContain("Pour l'un de nos clients");
+  });
+
+  it("cache : consigne + profil identiques d'une offre à l'autre, l'annonce seulement dans la demande", () => {
+    const a = buildAnalysisPrompt(JOB, PROFILE);
+    const b = buildAnalysisPrompt({ ...JOB, title: "Développeur Vue.js", description: "Autre annonce." }, PROFILE);
+    expect(a.system).toBe(b.system);
+    expect(a.system.startsWith(ANALYSIS_SYSTEM_PROMPT)).toBe(true);
+    expect(a.system).toContain("Compétences EN ENTREPRISE : Vue.js, TypeScript");
+    expect(a.system).not.toContain("Pour l'un de nos clients");
+    expect(a.user).toContain("Pour l'un de nos clients");
   });
 
   it("appel à Ollama : format JSON imposé, sans « réflexion », mémoire 8k ; réponse nettoyée", async () => {
@@ -61,19 +76,21 @@ describe("IA locale (Ollama)", () => {
       competences_obligatoires: ["Java", "Angular ou React", "5 ans de développement Java en backend", "Angular ou React en front end chez le client final"],
       competences_bonus: ["Kubernetes", "Docker"],
       adequation: "moyenne",
+      note: 68.4,
     };
     const client = new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify(answer) } }) });
     const { result } = await analyzeJobWithAi(client, JOB, PROFILE);
     expect(result.competences_obligatoires).toEqual(["Java", "Angular ou React"]);
     expect(result.adequation).toBe("faible"); // 5 ans demandés, profil jusqu'à 3 ans
+    expect(result.note).toBe(40); // la note suit l'adéquation corrigée par le code
   });
 
   it("extrait (Adzuna) + CV : signalés à l'IA ; niveau du titre prioritaire ; avertissement « incomplète » en tête", async () => {
-    const p = buildAnalysisPrompt({ ...JOB, abridged: true }, { ...PROFILE, cv: "Alternance chez Banquo (banque)" });
+    const p = fullPrompt({ ...JOB, abridged: true }, { ...PROFILE, cv: "Alternance chez Banquo (banque)" });
     expect(p).toContain("EXTRAIT");
     expect(p).toContain("CV DU CANDIDAT");
     expect(p).toContain("Banquo");
-    expect(buildAnalysisPrompt(JOB, PROFILE)).not.toMatch(/EXTRAIT|CV DU CANDIDAT/);
+    expect(fullPrompt(JOB, PROFILE)).not.toMatch(/EXTRAIT|CV DU CANDIDAT/);
 
     const answer = { ...GOOD, niveau: "senior", points_attention: ["Secteur bancaire", "Annonce incomplète"] };
     const client = new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify(answer) } }) });
@@ -156,7 +173,7 @@ describe("points d'attention sur le contrat", () => {
       description: "Alternance / Apprentissage\nDurée du contrat : 12 mois",
     };
 
-    expect(buildAnalysisPrompt(job, PROFILE)).toContain("à vérifier dans le texte) : ALTERNANCE");
+    expect(fullPrompt(job, PROFILE)).toContain("à vérifier dans le texte) : ALTERNANCE");
     const { result } = await analyzeJobWithAi(client, job, PROFILE);
     expect(result.adequation).toBe("faible");
     expect(result.points_attention).toContain("Contrat ALTERNANCE hors de tes critères (tu cherches : CDI)");
@@ -189,7 +206,7 @@ describe("points d'attention sur le contrat", () => {
     };
     const client = new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify(answer) } }) });
 
-    const prompt = buildAnalysisPrompt(job, me);
+    const prompt = fullPrompt(job, me);
     expect(prompt).toContain("Compétences EN ENTREPRISE : Vue.js, Java, Spring Boot, PostgreSQL, SQL, Git");
     expect(prompt).toContain("Compétences vues SEULEMENT EN PROJETS (pas en entreprise) : Python, Docker, CI/CD, IA");
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("JAMAIS une « solide base »");
@@ -247,7 +264,7 @@ describe("technos à apprendre (formation proposée, poste junior, ta liste)", (
 
   it("la consigne et le profil donnés à l'IA parlent des technos à apprendre", () => {
     expect(ANALYSIS_SYSTEM_PROMPT).toMatch(/À APPRENDRE/);
-    expect(buildAnalysisPrompt(JOB, { ...JAVA, learnableSkills: ["Angular", "Go"] })).toContain("APPRENDRE VITE (absentes de son profil, choisies par lui) : Angular, Go");
+    expect(fullPrompt(JOB, { ...JAVA, learnableSkills: ["Angular", "Go"] })).toContain("APPRENDRE VITE (absentes de son profil, choisies par lui) : Angular, Go");
   });
 });
 

@@ -358,6 +358,28 @@ describe("détail du score cohérent avec l'IA", () => {
     expect(d.reasons).toContain("Compétences lues par l'IA (« plus » comptés à moitié)");
     expect(before.aiSkills).toBe(false);
   });
+
+  it("note de l'IA : remplace la note par mots-clés, garde les bonus/malus, reste dans la fourchette de l'adéquation", async () => {
+    const { req, aiState } = await setup();
+    const keywords = (await req("GET", "/api/jobs/j-vue")).json().score.final;
+    aiState.note = 62;
+    aiState.adequation = "moyenne";
+    await req("POST", "/api/jobs/j-vue/analysis");
+    const d = (await req("GET", "/api/jobs/j-vue")).json();
+    const points = d.scoreSteps.filter((st: { kind: string }) => st.kind === "adjust").reduce((a: number, st: { value: number }) => a + st.value, 0);
+    expect(d.scoreSteps[0]).toMatchObject({ kind: "base", label: `Note de l'IA (mots-clés : ${keywords} %)`, value: 62 });
+    expect(d.score.final).toBe(Math.min(75, Math.max(0, 62 + points)));
+    expect(d.ai).toMatchObject({ note: 62, before: keywords });
+
+    // 90 avec « faible » : le petit modèle se contredit, la note est ramenée à 40 au plus.
+    const other = await setup();
+    other.aiState.note = 90;
+    other.aiState.adequation = "faible";
+    await other.req("POST", "/api/jobs/j-vue/analysis");
+    const low = (await other.req("GET", "/api/jobs/j-vue")).json();
+    expect(low.ai.note).toBe(40);
+    expect(low.score.final).toBeLessThanOrEqual(40);
+  });
 });
 
 describe("offre sans description (ex. LinkedIn via JobScraper sans le détail)", () => {

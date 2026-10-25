@@ -14,7 +14,8 @@ export type AiStatus =
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
 /** cache : le début de la demande sera renvoyé tel quel (correction d'une lettre) ; seul Claude s'en sert. */
-export type ChatOptions = { temperature?: number; contextTokens?: number; cache?: boolean };
+/** cache (Claude) : true = consigne + première demande ; "system" = consigne seule (la demande change à chaque appel). */
+export type ChatOptions = { temperature?: number; contextTokens?: number; cache?: boolean | "system" };
 
 export const toTurns = (user: string | ChatTurn[]): ChatTurn[] => (typeof user === "string" ? [{ role: "user", content: user }] : user);
 
