@@ -28,63 +28,68 @@ const toMail = (m: ApplicationMailRow) => ({
   dismissed: m.dismissed,
 });
 
-/** Candidatures : sur une offre et spontanées, chacune avec son étape (déduite des mails reçus) et ses mails. */
+/** Candidatures : sur une offre et spontanées, chacune avec son étape (déduite des mails reçus) et ses mails. Lecture seule (aussi pour le serveur MCP). */
+export async function listApplications(stores: Stores, jobs: JobService, userId: string) {
+  const [offers, sent, leads, mails, cvs] = await Promise.all([
+    jobs.listApplications(userId),
+    stores.applications.listSent(),
+    stores.leads.list(),
+    stores.applicationMails.list(),
+    stores.tailoredCvs.exported(),
+  ]);
+  const mailsOf = (key: "jobId" | "spontaneousId", id: string) => mails.filter((m) => m[key] === id);
+  const leadById = new Map(leads.map((l) => [l.id, l]));
+  return {
+    jobs: offers.map((j) => {
+      const own = mailsOf("jobId", j.id);
+      // CV envoyé : ceux exportés au moment de « Postulé » (sinon les exportés, s'il n'y a pas eu de marque).
+      const own_cvs = cvs.filter((c) => c.jobId === j.id);
+      const sentCvs = own_cvs.some((c) => c.sentAt) ? own_cvs.filter((c) => c.sentAt) : own_cvs;
+      const stage = applicationStage(own, j.status === "REJECTED");
+      // Aucune nouvelle depuis 21 jours : refus de fait (le statut de l'offre ne change pas, une réponse le corrige).
+      const silent = noAnswer(stage, j.appliedAt, own);
+      return {
+        ...j,
+        stage: silent ? "REJECTED" : stage,
+        noAnswer: silent,
+        mails: own.map(toMail),
+        cvs: sentCvs.map((c) => ({ template: c.template, exportedAt: c.exportedAt, sentAt: c.sentAt })),
+      };
+    }),
+    spontaneous: sent.flatMap((s) => {
+      const lead = leadById.get(s.leadId);
+      if (!lead) return [];
+      const own = mailsOf("spontaneousId", s.id);
+      return [
+        {
+          id: s.id,
+          leadId: s.leadId,
+          company: lead.name,
+          city: lead.city,
+          department: lead.department,
+          sentAt: s.sentAt,
+          sentTo: s.sentTo,
+          // Rien à postuler sur leur site : candidature close.
+          stage: s.noOpeningAt ? "REJECTED" : applicationStage(own, false, !!s.appliedOnSiteAt),
+          appliedOnSiteAt: s.appliedOnSiteAt,
+          noOpeningAt: s.noOpeningAt,
+          followedUpAt: s.followedUpAt,
+          mails: own.map(toMail),
+        },
+      ];
+    }),
+  };
+}
+
+/** Candidatures. */
 export async function applicationRoutes(app: FastifyInstance, opts: { stores: Stores; jobs: JobService; mailTracker?: MailTracker }) {
   const { stores, jobs } = opts;
   app.addHook("preHandler", requireAuth);
 
-  app.get("/api/applications", async (request) => {
-    const [offers, sent, leads, mails, cvs] = await Promise.all([
-      jobs.listApplications(request.userId!),
-      stores.applications.listSent(),
-      stores.leads.list(),
-      stores.applicationMails.list(),
-      stores.tailoredCvs.exported(),
-    ]);
-    const mailsOf = (key: "jobId" | "spontaneousId", id: string) => mails.filter((m) => m[key] === id);
-    const leadById = new Map(leads.map((l) => [l.id, l]));
-    return {
-      jobs: offers.map((j) => {
-        const own = mailsOf("jobId", j.id);
-        // CV envoyé : ceux exportés au moment de « Postulé » (sinon les exportés, s'il n'y a pas eu de marque).
-        const own_cvs = cvs.filter((c) => c.jobId === j.id);
-        const sentCvs = own_cvs.some((c) => c.sentAt) ? own_cvs.filter((c) => c.sentAt) : own_cvs;
-        const stage = applicationStage(own, j.status === "REJECTED");
-        // Aucune nouvelle depuis 21 jours : refus de fait (le statut de l'offre ne change pas, une réponse le corrige).
-        const silent = noAnswer(stage, j.appliedAt, own);
-        return {
-          ...j,
-          stage: silent ? "REJECTED" : stage,
-          noAnswer: silent,
-          mails: own.map(toMail),
-          cvs: sentCvs.map((c) => ({ template: c.template, exportedAt: c.exportedAt, sentAt: c.sentAt })),
-        };
-      }),
-      spontaneous: sent.flatMap((s) => {
-        const lead = leadById.get(s.leadId);
-        if (!lead) return [];
-        const own = mailsOf("spontaneousId", s.id);
-        return [
-          {
-            id: s.id,
-            leadId: s.leadId,
-            company: lead.name,
-            city: lead.city,
-            department: lead.department,
-            sentAt: s.sentAt,
-            sentTo: s.sentTo,
-            // Rien à postuler sur leur site : candidature close.
-            stage: s.noOpeningAt ? "REJECTED" : applicationStage(own, false, !!s.appliedOnSiteAt),
-            appliedOnSiteAt: s.appliedOnSiteAt,
-            noOpeningAt: s.noOpeningAt,
-            followedUpAt: s.followedUpAt,
-            mails: own.map(toMail),
-          },
-        ];
-      }),
-      tracking: opts.mailTracker?.status() ?? { configured: false, running: false, lastCheckAt: null, lastError: null },
-    };
-  });
+  app.get("/api/applications", async (request) => ({
+    ...(await listApplications(stores, jobs, request.userId!)),
+    tracking: opts.mailTracker?.status() ?? { configured: false, running: false, lastCheckAt: null, lastError: null },
+  }));
 
   app.post("/api/applications/check", async (_request, reply) => {
     if (!opts.mailTracker?.status().configured) {

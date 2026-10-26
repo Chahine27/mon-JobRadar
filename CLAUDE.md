@@ -18,6 +18,7 @@ Monorepo pnpm, TypeScript, Node >= 20 (24 en CI et sur le serveur). Code, commen
 - `apps/api` : API Fastify (lance aussi la collecte planifiée et la renormalisation au démarrage).
 - `apps/web` : site Vue 3 + Vite.
 - `apps/worker` : scripts de collecte et outils en ligne de commande (`pnpm collect`, `*:test`).
+- `apps/api/src/mcp.ts` : serveur MCP en lecture seule (offres, notes, suivi des candidatures) pour Claude Code, lancé sur le serveur par SSH/Tailscale (`mcp-server.ts`), base ouverte en lecture seule.
 - `packages/source-connectors` : un connecteur par site d'offres. `job-normalizer` : nettoyage des offres. `scoring` : note sur 100. `pipeline` : collecte → normalisation → dédoublonnage → score (`renormalize.ts`).
 - `packages/ai` : appels IA. `cover-letter.ts` écrit les lettres, `letter-review.ts` les relit par règles, `job-analysis.ts` donne l'avis sur une offre, `mail-reading.ts` trie les mails, `cloud.ts` gère la chaîne de modèles.
 - `packages/db` : Prisma 7 + PostgreSQL. `cv-tailor` / `cv-render` : CV adapté et PDF. `notifications`, `routing` (temps de trajet), `skills`, `shared`.

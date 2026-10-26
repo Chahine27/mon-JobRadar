@@ -26,6 +26,7 @@
     "@job-radar/shared": "workspace:*",
     "@job-radar/skills": "workspace:*",
     "@job-radar/source-connectors": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@node-rs/argon2": "2.2.1",
     "dotenv": "18.0.4",
     "fastify": "5.12.5",
