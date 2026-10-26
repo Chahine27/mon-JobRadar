@@ -109,16 +109,32 @@ export async function buildMcpServer(databaseUrl: string, env: Record<string, st
   server.registerTool(
     "suivi_candidatures",
     {
-      description: "Candidatures envoyées (sur offre et spontanées) avec leur étape (envoyée, entretien, refus…) et les mails reçus.",
-      inputSchema: {},
+      description:
+        "Candidatures envoyées (sur offre et spontanées) : total par étape (SENT, ACK, INTERVIEW, OFFER, REJECTED…), puis les plus récentes, " +
+        "une ligne chacune avec le dernier mail reçu. Détail d'une offre : voir_offre.",
+      inputSchema: {
+        stage: z.string().max(20).optional().describe("seulement cette étape, ex. INTERVIEW"),
+        limit: z.number().int().min(1).max(100).default(30),
+      },
       annotations: readOnly,
     },
-    async () => {
+    async ({ stage, limit }) => {
       const { jobs: offers, spontaneous } = await listApplications(stores, jobs, userId);
-      return json({
-        offers: offers.map((o) => ({ ...brief(o), appliedAt: o.appliedAt, stage: o.stage, noAnswer: o.noAnswer, mails: o.mails.map(({ url, ...m }) => m) })),
-        spontaneous,
-      });
+      // Une ligne par candidature : tout renvoyer (mails compris) dépasse ce que Claude Code accepte (~150 000 caractères).
+      const lastMail = (mails: Array<{ kind: string; detail: string | null; summary: string | null; receivedAt: Date; dismissed: boolean }>) => {
+        const m = mails.filter((x) => !x.dismissed).at(-1);
+        return m ? { kind: m.kind, detail: m.detail, summary: m.summary, receivedAt: m.receivedAt } : null;
+      };
+      const all = [
+        ...offers.map((o) => ({ type: "offre", id: o.id, company: o.company, title: o.title, score: o.score.final, date: o.appliedAt, stage: o.stage, noAnswer: o.noAnswer, lastMail: lastMail(o.mails) })),
+        ...spontaneous.map((s) => ({ type: "spontanée", id: s.id, company: s.company, title: null, score: null, date: s.sentAt, stage: s.stage, noAnswer: false, lastMail: lastMail(s.mails) })),
+      ];
+      const byStage: Record<string, number> = {};
+      for (const x of all) byStage[x.stage] = (byStage[x.stage] ?? 0) + 1;
+      const kept = all
+        .filter((x) => !stage || x.stage === stage.toUpperCase())
+        .sort((x, y) => new Date(y.lastMail?.receivedAt ?? y.date ?? 0).getTime() - new Date(x.lastMail?.receivedAt ?? x.date ?? 0).getTime());
+      return json({ total: all.length, byStage, shown: Math.min(limit, kept.length), of: kept.length, applications: kept.slice(0, limit) });
     },
   );
 

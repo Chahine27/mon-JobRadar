@@ -34,7 +34,7 @@ describe("serveur MCP (base réelle, lecture seule)", () => {
     const detail = JSON.parse(text(await client.callTool({ name: "voir_offre", arguments: { id: list.offers[0].id } })));
     expect(detail.scoreSteps.length).toBeGreaterThan(0);
     const follow = JSON.parse(text(await client.callTool({ name: "suivi_candidatures", arguments: {} })));
-    expect(follow).toEqual({ offers: [], spontaneous: [] });
+    expect(follow).toMatchObject({ total: 0, applications: [] });
     await close();
   });
 
