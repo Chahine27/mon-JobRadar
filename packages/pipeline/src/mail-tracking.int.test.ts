@@ -22,6 +22,24 @@ const inboxOf = (mails: InboxMail[]): Inbox & { calls: number } => {
 };
 
 describe("suivi des candidatures par les mails (base réelle)", () => {
+  it("réponse enregistrée en même temps par un autre passage (API pendant mails:retrack) : sautée, pas d'arrêt", async () => {
+    const job = await prisma.job.create({
+      data: { fingerprint: "race", contentHash: "h", title: "Développeur Vue.js", company: "Escape", description: "", technologies: [], status: "APPLIED" },
+    });
+    await prisma.jobEvent.create({ data: { jobId: job.id, type: "STATUS_CHANGED", toValue: "APPLIED", createdAt: new Date(Date.now() - 86_400_000) } });
+    const inbox = inboxOf([mail({ messageId: "<race@x>", text: "Escape : nous avons bien reçu votre candidature." })]);
+    const r = await trackApplicationMails({
+      prisma, inbox, self: [],
+      // Pendant que l'IA lit, l'autre passage enregistre le même mail.
+      classify: async () => {
+        await prisma.applicationMail.create({ data: { messageId: "<race@x>", jobId: job.id, kind: "ACK", subject: "x", fromAddress: "x@y", receivedAt: new Date() } });
+        return { index: 0, verdict: { kind: "ACK", detail: null }, summary: "Reçue.", certain: true };
+      },
+    });
+    expect(r.recorded).toBe(0);
+    expect(await prisma.applicationMail.count()).toBe(1);
+  });
+
   it("audit du 26/10 : refus Theodo sans nom de poste répartis, autre poste non rattaché, « pas d'opportunité » = refus", async () => {
     const DAY = 86_400_000;
     const applied = new Date(Date.now() - 5 * DAY);

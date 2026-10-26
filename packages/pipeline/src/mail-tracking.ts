@@ -494,6 +494,18 @@ export async function trackApplicationMails(opts: {
     opts.ignored?.add(mail.messageId);
     known.add(mail.messageId);
   };
+  /**
+   * Enregistre une réponse. false = déjà en base : un autre passage l'a lue en même temps (l'API au démarrage pendant
+   * « pnpm mails:retrack ») ; on la saute au lieu de tout arrêter.
+   */
+  const save = (data: Parameters<typeof prisma.applicationMail.create>[0]["data"]) =>
+    prisma.applicationMail.create({ data }).then(
+      () => true,
+      (err: unknown) => {
+        if ((err as { code?: string }).code === "P2002") return false;
+        throw err;
+      },
+    );
   /** Mail gardé sans lien (jamais affiché), quand il a changé quelque chose (adresse rejetée, personne partie…). */
   const remember = (mail: InboxMail, kind: string, detail: string | null) =>
     prisma.applicationMail.create({
@@ -553,17 +565,15 @@ export async function trackApplicationMails(opts: {
     const awayApp = away ? (candidates.length === 1 ? candidates[0]! : matchApplication(full, apps)) : null;
     if (away && awayApp) {
       const when = away.back.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
-      await prisma.applicationMail.create({
-        data: {
-          messageId: mail.messageId,
-          ...(awayApp.kind === "job" ? { jobId: awayApp.id } : { spontaneousId: awayApp.id }),
-          kind: "AWAY",
-          detail: isoDay(away.back),
-          summary: `Absent : relance possible à partir du ${when}.${away.contact ? ` Autre contact donné : ${away.contact}.` : ""}`,
-          subject: mail.subject.slice(0, 500),
-          fromAddress: mail.from.slice(0, 320),
-          receivedAt: mail.date,
-        },
+      await save({
+        messageId: mail.messageId,
+        ...(awayApp.kind === "job" ? { jobId: awayApp.id } : { spontaneousId: awayApp.id }),
+        kind: "AWAY",
+        detail: isoDay(away.back),
+        summary: `Absent : relance possible à partir du ${when}.${away.contact ? ` Autre contact donné : ${away.contact}.` : ""}`,
+        subject: mail.subject.slice(0, 500),
+        fromAddress: mail.from.slice(0, 320),
+        receivedAt: mail.date,
       });
       known.add(mail.messageId);
       report.matched++;
@@ -613,7 +623,7 @@ export async function trackApplicationMails(opts: {
     if (app.kind === "job" && samePost(mail, app.title) === false) {
       const other = candidates.find((a) => a.kind === "job" && samePost(mail, a.title) === true);
       if (!other) {
-        await remember(mail, "OTHER_POST", postInMail(mail)!.slice(0, 200));
+        await save({ messageId: mail.messageId, kind: "OTHER_POST", detail: postInMail(mail)!.slice(0, 200), subject: mail.subject.slice(0, 500), fromAddress: mail.from.slice(0, 320), receivedAt: mail.date, dismissed: true });
         known.add(mail.messageId);
         continue;
       }
@@ -681,20 +691,19 @@ export async function trackApplicationMails(opts: {
       }
     }
 
-    await prisma.applicationMail.create({
-      data: {
-        messageId: mail.messageId,
-        ...(app.kind === "job" ? { jobId: app.id } : { spontaneousId: app.id }),
-        kind: verdict.kind,
-        detail: verdict.detail,
-        summary,
-        needsReview: review,
-        subject: mail.subject.slice(0, 500),
-        fromAddress: mail.from.slice(0, 320),
-        receivedAt: mail.date,
-      },
+    const fresh = await save({
+      messageId: mail.messageId,
+      ...(app.kind === "job" ? { jobId: app.id } : { spontaneousId: app.id }),
+      kind: verdict.kind,
+      detail: verdict.detail,
+      summary,
+      needsReview: review,
+      subject: mail.subject.slice(0, 500),
+      fromAddress: mail.from.slice(0, 320),
+      receivedAt: mail.date,
     });
     known.add(mail.messageId);
+    if (!fresh) continue;
     seen.add(dupKey(app.id, mail.from, verdict.kind, mail.date));
     app.senders = [...(app.senders ?? []), mail.from];
     app.kinds = [...(app.kinds ?? []), verdict.kind];
