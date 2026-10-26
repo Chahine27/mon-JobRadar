@@ -11,7 +11,7 @@ import "./env"; // charge .env
 import { aiChain, readApplicationMailWithAi } from "@job-radar/ai";
 import { createPrismaClient } from "@job-radar/db";
 import { createImapInbox, imapHostFrom } from "@job-radar/notifications";
-import { trackApplicationMails } from "@job-radar/pipeline";
+import { type Inbox, trackApplicationMails } from "@job-radar/pipeline";
 
 const e = process.env;
 const apply = process.argv.includes("--apply");
@@ -35,14 +35,32 @@ try {
     if (!inbox.isConfigured()) throw new Error("Boîte mail non configurée (SMTP_USER / SMTP_PASSWORD dans .env)");
     await prisma.applicationMail.deleteMany({ where });
     const mailAi = aiChain(e, "mail", (m) => console.log(m));
-    const r = await trackApplicationMails({
-      prisma,
-      inbox,
-      full: true,
-      self: [e.SMTP_USER, e.NOTIFY_EMAIL_TO].map((a) => a?.trim()).filter((a): a is string => !!a),
-      classify: (m, candidates) => readApplicationMailWithAi(mailAi, m, candidates),
-      log: (m) => console.log(m),
-    });
+    // La boîte rend 300 mails au plus par passage : on enchaîne les passages, chacun sans les mails déjà lus avant,
+    // jusqu'à ce qu'il n'y ait plus rien (sinon seuls les 300 plus récents sont relus).
+    const read = new Set<string>();
+    const paged: Inbox = {
+      async fetchNew(o) {
+        const r = await inbox.fetchNew({ ...o, skip: (m) => read.has(m.messageId) || !!o.skip?.(m) });
+        for (const m of r.mails) read.add(m.messageId);
+        return r;
+      },
+    };
+    const r = { read: 0, recorded: 0, rejected: 0 };
+    for (let pass = 1; pass <= 20; pass++) {
+      const p = await trackApplicationMails({
+        prisma,
+        inbox: paged,
+        full: true,
+        self: [e.SMTP_USER, e.NOTIFY_EMAIL_TO].map((a) => a?.trim()).filter((a): a is string => !!a),
+        classify: (m, candidates) => readApplicationMailWithAi(mailAi, m, candidates),
+        log: (m) => console.log(m),
+      });
+      r.read += p.read;
+      r.recorded += p.recorded;
+      r.rejected += p.rejected;
+      console.log(`Passage ${pass} : ${p.read} mail(s) lu(s), ${p.recorded} réponse(s) rattachée(s).`);
+      if (!p.read) break;
+    }
     // Refus qui ne lui est plus rattaché : l'offre redevient « Postulé » (un nouveau refus sûr l'aurait déjà repassée « Refusée »).
     let reopened = 0;
     for (const jobId of rejectedJobs) {

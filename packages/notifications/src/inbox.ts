@@ -108,19 +108,28 @@ export function createImapInbox(cfg: InboxConfig) {
             // Relecture : les plus récents d'abord (sinon les mêmes 300 anciens à chaque passage).
             let uids = (found || [])
               .filter((u) => !cursor || opts.rescanSince || u > cursor.lastUid)
-              .sort((a, b) => (opts.rescanSince ? b - a : a - b))
-              .slice(0, MAX_PER_FOLDER);
+              .sort((a, b) => (opts.rescanSince ? b - a : a - b));
             let lastUid = cursor?.lastUid ?? 0;
-            for (const u of uids) lastUid = Math.max(lastUid, u);
-            if (uids.length && opts.skip) {
-              // Enveloppe seule (léger) : on ne télécharge pas ce qui est déjà traité ni tes envois (CV et lettre en PDF).
-              const keep: number[] = [];
-              for await (const msg of client.fetch(uids, { uid: true, envelope: true }, { uid: true })) {
+            // Enveloppe seule (léger) : on ne télécharge pas ce qui est déjà traité ni tes envois (CV et lettre en PDF).
+            const unseen = async (list: number[]) => {
+              if (!list.length || !opts.skip) return list;
+              const keep = new Set<number>();
+              for await (const msg of client.fetch(list, { uid: true, envelope: true }, { uid: true })) {
                 const id = msg.envelope?.messageId ?? "";
                 const from = msg.envelope?.from?.[0]?.address ?? "";
-                if (!id || !opts.skip({ messageId: id, from })) keep.push(msg.uid);
+                if (!id || !opts.skip({ messageId: id, from })) keep.add(msg.uid);
               }
-              uids = keep;
+              return list.filter((u) => keep.has(u));
+            };
+            if (opts.rescanSince) {
+              // Relecture : les déjà traités sont écartés AVANT la coupe, sinon chaque passage relit les mêmes 300 récents
+              // et les plus anciens ne sont jamais atteints.
+              for (const u of uids) lastUid = Math.max(lastUid, u);
+              uids = (await unseen(uids)).slice(0, MAX_PER_FOLDER);
+            } else {
+              uids = uids.slice(0, MAX_PER_FOLDER);
+              for (const u of uids) lastUid = Math.max(lastUid, u);
+              uids = await unseen(uids);
             }
             if (uids.length) {
               for await (const msg of client.fetch(uids, { uid: true, source: true }, { uid: true })) {
