@@ -117,7 +117,7 @@ export function classifyMail(subject: string, text: string): MailVerdict | "AMBI
 
 /** Alertes emploi, newsletters, « candidature consultée » : beaucoup de « candidature » / « offre », aucune réponse. */
 const NOISE_FROM = /jobalert|job-alerts|jobs-listings|alerte?s?@|newsletter|digest|news@|marketing|info@welcometothejungle|noreply@glassdoor|jobs@indeed\.com|alert@indeed/;
-const NOISE_SUBJECT = /a ete consultee|a ete vue|was viewed|has been viewed|nouvelles offres|dernieres offres|offres? recommandees?|selectionnees? pour (vous|toi)|ils recrutent|recrutent en ce moment|new jobs|offres? (qui|pour) (vous|toi)|jobs? (you may|for you)|alerte emploi|job alert|creation de (votre|ton) compte|activ(ez|e|er) (votre|ton) compte|verify your (email|account)|mot de passe|password/;
+const NOISE_SUBJECT = /a ete consultee|avez[- ]vous finalise|a ete vue|was viewed|has been viewed|nouvelles offres|dernieres offres|offres? recommandees?|selectionnees? pour (vous|toi)|ils recrutent|recrutent en ce moment|new jobs|offres? (qui|pour) (vous|toi)|jobs? (you may|for you)|alerte emploi|job alert|creation de (votre|ton) compte|activ(ez|e|er) (votre|ton) compte|verify your (email|account)|mot de passe|password/;
 
 export function isNoise(mail: Pick<InboxMail, "from" | "subject">, self: string[]): boolean {
   const from = mail.from.toLowerCase();

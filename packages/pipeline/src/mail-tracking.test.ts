@@ -326,3 +326,9 @@ describe("audit du 26/10 : intitulé écrit au féminin et au masculin", () => {
     expect(samePost(refus, "Développeur Full-Stack")).toBe(true);
   });
 });
+
+describe("audit du 26/10 : relance HelloWork", () => {
+  it("« Avez vous finalisé votre candidature… » : un rappel du site d'emploi, pas une réponse (lu comme un entretien chez BLG Mobility)", () => {
+    expect(isNoise({ from: "emploi@emails.hellowork.com", subject: "Avez vous finalisé votre candidature au poste de Développeur Node.Js - Intégrations & Apis H/F" }, [])).toBe(true);
+  });
+});
