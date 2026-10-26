@@ -1,7 +1,8 @@
 /**
  * Serveur MCP en LECTURE SEULE : offres, notes et suivi des candidatures, pour Claude Code.
  * Pas de port ouvert : Claude Code le lance sur le serveur par SSH (donc par Tailscale), échange sur stdin/stdout.
- *   claude mcp add --scope user jobradar -- ssh jobradar "bash -lc 'cd ~/jobradar/apps/api && npx tsx src/mcp-server.ts'"
+ *   claude mcp add --scope user jobradar -- "C:\Program Files\Git\usr\bin\ssh.exe" jobradar "bash -lc 'cd ~/jobradar/apps/api && node_modules/.bin/tsx src/mcp-server.ts'"
+ *   (ssh de Git : celui de Windows refuse ~/.ssh/config, dont les droits incluent un autre compte)
  * Lecture seule garantie par la base elle-même (transactions en lecture seule), pas seulement par le code.
  * Aucun appel IA : les notes et avis viennent de la base. Rien ne s'écrit sur stdout hors protocole.
  */
