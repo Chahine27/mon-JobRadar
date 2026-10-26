@@ -284,7 +284,7 @@ function titleOverlap(mail: InboxMail, title: string): number {
 }
 
 /** Mots trop courants dans les intitulés pour distinguer deux postes. */
-const GENERIC_WORD = /^(developpeur|developpeuse|developer|euse|engineer|ingenieur|software|full|stack|fullstack|junior|senior|confirme|confirmed|cdi|cdd|stage|alternance|paris|france|remote|it|nb|x|h|f|the|and|for|en|de|des|du|la|le|les|et|pour|avec|chez)$/;
+const GENERIC_WORD = /^(developpeur|developpeuse|developer|euse|se|rice|trice|ere|e|engineer|ingenieur|software|full|stack|fullstack|junior|senior|confirme|confirmed|cdi|cdd|stage|alternance|paris|france|remote|it|nb|x|h|f|the|and|for|en|de|des|du|la|le|les|et|pour|avec|chez)$/;
 const distinctive = (words: string[]) => words.filter((w) => !GENERIC_WORD.test(w));
 
 const POST_PATTERNS = [

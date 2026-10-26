@@ -319,3 +319,10 @@ describe("audit du 26/10 : rattachement", () => {
     expect(careerSiteUrl({ text: "Bonjour,\nToutes nos offres d'emploi sont disponibles sur Welcome to the Jungle, vous pouvez les consulter ici : https://www.welcometothejungle.com/fr/companies/partoo/jobs" })).toBe("https://www.welcometothejungle.com/fr/companies/partoo/jobs");
   });
 });
+
+describe("audit du 26/10 : intitulé écrit au féminin et au masculin", () => {
+  it("« Développeur/se Full-Stack » (Advanced Schema) est bien « Développeur Full-Stack »", () => {
+    const refus = { subject: "Retour candidature - Développeur/se Full-Stack chez Advanced Schema", text: "Je vous contacte suite à votre candidature au poste de Développeur/se Full-Stack chez Advanced Schema." };
+    expect(samePost(refus, "Développeur Full-Stack")).toBe(true);
+  });
+});

@@ -18,7 +18,11 @@ const apply = process.argv.includes("--apply");
 const prisma = createPrismaClient();
 // Même fenêtre que le clic « Actualiser » (60 jours) : au-delà, la boîte n'est pas relue et rien n'est effacé.
 const since = new Date(Date.now() - 60 * 86_400_000);
-const where = { dismissed: false, receivedAt: { gte: since }, kind: { in: ["ACK", "INTERVIEW", "OFFER", "REJECTION", "CAREER_SITE"] } };
+// Réponses reconnues, et mails gardés sans lien parce qu'ils nommaient un autre poste (règle qui a pu changer depuis).
+const where = {
+  receivedAt: { gte: since },
+  OR: [{ dismissed: false, kind: { in: ["ACK", "INTERVIEW", "OFFER", "REJECTION", "CAREER_SITE"] } }, { kind: "OTHER_POST" }],
+};
 try {
   const mails = await prisma.applicationMail.findMany({ where, select: { kind: true, jobId: true, job: { select: { status: true } } } });
   const rejectedJobs = [...new Set(mails.filter((m) => m.kind === "REJECTION" && m.job?.status === "REJECTED").map((m) => m.jobId!))];

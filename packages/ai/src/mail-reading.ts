@@ -26,7 +26,7 @@ const SYSTEM = `Tu lis un mail reçu par un candidat et tu dis s'il répond à l
   - Le mail ne nomme pas le poste et plusieurs candidatures chez cette entreprise conviennent : donne la plus probable (la plus récente) et certain = false. Ne réponds pas 0 dans ce cas.
   - Un outil de recrutement (Welcome to the Jungle, Teamtailor, Lever…) envoie pour beaucoup d'entreprises : fie-toi au nom de l'entreprise et au poste écrits dans le mail, pas à l'expéditeur.
 - type :
-  - accuse_reception : candidature bien reçue / en cours d'étude, sans décision ni rendez-vous.
+  - accuse_reception : candidature bien reçue / en cours d'étude, sans décision ni rendez-vous. Aussi « complétez votre dossier », un questionnaire en ligne à remplir ou un compte à confirmer : c'est encore l'envoi de la candidature.
   - entretien : on propose un entretien, un appel, une rencontre, ou on demande ses disponibilités pour se voir.
   - test_technique : on envoie un test, un exercice, un cas pratique à faire.
   - demande_informations : on demande des informations (prétentions salariales, date de disponibilité, CV à jour…).
