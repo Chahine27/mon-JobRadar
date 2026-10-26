@@ -182,7 +182,7 @@ export function isHelpdeskReply(mail: Pick<InboxMail, "from" | "fromName" | "sub
 }
 
 const CAREER =
-  /(retrouver|consulter|voir|postuler|candidater|deposer|disponibles?).{0,80}(offres|sur (le|notre) site|carrieres?|jobs|recrutement|careers?)|(apply|applications?).{0,40}(website|careers? (page|site)|portal)/;
+  /(retrouver|consulter|voir|postuler|candidater|deposer|disponibles?).{0,80}(offres|sur (le|notre) site|carrieres?|jobs|recrutement|careers?|welcome ?to ?the ?jungle)|(apply|applications?).{0,40}(website|careers? (page|site)|portal)/;
 
 /** Réponse qui renvoie vers le site carrière (« retrouvez nos offres sur … ») : le lien, ou null. */
 /**
@@ -237,7 +237,8 @@ const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
 // ───────── Association à une candidature ─────────
 
 /** `senders` : adresses dont on a déjà reconnu un mail pour cette candidature (même outil de recrutement). */
-export type JobApplicationRef = { kind: "job"; id: string; company: string | null; title: string; since: Date; senders?: string[] };
+/** `kinds` : genres de réponses déjà reçues pour cette candidature (ACK, REJECTION…). */
+export type JobApplicationRef = { kind: "job"; id: string; company: string | null; title: string; since: Date; senders?: string[]; kinds?: string[] };
 export type SpontaneousRef = {
   kind: "spontaneous";
   id: string;
@@ -246,6 +247,7 @@ export type SpontaneousRef = {
   messageId: string | null;
   sentTo: string | null;
   senders?: string[];
+  kinds?: string[];
 };
 export type ApplicationRef = JobApplicationRef | SpontaneousRef;
 
@@ -281,6 +283,59 @@ function titleOverlap(mail: InboxMail, title: string): number {
   return words.filter((w) => hay.includes(` ${w} `)).length;
 }
 
+/** Mots trop courants dans les intitulés pour distinguer deux postes. */
+const GENERIC_WORD = /^(developpeur|developpeuse|developer|euse|engineer|ingenieur|software|full|stack|fullstack|junior|senior|confirme|confirmed|cdi|cdd|stage|alternance|paris|france|remote|it|nb|x|h|f|the|and|for|en|de|des|du|la|le|les|et|pour|avec|chez)$/;
+const distinctive = (words: string[]) => words.filter((w) => !GENERIC_WORD.test(w));
+
+const POST_PATTERNS = [
+  /\bposte (?:de |d'|:)\s*["«“]?\s*(.{3,90}?)\s*["»”]?\s*(?:[,.!;]|\s+chez\s|\s+au sein|\s+et\s|\s+a\s|\s+localise|$)/,
+  /\bcandidature (?:pour|au) (?:le )?poste (?:de |d'|:)?\s*["«“]?\s*(.{3,90}?)\s*["»”]?\s*(?:[,.!;]|\s+chez\s|\s+au sein|\s+et\s|$)/,
+  /\b(?:l'|notre |votre )offre\b(?: d'emploi)?\s*(?::|de\s)?\s*["«“]?\s*(.{3,90}?)\s*["»”]?\s*(?:[,.!;]|\s+chez\s|\s+au sein|\s+n'est|\s+est\s|$)/,
+  /\bapplication (?:received )?for (?:the )?["«“]?(.{3,90}?)["»”]?(?: role| position)?\s*(?:[,.!;]|\s+at\s|\s+-\s|$)/,
+];
+
+/** Intitulé du poste écrit dans le mail (« pour le poste de X », « l'offre X », « application for X »), ou null. */
+export function postInMail(mail: Pick<InboxMail, "subject" | "text">): string | null {
+  for (const line of [mail.subject, ...decodeEntities(mail.text.slice(0, 3000)).split("\n")]) {
+    const l = plain(line).replace(/\s+/g, " ");
+    for (const re of POST_PATTERNS) {
+      const m = l.match(re);
+      if (m && comparable(m[1]).length >= 3) return m[1]!;
+    }
+  }
+  return null;
+}
+
+/**
+ * Le poste écrit dans le mail est-il celui de la candidature ? null = aucun poste lisible dans le mail.
+ * Ses mots distinctifs (« ai native » dans « AI-Native Software Engineer ») doivent être à moitié dans l'intitulé ;
+ * sans mot distinctif (« Développeur Full Stack Junior »), tous ses mots comptent.
+ */
+export function samePost(mail: Pick<InboxMail, "subject" | "text">, title: string): boolean | null {
+  const post = postInMail(mail);
+  if (!post) return null;
+  const words = comparable(post).split(" ").filter(Boolean);
+  const pool = distinctive(words).length ? distinctive(words) : words;
+  const inTitle = new Set(comparable(title).split(" "));
+  return pool.filter((w) => inTitle.has(w)).length / pool.length >= 0.5;
+}
+
+/** L'intitulé complet de l'offre est écrit dans le mail (nom d'entreprise différent : CNRS pour un labo, « Manhattan »). */
+function titleInMail(mail: InboxMail, title: string): boolean {
+  const t = comparable(title);
+  const words = t.split(" ");
+  if (words.length < 3 || !distinctive(words).some((w) => w.length >= 3)) return false;
+  return ` ${comparable(`${mail.subject} ${mail.text.slice(0, 6000)}`)} `.includes(` ${t} `);
+}
+
+/** Réponse (« Re: », « TR: », « Fwd: ») venue du domaine de l'adresse où la spontanée est partie (rh@ → recrutement@). */
+const isReply = (subject: string) => /^\s*(re|tr|fwd?|aw)\s*:/i.test(subject);
+const sameDomain = (a: SpontaneousRef, mail: InboxMail) =>
+  !!a.sentTo && isReply(mail.subject) && !PUBLIC_MAIL.test(domainOf(a.sentTo)) && domainOf(a.sentTo) === domainOf(mail.from);
+
+/** Réponse d'une entreprise à une spontanée : « pas de poste », « aucune opportunité », « nous ne recrutons pas » = refus. */
+const NO_OPENING = /malheureusement|(pas|aucune?) (d'|de )?(poste|besoin|ouverture|opportunite|offre)s?\b|ne recrut(ons|e) pas/;
+
 const JOB_MARGIN_MS = 7 * 86_400_000;
 /** Relecture complète (clic « Actualiser ») : jamais plus loin que 60 jours. */
 const FULL_RESCAN_MS = 60 * 86_400_000;
@@ -297,7 +352,7 @@ export function matchApplication(mail: InboxMail, apps: ApplicationRef[]): Appli
   const spontaneous = apps.filter((a): a is SpontaneousRef => a.kind === "spontaneous" && after(a));
   const inThread = spontaneous.find((a) => a.messageId && mail.replyTo.includes(a.messageId));
   if (inThread) return inThread;
-  const fromSentTo = spontaneous.find((a) => a.sentTo && a.sentTo.toLowerCase() === mail.from.toLowerCase());
+  const fromSentTo = spontaneous.find((a) => a.sentTo && a.sentTo.toLowerCase() === mail.from.toLowerCase()) ?? spontaneous.find((a) => sameDomain(a, mail));
   if (fromSentTo) return fromSentTo;
 
   const candidates = apps.filter((a) => after(a) && mentionsCompany(mail, a.company));
@@ -323,10 +378,15 @@ export function matchApplication(mail: InboxMail, apps: ApplicationRef[]): Appli
  */
 export function candidateApplications(mail: InboxMail, apps: ApplicationRef[]): ApplicationRef[] {
   const best = matchApplication(mail, apps);
-  if (best?.kind === "spontaneous" && ((best.messageId && mail.replyTo.includes(best.messageId)) || best.sentTo?.toLowerCase() === mail.from.toLowerCase())) return [best];
+  if (best?.kind === "spontaneous" && ((best.messageId && mail.replyTo.includes(best.messageId)) || best.sentTo?.toLowerCase() === mail.from.toLowerCase() || sameDomain(best, mail))) return [best];
   const after = (a: ApplicationRef) => mail.date.getTime() >= a.since.getTime() - (a.kind === "job" ? JOB_MARGIN_MS : 3_600_000);
   const from = mail.from.toLowerCase();
-  const others = apps.filter((a) => a !== best && after(a) && (mentionsCompany(mail, a.company) || a.senders?.some((x) => x.toLowerCase() === from)));
+  const others = apps.filter(
+    (a) =>
+      a !== best &&
+      after(a) &&
+      (mentionsCompany(mail, a.company) || a.senders?.some((x) => x.toLowerCase() === from) || (a.kind === "job" && titleInMail(mail, a.title))),
+  );
   return [...(best ? [best] : []), ...others].slice(0, 6);
 }
 
@@ -384,9 +444,12 @@ export async function trackApplicationMails(opts: {
     ...sent.map((s): SpontaneousRef => ({ kind: "spontaneous", id: s.id, company: s.lead.name, since: s.sentAt!, messageId: s.messageId, sentTo: s.sentTo })),
   ];
   if (apps.length === 0) return report; // rien à suivre : on ne lit pas la boîte
-  for (const m of await prisma.applicationMail.findMany({ where: { dismissed: false }, select: { jobId: true, spontaneousId: true, fromAddress: true } })) {
+  for (const m of await prisma.applicationMail.findMany({ where: { dismissed: false }, select: { jobId: true, spontaneousId: true, fromAddress: true, kind: true } })) {
     const app = apps.find((a) => a.id === (m.jobId ?? m.spontaneousId));
-    if (app) app.senders = [...(app.senders ?? []), m.fromAddress];
+    if (app) {
+      app.senders = [...(app.senders ?? []), m.fromAddress];
+      app.kinds = [...(app.kinds ?? []), m.kind];
+    }
   }
 
   const since = new Date(Math.min(...apps.map((a) => a.since.getTime())) - 86_400_000);
@@ -545,6 +608,17 @@ export async function trackApplicationMails(opts: {
       forget(mail);
       continue;
     }
+    // Le mail nomme un autre poste que celui choisi : la candidature chez cette entreprise qui lui correspond, sinon
+    // aucune (postulé hors de Job Radar). Gardé sans lien, avec le poste, pour ne pas le redonner à l'IA.
+    if (app.kind === "job" && samePost(mail, app.title) === false) {
+      const other = candidates.find((a) => a.kind === "job" && samePost(mail, a.title) === true);
+      if (!other) {
+        await remember(mail, "OTHER_POST", postInMail(mail)!.slice(0, 200));
+        known.add(mail.messageId);
+        continue;
+      }
+      app = other;
+    }
     report.matched++;
 
     if (app.kind === "spontaneous" && app.sentTo) {
@@ -575,12 +649,25 @@ export async function trackApplicationMails(opts: {
     // Pour une offre, ce n'est qu'un accusé qui cite leurs autres offres.
     const career = !verdict || verdict.kind === "ACK" ? careerSiteUrl(mail) : null;
     if (career) verdict = app.kind === "spontaneous" ? { kind: "CAREER_SITE", detail: career } : { kind: "ACK", detail: `Te renvoie vers son site carrière : ${career}` };
+    if (app.kind === "spontaneous" && verdict?.kind === "ACK" && NO_OPENING.test(plain(mail.text))) verdict = { kind: "REJECTION", detail: null };
     if (!verdict) {
       // Lu et sans rapport avec une étape de candidature : gardé pour ne pas redemander à l'IA à chaque relecture.
       if (answered || !opts.classify) {
         forget(mail);
       }
       continue;
+    }
+    // Refus arrivé avant le clic « postulé » : sans doute une candidature précédente au même poste, à vérifier par toi.
+    if (verdict.kind === "REJECTION" && mail.date < app.since) review = true;
+    // Même réponse déjà reçue pour cette candidature, sans nom de poste (4 refus Theodo identiques pour 4 offres) :
+    // elle va à une autre candidature chez cette entreprise qui ne l'a pas encore, à vérifier par toi.
+    if (app.kind === "job" && app.kinds?.includes(verdict.kind) && samePost(mail, app.title) === null) {
+      const kind = verdict.kind;
+      const sibling = candidates.find((a) => a !== app && a.kind === "job" && !a.kinds?.includes(kind) && mentionsCompany(full, a.company));
+      if (sibling) {
+        app = sibling;
+        review = true;
+      }
     }
     if (seen.has(dupKey(app.id, mail.from, verdict.kind, mail.date))) {
       forget(mail);
@@ -610,6 +697,7 @@ export async function trackApplicationMails(opts: {
     known.add(mail.messageId);
     seen.add(dupKey(app.id, mail.from, verdict.kind, mail.date));
     app.senders = [...(app.senders ?? []), mail.from];
+    app.kinds = [...(app.kinds ?? []), verdict.kind];
     report.recorded++;
     // Un refus change le statut tout seul seulement si l'IA est sûre d'elle (sinon : « à vérifier »).
     if (verdict.kind === "REJECTION" && app.kind === "job" && !review) {

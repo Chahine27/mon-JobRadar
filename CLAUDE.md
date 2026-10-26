@@ -11,6 +11,7 @@ Monorepo pnpm, TypeScript, Node >= 20 (24 en CI et sur le serveur). Code, commen
 - `pnpm dev` : API (Fastify, port 3000) + site (Vite, http://localhost:5173).
 - `pnpm db:generate` après une modif de `packages/db/prisma/schema.prisma`, `pnpm db:migrate` pour créer la migration.
 - `pnpm jobs:renormalize` : réapplique normalisation et score aux offres déjà en base.
+- `pnpm mails:retrack [--apply]` : relit les réponses de candidature des 60 derniers jours avec les règles actuelles de rattachement (sur le serveur).
 - `scripts/sandbox.sh [commande]` : bac à sable sur le serveur (code du PC, copie fraîche de la vraie base, sans collecte, mails ni clé Claude). `SANDBOX_DB=keep` pour ne pas recopier la base.
 
 ## Organisation

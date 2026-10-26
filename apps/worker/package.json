@@ -14,6 +14,7 @@
     "ai:test": "tsx src/ai-test.ts",
     "dedupe": "tsx src/dedupe-cli.ts",
     "renormalize": "tsx src/renormalize-cli.ts",
+    "mails:retrack": "tsx src/mails-retrack-cli.ts",
     "jobscraper:test": "tsx src/jobscraper-test.ts"
   },
   "dependencies": {

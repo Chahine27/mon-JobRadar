@@ -22,6 +22,46 @@ const inboxOf = (mails: InboxMail[]): Inbox & { calls: number } => {
 };
 
 describe("suivi des candidatures par les mails (base réelle)", () => {
+  it("audit du 26/10 : refus Theodo sans nom de poste répartis, autre poste non rattaché, « pas d'opportunité » = refus", async () => {
+    const DAY = 86_400_000;
+    const applied = new Date(Date.now() - 5 * DAY);
+    const jobs = [];
+    for (const t of ["Retail", "FinTech"]) {
+      const j = await prisma.job.create({
+        data: { fingerprint: t, contentHash: "h", title: `Software Engineer Fullstack - CDI Paris - Theodo ${t}`, company: "Theodo", description: "", technologies: [], status: "APPLIED" },
+      });
+      await prisma.jobEvent.create({ data: { jobId: j.id, type: "STATUS_CHANGED", toValue: "APPLIED", createdAt: applied } });
+      jobs.push(j);
+    }
+    const lead = await prisma.companyLead.create({ data: { siret: "zelty", name: "ZELTY" } });
+    const sp = await prisma.spontaneousApplication.create({
+      data: { leadId: lead.id, inputHash: "", model: "m", letter: "…", sentAt: applied, sentTo: "jobs@zelty.fr", messageId: "<z@gmail.com>" },
+    });
+    const refus = "Theodo : nous ne donnerons malheureusement pas suite pour ce poste.";
+    const inbox = inboxOf([
+      mail({ messageId: "<t1@x>", from: "no-reply@hire.lever.co", text: refus, date: new Date(Date.now() - 3 * DAY) }),
+      mail({ messageId: "<t2@x>", from: "no-reply@hire.lever.co", text: refus, date: new Date(Date.now() - 3 * DAY + 60_000) }),
+      mail({ messageId: "<ai@x>", from: "no-reply@hire.lever.co", text: "Theodo : we have received your application for the AI-Native Software Engineer - CDI Paris - Theodo", date: new Date(Date.now() - DAY) }),
+      mail({
+        messageId: "<zel@x>", from: "elsa@zelty.fr", subject: "Merci pour votre intérêt pour Zelty", replyTo: ["<z@gmail.com>"],
+        text: "Nous avons bien reçu votre candidature spontanée. Malheureusement à ce jour nous n'avons pas d'opportunité correspondant à votre profil.",
+      }),
+    ]);
+    // IA qui se trompe comme en vrai : toujours la 1re candidature proposée, et un simple accusé pour Zelty.
+    await trackApplicationMails({
+      prisma, inbox, self: [],
+      classify: async (m) =>
+        m.from.includes("zelty") || m.text.includes("received")
+          ? { index: 0, verdict: { kind: "ACK", detail: null }, summary: "Reçue.", certain: true }
+          : { index: 0, verdict: { kind: "REJECTION", detail: null }, summary: "Refus.", certain: true },
+    });
+    const refusals = await prisma.applicationMail.findMany({ where: { kind: "REJECTION", jobId: { not: null } } });
+    expect(refusals.map((r) => r.jobId).sort()).toEqual(jobs.map((j) => j.id).sort());
+    expect(refusals.filter((r) => r.needsReview)).toHaveLength(1);
+    expect(await prisma.applicationMail.findUniqueOrThrow({ where: { messageId: "<ai@x>" } })).toMatchObject({ kind: "OTHER_POST", jobId: null, dismissed: true, detail: "ai-native software engineer" });
+    expect(await prisma.applicationMail.findFirstOrThrow({ where: { spontaneousId: sp.id } })).toMatchObject({ kind: "REJECTION" });
+  });
+
   it("accusé puis refus : statut « Refusée » ; spontanée reconnue dans le fil ; bruit ignoré ; jamais deux fois", async () => {
     const applied = new Date(Date.now() - 5 * 86_400_000);
     const job = await prisma.job.create({

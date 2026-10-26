@@ -12,6 +12,9 @@ import {
   isNoise,
   matchApplication,
   movedContact,
+  postInMail,
+  samePost,
+  candidateApplications,
 } from "./mail-tracking";
 
 describe("mauvaise adresse de candidature spontanée", () => {
@@ -265,5 +268,54 @@ describe("réponse seule (message d'origine cité retiré)", () => {
   it("le refus de MIW n'est plus lu comme une invitation (règles)", () => {
     const text = "Bonjour,\n\nMalheureusement, nous ne sommes pas en mesure de donner une suite favorable à votre candidature, tous nos postes étant pourvus.\n\n________________________________\nDe : Chahine MEHADJI\nEnvoyé : vendredi 16 octobre 2026 16:18\n\nJe serais heureux d'en discuter avec vous quand cela vous convient, vos disponibilités.";
     expect(classifyMail("RE: Candidature spontanée", replyOnly(text))).toEqual({ kind: "REJECTION", detail: null });
+  });
+});
+
+describe("audit du 26/10 : poste écrit dans le mail", () => {
+  const m = (subject: string, text = "") => ({ subject, text });
+
+  it("reconnaît le même poste (Hubvisory, Otoqi, Storm, Manhattan, ISAGRI)", () => {
+    expect(samePost(m("Hubvisory | Retour", "Malheureusement, ta candidature n'a pas été retenue pour le poste de Développeur Front-End React / TypeScript – H/F. Merci"), "Développeur Front-End React / TypeScript – H/F")).toBe(true);
+    expect(samePost(m("Merci", "Nous vous remercions d'avoir postulé pour le poste de Full-stack Developper H/F au sein d'Otoqi."), "Full-stack Developper H/F")).toBe(true);
+    expect(samePost(m("Storm Group", "Nous avons reçu votre candidature pour le poste de Développeur Frontend – H/F et vous remercions"), "Développeur Frontend – H/F (IT)")).toBe(true);
+    expect(samePost(m("Application Received for Technology Associate Consultant"), "Technology Associate Consultant")).toBe(true);
+    expect(samePost(m("Suite à votre candidature pour le poste Développeur Full-Stack Node/VueJS H/F"), "Développeur Full-Stack Node/VueJS F/H (CDI)")).toBe(true);
+  });
+
+  it("voit un autre poste (Theodo AI-Native, Talan, Kicklox, Basikon, Urban Linker)", () => {
+    expect(postInMail(m("[Theodo] - We have received your application", "We would like to confirm that we have received your application for the AI-Native Software Engineer - CDI Paris - Theodo"))).toBe("ai-native software engineer");
+    expect(samePost(m("[Theodo] - We have received your application", "we have received your application for the AI-Native Software Engineer - CDI Paris -"), "Software Engineer Fullstack - CDI Paris - Theodo Retail")).toBe(false);
+    expect(samePost(m("Votre candidature", "L'offre de Développeur Junior Java - Angular H/F n'est plus disponible."), "IT Quant & Commando Front Office – BFI & Énergie - H/F")).toBe(false);
+    expect(samePost(m("Re: Votre candidature pour l'offre  Développeur Full-Stack (JavaScript) H/F"), "Développeur Front-End (Vue.js) H/F")).toBe(false);
+    expect(samePost(m("Votre candidature", "Nous vous remercions d'avoir postulé à notre offre d'emploi de \"Consultant développeur junior Javascript (H/F)\", à pourvoir"), "Développeur JS Full-Stack Junior (H/F)")).toBe(false);
+    expect(samePost(m("Merci", "Merci d'avoir postulé à l'offre : DÉVELOPPEUR FULL STACK JUNIOR"), "Développeur JS (H/F) & Référent IA — Agence Web (Paris)")).toBe(false);
+  });
+
+  it("refus sans nom de poste (Theodo) : rien à comparer", () => {
+    expect(samePost(m("[Theodo] - Merci pour ta candidature", "nous ne donnerons malheureusement pas suite pour ce poste."), "Software Engineer Fullstack - CDI Paris - Theodo FinTech")).toBeNull();
+  });
+});
+
+describe("audit du 26/10 : rattachement", () => {
+  const mail = (m: Partial<InboxMail>): InboxMail => ({
+    messageId: "<m@x>", folder: "INBOX", from: "x@y.fr", fromName: "", subject: "Votre candidature", text: "", date: new Date("2026-10-07T10:00:00Z"), replyTo: [], ...m,
+  });
+
+  it("réponse « Fwd: » d'une autre adresse du même domaine (Synetis) : sa spontanée, sans hésiter", () => {
+    const apps: ApplicationRef[] = [{ kind: "spontaneous", id: "synetis", company: "SYNETIS", since: new Date("2026-10-06T15:47:00Z"), messageId: null, sentTo: "contact@synetis.com" }];
+    const reply = mail({ from: "recrutement@synetis.com", subject: "Fwd: Candidature spontanée – Développeur full stack", text: "Malheureusement, nous n'avons pas de poste de développeur full stack à pourvoir." });
+    expect(candidateApplications(reply, apps).map((a) => a.id)).toEqual(["synetis"]);
+    // Même domaine mais pas une réponse (alerte, newsletter) : pas certain.
+    expect(matchApplication(mail({ from: "news@synetis.com", subject: "Nos actualités" }), apps)?.id).toBe("synetis");
+  });
+
+  it("intitulé exact dans le mail, entreprise écrite autrement (CNRS pour le labo)", () => {
+    const apps: ApplicationRef[] = [{ kind: "job", id: "clia", company: "Centre Lasers Intenses et Applications", title: "Ingénieur d'études (H/F) en ingénierie logicielle", since: new Date("2026-10-26T13:00:00Z") }];
+    const ack = mail({ from: "NePasRepondre@emploi.cnrs.fr", subject: "[Portail Emploi CNRS] Confirmation de l'enregistrement de votre candidature (Offre UMR7253-OLITOU-002 - Ingénieur d'études (H/F) en ingénierie logicielle)", date: new Date("2026-10-26T13:13:00Z") });
+    expect(candidateApplications(ack, apps).map((a) => a.id)).toEqual(["clia"]);
+  });
+
+  it("site carrière sur Welcome to the Jungle (Partoo)", () => {
+    expect(careerSiteUrl({ text: "Bonjour,\nToutes nos offres d'emploi sont disponibles sur Welcome to the Jungle, vous pouvez les consulter ici : https://www.welcometothejungle.com/fr/companies/partoo/jobs" })).toBe("https://www.welcometothejungle.com/fr/companies/partoo/jobs");
   });
 });
