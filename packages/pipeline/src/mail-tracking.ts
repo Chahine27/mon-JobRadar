@@ -336,6 +336,15 @@ const sameDomain = (a: SpontaneousRef, mail: InboxMail) =>
 /** Réponse d'une entreprise à une spontanée : « pas de poste », « aucune opportunité », « nous ne recrutons pas » = refus. */
 const NO_OPENING = /malheureusement|(pas|aucune?) (d'|de )?(poste|besoin|ouverture|opportunite|offre)s?\b|ne recrut(ons|e) pas/;
 
+/** « Merci de me supprimer de votre liste », « ne plus me contacter » : ne plus jamais écrire à cette personne. */
+const OPT_OUT = /(supprimer|retirer|enlever|desinscrire)( de)? (votre|vos|la|ta) (liste|fichier|base|mailing)|ne (plus )?(me )?(contacter|recontacter|solliciter|ecrire)|remove me from|unsubscribe|do not contact/;
+
+/** Réponse certaine à la spontanée : dans son fil, de l'adresse où elle est partie, ou « Re: / TR: Candidature spontanée ». */
+const repliesTo = (a: SpontaneousRef, mail: InboxMail) =>
+  (!!a.messageId && mail.replyTo.includes(a.messageId)) ||
+  a.sentTo?.toLowerCase() === mail.from.toLowerCase() ||
+  (isReply(mail.subject) && /candidature spontanee/.test(plain(mail.subject)));
+
 const JOB_MARGIN_MS = 7 * 86_400_000;
 /** Relecture complète (clic « Actualiser ») : jamais plus loin que 60 jours. */
 const FULL_RESCAN_MS = 60 * 86_400_000;
@@ -660,6 +669,12 @@ export async function trackApplicationMails(opts: {
     const career = !verdict || verdict.kind === "ACK" ? careerSiteUrl(mail) : null;
     if (career) verdict = app.kind === "spontaneous" ? { kind: "CAREER_SITE", detail: career } : { kind: "ACK", detail: `Te renvoie vers son site carrière : ${career}` };
     if (app.kind === "spontaneous" && verdict?.kind === "ACK" && NO_OPENING.test(plain(mail.text))) verdict = { kind: "REJECTION", detail: null };
+    // Une personne a répondu à la spontanée, même sans étape reconnue (« je ne gère pas les recrutements, je fais suivre,
+    // supprimez-moi de votre liste ») : gardée quand même, sinon une relance part vers quelqu'un qui a déjà répondu (Amelkis).
+    if (app.kind === "spontaneous" && (!verdict || verdict.kind === "ACK") && repliesTo(app, mail)) {
+      const optOut = OPT_OUT.test(plain(mail.text));
+      if (!verdict || optOut) verdict = { kind: "ACK", detail: optOut ? `Ne plus écrire à ${app.sentTo ?? "cette adresse"} : demandé dans sa réponse` : "Réponse reçue" };
+    }
     if (!verdict) {
       // Lu et sans rapport avec une étape de candidature : gardé pour ne pas redemander à l'IA à chaque relecture.
       if (answered || !opts.classify) {

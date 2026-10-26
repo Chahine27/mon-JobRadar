@@ -22,6 +22,24 @@ const inboxOf = (mails: InboxMail[]): Inbox & { calls: number } => {
 };
 
 describe("suivi des candidatures par les mails (base réelle)", () => {
+  it("réponse « je ne gère pas les recrutements, supprimez-moi de votre liste » (Amelkis) : gardée, donc jamais relancée", async () => {
+    const lead = await prisma.companyLead.create({ data: { siret: "amelkis", name: "AMELKIS" } });
+    const sp = await prisma.spontaneousApplication.create({
+      data: { leadId: lead.id, inputHash: "", model: "m", letter: "…", sentAt: new Date(Date.now() - 86_400_000), sentTo: "mnlefevre@amelkis-solutions.com", messageId: "<a@gmail.com>" },
+    });
+    const inbox = inboxOf([
+      mail({
+        messageId: "<amelkis@x>", from: "mnlefevre@amelkis.com", subject: "TR: Candidature spontanée – Développeur full stack – Chahine MEHADJI",
+        text: "Bonjour Chahine,\n\nJe ne gère pas les recrutements, mais je fais suivre au bon service en copie\nMerci de me supprimer de votre liste à l'avenir.\n\nAmelkis",
+      }),
+    ]);
+    // L'IA n'y voit aucune étape (« autre ») : la réponse est gardée quand même.
+    await trackApplicationMails({ prisma, inbox, self: [], classify: async () => ({ index: 0, verdict: null, summary: "Transmise au service RH.", certain: true }) });
+    expect(await prisma.applicationMail.findFirstOrThrow({ where: { spontaneousId: sp.id } })).toMatchObject({
+      kind: "ACK", detail: "Ne plus écrire à mnlefevre@amelkis-solutions.com : demandé dans sa réponse",
+    });
+  });
+
   it("réponse enregistrée en même temps par un autre passage (API pendant mails:retrack) : sautée, pas d'arrêt", async () => {
     const job = await prisma.job.create({
       data: { fingerprint: "race", contentHash: "h", title: "Développeur Vue.js", company: "Escape", description: "", technologies: [], status: "APPLIED" },

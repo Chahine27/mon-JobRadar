@@ -81,8 +81,14 @@ describe("candidature spontanée", () => {
     const draft = (await req("GET", `/api/leads/${lead.id}/application/follow-up`)).json();
     expect(draft).toMatchObject({ to: "rh@alpha.fr", subject: "Re: Candidature spontanée – Développeur full stack – Alex MARTIN", followedUpAt: null });
     expect(draft.message).toContain("Je reviens vers vous au sujet de ma candidature spontanée envoyée le");
-    const follow = await req("POST", `/api/leads/${lead.id}/application/follow-up`, { subject: draft.subject, message: draft.message });
-    expect(follow.statusCode).toBe(200);
+    // L'entreprise a répondu (« je ne gère pas les recrutements, je fais suivre ») : pas de relance, même à la main.
+    const reply = { id: "m-reply", jobId: null, spontaneousId: `sp-${lead.id}`, kind: "ACK", detail: "Réponse reçue", summary: null, needsReview: false, subject: "TR: Candidature spontanée", fromAddress: "rh@alpha.fr", messageId: "<r@x>", receivedAt: new Date(), dismissed: false };
+    t.mailRows.push(reply);
+    expect((await req("POST", `/api/leads/${lead.id}/application/follow-up`, { subject: draft.subject, message: draft.message })).json().error).toBe("ALREADY_ANSWERED");
+    reply.dismissed = true;
+    // Double clic : une seule relance part.
+    const [follow, twice] = await Promise.all([1, 2].map(() => req("POST", `/api/leads/${lead.id}/application/follow-up`, { subject: draft.subject, message: draft.message })));
+    expect([follow!.statusCode, twice!.statusCode]).toEqual([200, 409]);
     expect(sentMails.at(-1)).toMatchObject({ to: "rh@alpha.fr", subject: draft.subject, inReplyTo: "<envoi-2@test>" });
     expect(sentMails.at(-1)!.attachments.map((a) => a.filename)).toEqual(["Lettre_de_motivation.pdf", "CV_Alex_Martin.pdf"]);
     expect((await req("POST", `/api/leads/${lead.id}/application/follow-up`, { subject: draft.subject, message: draft.message })).statusCode).toBe(409);

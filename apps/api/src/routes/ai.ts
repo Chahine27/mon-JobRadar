@@ -687,16 +687,30 @@ export async function aiRoutes(
    * Envoie la relance d'une spontanée : même adresse, en réponse au premier mail (même fil), même lettre, CV actuel.
    * Sans objet ni message : ceux écrits par le code (followUpMail).
    */
+  /** Relances en cours d'envoi : un 2ᵉ clic (ou le lot) pendant l'envoi ne repart pas (Amelkis relancée deux fois). */
+  const followingUp = new Set<string>();
+
   async function sendFollowUp(userId: string, leadId: string, mail?: { subject: string; message: string }): Promise<{ followedUpAt: Date } | FollowUpFail> {
+    if (followingUp.has(leadId)) return { status: 409, error: "FOLLOW_UP_RUNNING", message: "Cette relance est déjà en cours d'envoi." };
+    followingUp.add(leadId);
+    try {
+      return await sendFollowUpOnce(userId, leadId, mail);
+    } finally {
+      followingUp.delete(leadId);
+    }
+  }
+
+  async function sendFollowUpOnce(userId: string, leadId: string, mail?: { subject: string; message: string }): Promise<{ followedUpAt: Date } | FollowUpFail> {
     const ctx = await applicationContext(userId, leadId);
     const sent = ctx?.application;
     if (!ctx || !sent?.sentAt || !sent.sentTo) return { status: 404, error: "NOT_SENT", message: "Cette candidature n'a pas été envoyée par Job Radar." };
+    const spId = (await stores.applications.listSent()).find((s) => s.leadId === leadId)?.id;
+    const own = (await stores.applicationMails.list()).filter((m) => m.spontaneousId === spId && !m.dismissed);
+    // L'entreprise a déjà répondu (même « je fais suivre ») : jamais de relance, même demandée à la main.
+    if (own.some((m) => m.kind !== "AWAY")) return { status: 409, error: "ALREADY_ANSWERED", message: "L'entreprise a déjà répondu : pas de relance." };
     if (sent.followedUpAt) {
       // Une seule relance, sauf si elle est tombée pendant une absence (message d'absence reçu après elle).
-      const spId = (await stores.applications.listSent()).find((s) => s.leadId === leadId)?.id;
-      const awayAfter = (await stores.applicationMails.list()).some(
-        (m) => m.spontaneousId === spId && m.kind === "AWAY" && !m.dismissed && m.receivedAt.getTime() >= sent.followedUpAt!.getTime(),
-      );
+      const awayAfter = own.some((m) => m.kind === "AWAY" && m.receivedAt.getTime() >= sent.followedUpAt!.getTime());
       if (!awayAfter) return { status: 409, error: "ALREADY_FOLLOWED_UP", message: `Déjà relancée le ${sent.followedUpAt.toLocaleDateString("fr-FR")}.` };
     }
     if (!opts.mailer?.isConfigured()) {
