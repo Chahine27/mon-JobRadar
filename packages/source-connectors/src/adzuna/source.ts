@@ -41,6 +41,30 @@ export const AdzunaJobSchema = z.looseObject({
 });
 export type AdzunaJob = z.infer<typeof AdzunaJobSchema>;
 
+/**
+ * L'offre est-elle encore sur Adzuna ? Page publique adzuna.fr/details/<id> (l'id de l'API) :
+ * 200 = en ligne, 404 / 410 = retirée (testé le 27/10/2026), autre chose (403 CloudFront, réseau) = null, on ne conclut rien.
+ * curl est refusé (403), le fetch de Node passe.
+ */
+export async function adzunaJobIsOpen(sourceJobId: string, fetchImpl: typeof fetch = fetch): Promise<boolean | null> {
+  if (!/^\d+$/.test(sourceJobId)) return null;
+  try {
+    const res = await fetchImpl(`https://www.adzuna.fr/details/${sourceJobId}`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        Accept: "text/html",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    await res.body?.cancel().catch(() => {}); // seul le code compte : la page (50-90 Ko) n'est pas lue
+    if (res.status === 404 || res.status === 410) return false;
+    return res.status === 200 ? true : null;
+  } catch {
+    return null;
+  }
+}
+
 export class AdzunaSource implements JobSource {
   readonly name = ADZUNA_SOURCE;
   private readonly limiter: RateLimiter;

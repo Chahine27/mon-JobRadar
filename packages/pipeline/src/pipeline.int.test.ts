@@ -171,6 +171,23 @@ describe("source → normalisation → base (README §32)", () => {
     expect(asked).toHaveLength(3);
   });
 
+  it("Adzuna : expirée seulement si toutes ses pages sont retirées ; une page en ligne suffit, les autres ne sont pas demandées", async () => {
+    const adz = (id: string, title: string) =>
+      ({ source: "adzuna", sourceJobId: id, data: { id, title, description: "Développeur Node.js pour une banque.", company: { display_name: `Boîte ${title}` }, location: { display_name: "Paris", area: ["France", "Ile-de-France", "Paris"] }, created: new Date(Date.now() - 5 * 86_400_000).toISOString() }, collectedAt: new Date() }) satisfies RawJob;
+    const old = (d: number) => new Date(Date.now() - d * 86_400_000);
+    await ingestJob(prisma, normalize(adz("101", "Dev retiré"))!, old(3));
+    await ingestJob(prisma, normalize(adz("201", "Dev en ligne"))!, old(3));
+    await ingestJob(prisma, normalize(adz("202", "Dev en ligne"))!, old(2)); // même offre republiée : 2ᵉ lien, plus récent
+    expect(await prisma.job.count()).toBe(2);
+    const asked: string[] = [];
+    const r = await expireJobs({ prisma, sleep: async () => {}, adzunaIsOpen: async (id) => (asked.push(id), id === "202") });
+    expect(r.expired).toBe(1);
+    expect(asked.sort()).toEqual(["101", "202"]); // 201 pas demandé : 202 (le plus récent) est en ligne
+    const byTitle = Object.fromEntries((await prisma.job.findMany()).map((j) => [j.title, j.status]));
+    expect(byTitle["Dev retiré"]).toBe("EXPIRED");
+    expect(byTitle["Dev en ligne"]).toBe("NEW");
+  });
+
   it("Jooble : offres enregistrées, appels comptés en base, pas de 2ᵉ appel le même jour", async () => {
     const quota = prismaJoobleQuota(prisma, "abcd-1234-efgh");
     let calls = 0;

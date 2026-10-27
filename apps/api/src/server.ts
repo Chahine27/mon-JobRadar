@@ -27,6 +27,7 @@ import {
   fetchJobScraperDetails,
   searchFreeWork,
   linkedinJobIsOpen,
+  adzunaJobIsOpen,
   LaBonneBoiteClient,
 } from "@job-radar/source-connectors";
 import { buildApp } from "./app";
@@ -138,6 +139,8 @@ async function afterCollect(report: CollectReport, changed: boolean) {
       ftIsOnline: (id) => franceTravail.isStillOnline(id),
       // Offre LinkedIn close (« candidatures plus acceptées ») → expirée, retirée du flux.
       ...(env.JOBSCRAPER_ENABLED ? { linkedinIsOpen: (id: string) => linkedinJobIsOpen(id) } : {}),
+      // Offre Adzuna dont la page répond 404 / 410 → expirée (sinon, règle des 45 jours).
+      adzunaIsOpen: (id) => adzunaJobIsOpen(id),
       log: (m) => log(m),
     }).catch((err) =>
       log(`Expiration : ${String(err)}`),

@@ -28,6 +28,13 @@ describe("expiration des offres", () => {
     expect(linkVerdict(link, job(null, 50), NOW)).toBe("gone");
   });
 
+  it("Adzuna : la réponse de sa page l'emporte sur l'âge ; sans réponse, règle des 45 jours", () => {
+    const link = { source: "adzuna", sourceJobId: "5922296683", lastSeenAt: daysAgo(3) };
+    expect(linkVerdict(link, job(10), NOW, false)).toBe("gone"); // page en 410 : retirée même si récente
+    expect(linkVerdict(link, job(50), NOW, true)).toBe("online"); // vieille mais encore en ligne
+    expect(linkVerdict(link, job(50), NOW, null)).toBe("gone"); // bloqué : on retombe sur l'âge
+  });
+
   it("démo et sources inconnues : jamais expirées", () => {
     expect(linkVerdict({ source: "demo", sourceJobId: "d", lastSeenAt: daysAgo(100) }, job(100), NOW)).toBe("online");
   });
