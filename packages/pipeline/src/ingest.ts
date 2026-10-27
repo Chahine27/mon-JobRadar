@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from "@job-radar/db";
 import { type NormalizedJob, type OfferSalary, dedupeKeyOf, sameAdText, sameOffer, sameSalary, urlKey } from "@job-radar/job-normalizer";
 import { ABRIDGED_SOURCES } from "@job-radar/shared";
+import { fillGaps } from "./renormalize";
 
 export type IngestOutcome = "created" | "updated" | "unchanged" | "duplicate";
 
@@ -33,6 +34,12 @@ export function jobFields(n: NormalizedJob) {
 }
 
 const json = (v: unknown) => (v ?? undefined) as Prisma.InputJsonValue | undefined;
+
+/** Champs tirés du texte de l'annonce (cf. RULE_FIELDS de renormalize), comblés d'une annonce à l'autre par fillGaps. */
+const RULE_SELECT = {
+  contractType: true, experienceText: true, experienceMinYrs: true, experienceMaxYrs: true, technologies: true,
+  salaryMin: true, salaryMax: true, salaryPeriod: true, salaryText: true, remoteType: true,
+} as const;
 
 /**
  * Enregistre une offre normalisée en évitant les doublons (README §10) :
@@ -138,9 +145,12 @@ export async function ingestJob(prisma: PrismaClient, n: NormalizedJob, now = ne
   if (same) {
     // L'offre connue n'avait pas de description, ou seulement un extrait : celle du doublon la complète (score et IA sur le vrai texte).
     const fill = (!same.description.trim() && n.description.trim() !== "") || improvesDescription(same.description);
+    // Les infos s'additionnent : un champ vide d'un côté (contrat, salaire, expérience, télétravail) est pris à l'autre.
+    const current = await prisma.job.findUniqueOrThrow({ where: { id: same.id }, select: RULE_SELECT });
+    const fields = fill ? fillGaps({ ...jobFields(n), ...keptSalary(same) }, [current]) : fillGaps(current, [n]);
     await prisma.$transaction([
       prisma.jobSourceLink.create({ data: { ...sourceLink, jobId: same.id } }),
-      prisma.job.update({ where: { id: same.id }, data: fill ? { ...jobFields(n), ...keptSalary(same), lastSeenAt: now } : { lastSeenAt: now } }),
+      prisma.job.update({ where: { id: same.id }, data: { ...(fill ? jobFields(n) : {}), ...fields, lastSeenAt: now } }),
       prisma.jobEvent.create({ data: { jobId: same.id, type: "SOURCE_ADDED", toValue: n.source } }),
     ]);
     return "duplicate";

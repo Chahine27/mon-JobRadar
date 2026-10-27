@@ -1,7 +1,7 @@
 import { normalize, withoutFreeWorkIntro } from "@job-radar/job-normalizer";
 import { describe, expect, it } from "vitest";
 import { freeWorkQuery } from "./complete";
-import { oldestSalary, ownerFields, sameDescription } from "./renormalize";
+import { fillGaps, oldestSalary, ownerFields, sameDescription } from "./renormalize";
 
 const INTRO =
   "Free-Work est une plateforme qui s'adresse à tous les professionnels des métiers de l'informatique. Ses contenus et son jobboard IT sont mis à disposition 100% gratuitement pour les indépendants et les salariés du secteur. ";
@@ -51,5 +51,18 @@ describe("offres à plusieurs sources : source qui a écrit la description", () 
     expect(oldestSalary([paid("1", 36000, 36000), paid("2", 70000, 100000)])?.salaryMin).toBe(36000);
     expect(oldestSalary([paid("1", null, null), paid("2", 50000, 70000), paid("3", 90000, 130000)])?.salaryMax).toBe(70000);
     expect(oldestSalary([paid("1", 40000, 45000), paid("2", 45000, 50000)])).toBeNull();
+  });
+
+  it("les infos s'additionnent : champ vide de l'annonce propriétaire pris aux autres, si elles s'accordent (VISIAN)", () => {
+    const linkedin = raw("1", text, "");
+    const cdi = raw("2", text, "permanent");
+    const cdd = raw("3", text, "contract"); // Adzuna : « contract » = CDD
+    expect(fillGaps(linkedin, [linkedin, cdi, raw("4", text, "permanent")]).contractType).toBe("CDI");
+    expect(fillGaps(linkedin, [cdi, cdd]).contractType).toBeNull(); // CDI ici, CDD là : rien
+    expect(fillGaps(cdd, [cdi]).contractType).toBe("CDD"); // une valeur connue n'est jamais remplacée
+    const paid = { ...cdi, salaryMin: 40000, salaryMax: 45000, salaryPeriod: "year" as const };
+    expect(fillGaps(linkedin, [cdi, paid])).toMatchObject({ salaryMin: 40000, salaryMax: 45000, salaryPeriod: "year" });
+    expect(fillGaps(linkedin, [{ ...cdi, experienceMinYrs: 3, experienceMaxYrs: 5 }]).experienceMinYrs).toBe(3);
+    expect(fillGaps(linkedin, [{ ...cdi, remoteType: "hybrid" as const }, { ...cdi, remoteType: "remote" as const }]).remoteType).toBe("unknown");
   });
 });

@@ -49,6 +49,36 @@ export function ownerFields(
 }
 
 /**
+ * Champs que l'annonce de la description ne donne pas : pris aux autres annonces de l'offre. Les infos s'additionnent
+ * (VISIAN : LinkedIn muet sur le contrat, HelloWork et Adzuna disent CDI). Contrat, télétravail, expérience : seulement
+ * si les autres annonces s'accordent (CDI ici, Freelance là : rien). Salaire : celui de la plus ancienne qui en donne un
+ * (cf. oldestSalary). `others` : de la plus ancienne à la plus récente. 83 contrats, 54 salaires manquants le 27/10/2026.
+ */
+type GapFields = {
+  contractType: string | null; remoteType: string; experienceText: string | null; experienceMinYrs: number | null; experienceMaxYrs: number | null;
+  salaryMin: number | null; salaryMax: number | null; salaryPeriod: string | null; salaryText: string | null;
+};
+export function fillGaps<T extends GapFields>(fields: T, others: GapFields[]): T {
+  const out: GapFields = { ...fields };
+  const agreed = <V>(values: V[]) => {
+    const keys = [...new Set(values.map((v) => JSON.stringify(v)))];
+    return keys.length === 1 ? values[0]! : null;
+  };
+  if (out.contractType === null) out.contractType = agreed(others.map((o) => o.contractType).filter((c) => c !== null));
+  if (out.remoteType === "unknown") out.remoteType = agreed(others.map((o) => o.remoteType).filter((r) => r !== "unknown")) ?? "unknown";
+  if (out.experienceMinYrs === null && out.experienceMaxYrs === null) {
+    const exp = agreed(others.filter((o) => o.experienceMinYrs !== null || o.experienceMaxYrs !== null).map((o) => [o.experienceMinYrs, o.experienceMaxYrs]));
+    const from = exp && others.find((o) => o.experienceMinYrs === exp[0] && o.experienceMaxYrs === exp[1]);
+    if (from) Object.assign(out, { experienceMinYrs: from.experienceMinYrs, experienceMaxYrs: from.experienceMaxYrs, experienceText: out.experienceText ?? from.experienceText });
+  }
+  if (out.salaryMin === null && out.salaryMax === null) {
+    const paid = others.find((o) => o.salaryMin !== null || o.salaryMax !== null);
+    if (paid) Object.assign(out, { salaryMin: paid.salaryMin, salaryMax: paid.salaryMax, salaryPeriod: paid.salaryPeriod, salaryText: out.salaryText ?? paid.salaryText });
+  }
+  return out as T;
+}
+
+/**
  * Annonces d'une offre aux salaires qui se contredisent (Talan à 36 k€ sur l'Apec, recopiée à « 70–100 k€ » par un
  * agrégateur) : celui de la plus ancienne qui en donne un, l'annonce d'origine ; les copies arrivent après.
  * null si les salaires s'accordent. `all` : annonces de la plus ancienne à la plus récente.
@@ -96,7 +126,11 @@ export async function renormalizeJobs(opts: {
     if (all.length !== job.sources.length || all.length === 0) continue;
     const owned = all.length === 1 ? ruleFieldsOf(all[0]!, job) : ownerFields(job.description, all, job);
     const salary = all.length > 1 ? oldestSalary(all) : null;
-    const next = salary ? { ...(owned ?? (job as unknown as Pick<NormalizedJob, RuleField>)), ...salary } : owned;
+    const kept = job as unknown as Pick<NormalizedJob, RuleField>;
+    const merged = salary ? { ...(owned ?? kept), ...salary } : owned;
+    // Contrat, salaire, expérience, télétravail que l'annonce de la description ne donne pas : pris aux autres annonces.
+    // Aussi quand aucune annonce n'a écrit la description (texte complété par l'extension, VISIAN) : seuls les vides bougent.
+    const next = all.length > 1 ? fillGaps(merged ?? kept, all) : merged;
     if (!next) continue;
     checked++;
     const diff = RULE_FIELDS.filter((k) => JSON.stringify(next[k]) !== JSON.stringify(job[k]));
