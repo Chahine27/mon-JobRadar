@@ -11,6 +11,12 @@ describe("dedupeKeyOf : même offre, écritures différentes", () => {
     expect(dedupeKeyOf("Acme", "Développeur Full‑Stack")).toBe(dedupeKeyOf("Acme", "Développeur Fullstack H/F"));
     expect(dedupeKeyOf("Acme", "Développeur·se Front-end")).toBe(dedupeKeyOf("Acme", "Développeur Frontend"));
   });
+  it("catégorie « (IT) » ajoutée par Adzuna en fin de titre : même offre que sur Indeed (OCTOGONE, 27/10/2026)", () => {
+    expect(dedupeKeyOf("OCTOGONE", "Développeur Java / Spring Boot Confirmé - Île-de-France (IT)")).toBe(dedupeKeyOf("Octogone", "Développeur Java / Spring Boot Confirmé - Île-de-France"));
+    expect(sameOffer(offer("Développeur Java / Spring Boot Confirmé - Île-de-France (IT)"), offer("Développeur Java / Spring Boot Confirmé - Île-de-France"))).toBe(true);
+    // « IT » ailleurs dans le titre fait partie de l'intitulé.
+    expect(dedupeKeyOf("Acme", "Développeur C# – IT Quant Equity")).not.toBe(dedupeKeyOf("Acme", "Développeur C# – Quant Equity"));
+  });
   it("un autre intitulé ou une autre entreprise donne une autre clé", () => {
     expect(dedupeKeyOf("Collective.work", "Développeur Full Stack Java Angular - Freelance")).not.toBe(dedupeKeyOf("Collective.work", "Senior Développeur Full Stack Java Angular Quarkus - Freelance"));
     expect(dedupeKeyOf("Autre", "Développeur Backend Node.js / TypeScript Senior")).not.toBe(key);

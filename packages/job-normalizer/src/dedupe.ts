@@ -11,9 +11,12 @@ const CONTRACT = /\b(cdi|cdd|stage|stagiaire|alternance|apprentissage|freelance|
 
 const companyCore = (company: string | null | undefined) => comparable(company).replace(LEGAL, " ").replace(/\s+/g, " ").trim();
 
-/** Titre réduit à l'essentiel : sans (H/F), sans contrat, « full-stack » = « fullstack », « développeur·se » = « développeur ». */
+/**
+ * Titre réduit à l'essentiel : sans (H/F), sans contrat, « full-stack » = « fullstack », « développeur·se » = « développeur »,
+ * sans la catégorie « (IT) » qu'Adzuna ajoute en fin de titre aux annonces de Free-Work (53 doublons manqués le 27/10/2026).
+ */
 export function titleCore(title: string): string {
-  return comparable(title)
+  return comparable(title.replace(/\(\s*it\s*\)\s*$/i, " "))
     .replace(CONTRACT, " ")
     .replace(/\bfull stack\b/g, "fullstack")
     .replace(/\b(developpeur|ingenieur|concepteur|consultant|architecte|analyste|technicien)(?:e|se|euse|s)\b/g, "$1") // « développeur·se » (le point médian disparaît)
