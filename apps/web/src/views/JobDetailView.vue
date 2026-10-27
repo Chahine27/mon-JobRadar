@@ -233,14 +233,14 @@ const links = computed(() =>
   (job.value?.sources ?? []).map((s) => ({ ...s, safe: safeUrl(s.url) })).filter((s) => s.safe),
 );
 // ───── « Pas pour moi » : ignore l'offre et, au choix, ajoute une règle pour les prochaines ─────
-type NotForMeReason = "stack" | "role" | "company" | "other";
+type NotForMeReason = "stack" | "role" | "company" | "expired" | "other";
 const notForMe = ref(false);
 const nfmReason = ref<NotForMeReason>("stack");
 const nfmSkills = ref<string[]>([]);
 const nfmWord = ref("");
 const nfmRemember = ref(true);
 /** Points retirés par défaut selon la raison (modifiables ensuite dans le profil). */
-const NFM_POINTS: Record<Exclude<NotForMeReason, "other">, number> = { stack: -30, role: -40, company: -50 };
+const NFM_POINTS: Record<Exclude<NotForMeReason, "expired" | "other">, number> = { stack: -30, role: -40, company: -50 };
 
 function openNotForMe() {
   const j = job.value!;
@@ -273,7 +273,7 @@ const confirmNotForMe = () =>
       const added = nfmRules.value.filter((r) => !profile.scoreRules.some((x) => same(x, r)));
       if (added.length) await api.saveProfile({ ...profile, scoreRules: [...profile.scoreRules, ...added] });
     }
-    job.value = await api.setJobStatus(props.id, "IGNORED");
+    job.value = await api.setJobStatus(props.id, nfmReason.value === "expired" ? "EXPIRED" : "IGNORED");
     notForMe.value = false;
   });
 
@@ -419,14 +419,15 @@ const ruleLabel = (r: ScoreRule) =>
         <input v-model="nfmWord" type="text" maxlength="80" placeholder="Mot du titre, ex. support, analyste, Windev" />
       </div>
       <label class="choice" :class="{ muted: !job.company }"><input v-model="nfmReason" type="radio" value="company" :disabled="!job.company" />L'entreprise {{ job.company ? `(${job.company})` : "(non précisée)" }}</label>
+      <label class="choice"><input v-model="nfmReason" type="radio" value="expired" />L'offre n'est plus active (pourvue, retirée)</label>
       <label class="choice"><input v-model="nfmReason" type="radio" value="other" />Autre raison (doublon, contexte…)</label>
-      <label v-if="nfmReason !== 'other'" class="choice small"><input v-model="nfmRemember" type="checkbox" />Baisser aussi le score des prochaines offres similaires</label>
+      <label v-if="nfmReason !== 'other' && nfmReason !== 'expired'" class="choice small"><input v-model="nfmRemember" type="checkbox" />Baisser aussi le score des prochaines offres similaires</label>
       <ul v-if="nfmRules.length" class="clean small muted">
         <li v-for="r in nfmRules" :key="r.kind + r.value">Règle ajoutée : {{ ruleLabel(r) }}</li>
       </ul>
       <div class="row">
         <button type="button" class="danger" :disabled="busy || (nfmReason === 'stack' && nfmRemember && !nfmSkills.length && job.missingSkills.length > 0)" @click="confirmNotForMe">
-          <Icon name="eyeOff" :size="16" />Ignorer l'offre
+          <Icon name="eyeOff" :size="16" />{{ nfmReason === "expired" ? "Marquer comme expirée" : "Ignorer l'offre" }}
         </button>
         <button type="button" class="ghost" :disabled="busy" @click="notForMe = false">Annuler</button>
       </div>
