@@ -12,7 +12,10 @@ describe("annonce entière lue sur la page Adzuna", () => {
 
   it("410 = retirée (pas de texte), 429 = refusée (null)", async () => {
     const page = (status: number, body = "") => (async () => new Response(body, { status })) as unknown as typeof fetch;
-    expect(await fetchAdzunaAd("5943690457", page(200, html))).toEqual({ description: "<p>Wink recrute un Développeur Full-Stack</p>" });
+    expect(await fetchAdzunaAd("5943690457", page(200, html))).toEqual({ description: "<p>Wink recrute un Développeur Full-Stack</p>", partner: null });
+    // Annonce qu'Adzuna tient de Free-Work : logo du partenaire sur la page.
+    const fromFreeWork = `<img class="h-12 md:hidden ml-auto" src="//zunastatic-abf.kxcdn.com/images/fr/jobs/partners/logo_free_work.png" alt="Free-Work">${html}`;
+    expect((await fetchAdzunaAd("5943741083", page(200, fromFreeWork)))?.partner).toBe("Free-Work");
     expect(await fetchAdzunaAd("5943690457", page(410))).toEqual({ description: null });
     expect(await fetchAdzunaAd("5943690457", page(429))).toBeNull();
   });

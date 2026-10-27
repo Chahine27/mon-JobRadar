@@ -17,6 +17,12 @@ export const DETAIL_FETCHED = "detailFetched";
 export const DATE_CHECKED = "dateChecked";
 /** Dernier essai de lecture de la page resté sans résultat (page illisible, offre retirée) : pas de nouvel essai avant 1 jour. */
 export const DETAIL_TRIED_AT = "detailTriedAt";
+/** Annonce Adzuna tenue de Free-Work (logo de sa page) : à relire sur Free-Work, plus complet (« Profil recherché »). */
+export const FREE_WORK_PENDING = "freeWorkPending";
+/** Annonce relue sur Free-Work avec son bloc « Profil recherché » (les plus anciennes ne l'avaient pas). */
+export const FREE_WORK_PROFILE = "freeWorkProfile";
+/** Site d'où Adzuna tient l'annonce, lu sur sa page (null : aucun logo). Absent : lue avant ce repérage, à relire. */
+export const ADZUNA_PARTNER = "adzunaPartner";
 
 /** WTTJ via JobScraper : seulement le résumé de l'index de recherche, jamais l'annonce. */
 const SUMMARY_ONLY = ["jobscraper:wttj"];
@@ -111,7 +117,7 @@ export async function completeJobScraperDescriptions(opts: {
 export async function completeAdzunaAds(opts: {
   prisma: PrismaClient;
   /** Page de l'offre (fetchAdzunaAd) : null = refusée ou illisible, on arrête ce passage. */
-  fetchAd: (sourceJobId: string) => Promise<{ description: string | null } | null>;
+  fetchAd: (sourceJobId: string) => Promise<{ description: string | null; partner?: string | null } | null>;
   /** Pages au plus par passage, 3 s d'écart (Adzuna répond 429 en dessous, cf. expireJobs). */
   max?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -126,8 +132,11 @@ export async function completeAdzunaAds(opts: {
     orderBy: { firstSeenAt: "desc" },
   });
   const raw = (l: (typeof all)[number]) => (l.rawData ?? {}) as Record<string, unknown>;
-  // Offre dont une annonce Adzuna a déjà été lue en entier : rien à refaire pour ses autres liens.
-  const done = new Set(all.filter((l) => raw(l)[DETAIL_FETCHED] === true).map((l) => l.jobId));
+  // Offre dont une annonce Adzuna a déjà été lue en entier (sur Adzuna, site d'origine noté, ou sur Free-Work) : rien à
+  // refaire pour ses autres liens. Lue avant le repérage du site d'origine : relue une fois (Free-Work à reprendre).
+  const done = new Set(
+    all.filter((l) => raw(l)[DETAIL_FETCHED] === true && (ADZUNA_PARTNER in raw(l) || typeof raw(l).freeWorkUrl === "string")).map((l) => l.jobId),
+  );
   const seen = new Set<string>();
   const links = all
     .filter((l) => l.job.company !== FREE_WORK_COMPANY && !done.has(l.jobId))
@@ -152,7 +161,9 @@ export async function completeAdzunaAds(opts: {
       if (!ad) break; // Adzuna refuse (429) : on arrête ce passage, insister prolonge le blocage.
       continue;
     }
-    const next = normalize({ source: "adzuna", sourceJobId: link.sourceJobId, data: { ...raw(link), description: ad.description, [DETAIL_FETCHED]: true }, collectedAt: link.firstSeenAt });
+    // Annonce tenue de Free-Work : texte d'Adzuna gardé en attendant, completeFreeWorkAds la relira sur Free-Work.
+    const fromFreeWork = ad.partner === FREE_WORK_COMPANY ? { [FREE_WORK_PENDING]: true } : {};
+    const next = normalize({ source: "adzuna", sourceJobId: link.sourceJobId, data: { ...raw(link), description: ad.description, [DETAIL_FETCHED]: true, [ADZUNA_PARTNER]: ad.partner ?? null, ...fromFreeWork }, collectedAt: link.firstSeenAt });
     if (next && (await ingestJob(prisma, next)) === "updated") completed++;
   }
   if (checked) log(`Offres Adzuna complétées (annonce entière lue sur adzuna.fr) : ${completed} sur ${checked}`);
@@ -184,6 +195,8 @@ const textKey = (text: string) => comparable(text).replace(/ /g, "");
  * Une annonce n'est prise que si elle contient le début de l'extrait Adzuna : même titre chez un autre client = refusée
  * (testé le 23/10/2026 : 10 annonces retrouvées sur 12, aucune fausse). Pas trouvée : nouvel essai dans 1 jour.
  * Seulement les offres encore utiles, dont la description est encore l'extrait Adzuna (pas un texte venu d'ailleurs).
+ * Aussi : les annonces à vrai nom d'employeur que la page Adzuna dit tenues de Free-Work (FREE_WORK_PENDING, cf.
+ * completeAdzunaAds), et une fois les annonces déjà relues avant l'ajout du « Profil recherché » (relues à leur adresse).
  */
 export async function completeFreeWorkAds(opts: {
   prisma: PrismaClient;
@@ -199,8 +212,8 @@ export async function completeFreeWorkAds(opts: {
   const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const links = (
     await prisma.jobSourceLink.findMany({
-      where: { source: "adzuna", job: { fullTextAt: null, company: FREE_WORK_COMPANY, status: { in: ["NEW", "SEEN", "SAVED"] } } },
-      select: { id: true, source: true, sourceJobId: true, sourceUrl: true, rawData: true, firstSeenAt: true, job: { select: { title: true, description: true, department: true, remoteType: true } } },
+      where: { source: "adzuna", job: { fullTextAt: null, status: { in: ["NEW", "SEEN", "SAVED"] } } },
+      select: { id: true, source: true, sourceJobId: true, sourceUrl: true, rawData: true, firstSeenAt: true, job: { select: { title: true, company: true, description: true, department: true, remoteType: true } } },
       orderBy: { firstSeenAt: "desc" },
     })
   )
@@ -208,7 +221,9 @@ export async function completeFreeWorkAds(opts: {
     .filter((l) => {
       const raw = (l.rawData ?? {}) as Record<string, unknown>;
       const tried = raw[DETAIL_TRIED_AT];
-      return raw[DETAIL_FETCHED] !== true && (typeof tried !== "string" || Date.now() - Date.parse(tried) > 86_400_000);
+      // « Free-Work » pour entreprise, ou annonce que la page Adzuna dit tenue de Free-Work, ou déjà relue sans son « Profil recherché ».
+      const todo = (l.job.company === FREE_WORK_COMPANY && raw[DETAIL_FETCHED] !== true) || raw[FREE_WORK_PENDING] === true || (typeof raw.freeWorkUrl === "string" && raw[FREE_WORK_PROFILE] !== true);
+      return todo && (typeof tried !== "string" || Date.now() - Date.parse(tried) > 86_400_000);
     })
     .slice(0, opts.max ?? 8);
   let completed = 0;
@@ -221,7 +236,14 @@ export async function completeFreeWorkAds(opts: {
     const excerpt = textKey(n.description).slice(0, 50);
     let found: { description: string; company?: string | null; url: string } | null = null;
     let refused = false;
-    if (excerpt.length >= 40) {
+    const known = (link.rawData as Record<string, unknown>).freeWorkUrl;
+    if (typeof known === "string") {
+      // Annonce déjà retrouvée : relue à son adresse, sans recherche.
+      await pause();
+      const page = await opts.freeWork.ad(known);
+      if (page?.description) found = { description: page.description, company: page.company ?? null, url: page.url };
+      else refused = page === null;
+    } else if (excerpt.length >= 40) {
       const core = freeWorkQuery(link.job.title);
       for (const query of [...new Set([core, core.split(" ").slice(0, 5).join(" ")])]) {
         await pause();
@@ -248,12 +270,14 @@ export async function completeFreeWorkAds(opts: {
       continue;
     }
     const company = (raw.company ?? {}) as Record<string, unknown>;
+    const { [FREE_WORK_PENDING]: _pending, ...kept } = raw;
     const data = {
-      ...raw,
+      ...kept,
       description: found.description,
       ...(found.company ? { company: { ...company, display_name: found.company } } : {}),
       freeWorkUrl: found.url,
       [DETAIL_FETCHED]: true,
+      [FREE_WORK_PROFILE]: true,
     };
     const next = normalize({ source: link.source, sourceJobId: link.sourceJobId, data, collectedAt: link.firstSeenAt });
     if (next && (await ingestJob(prisma, next)) === "updated") completed++;

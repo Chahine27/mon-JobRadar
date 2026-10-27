@@ -206,16 +206,16 @@ const runner = new CollectionRunner({
         (await prisma.companyTarget.findMany()).map((c) => ({ ...c, ats: c.ats as AtsKind })),
     }),
   ],
-  // Offres Adzuna reprises de Free-Work : annonce entière et employeur réel lus sur Free-Work, avant trajets, IA et mails.
+  // Offres Adzuna : l'API n'en donne que 500 caractères. Annonce entière lue sur adzuna.fr, puis, pour celles qu'Adzuna
+  // tient de Free-Work, sur Free-Work (« Profil recherché », employeur réel). Avant trajets, IA et mails.
   onFinished: async (report) => {
     const zone = await currentZone();
-    const completed = await completeFreeWorkAds({ prisma, freeWork: { search: (q) => searchFreeWork(q), ad: (l) => fetchFreeWorkAd(l) }, ...(zone ? { zone } : {}), log: (m) => log(m) })
-      .then((r) => r.completed)
-      .catch((err) => (log(`Annonces Free-Work : ${String(err)}`), 0));
-    // Autres offres Adzuna : l'API n'en donne que 500 caractères, l'annonce entière est lue sur adzuna.fr.
     const adzuna = await completeAdzunaAds({ prisma, fetchAd: (id) => fetchAdzunaAd(id), ...(zone ? { zone } : {}), log: (m) => log(m) })
       .then((r) => r.completed)
       .catch((err) => (log(`Annonces Adzuna : ${String(err)}`), 0));
+    const completed = await completeFreeWorkAds({ prisma, freeWork: { search: (q) => searchFreeWork(q), ad: (l) => fetchFreeWorkAd(l) }, ...(zone ? { zone } : {}), log: (m) => log(m) })
+      .then((r) => r.completed)
+      .catch((err) => (log(`Annonces Free-Work : ${String(err)}`), 0));
     await afterCollect(report, report.created + report.updated + completed + adzuna > 0);
   },
 });

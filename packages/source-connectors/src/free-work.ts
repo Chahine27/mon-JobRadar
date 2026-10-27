@@ -26,12 +26,21 @@ export async function searchFreeWork(query: string, fetchImpl: typeof fetch = fe
   }
 }
 
-/** Annonce Free-Work (texte HTML, date, employeur) ; null si la page est illisible. */
+/** Bloc « Profil recherché » de la page (expérience attendue, profil) : hors du JobPosting, il manquait au texte. */
+export function freeWorkProfile(html: string): string | null {
+  return html.match(/Profil recherché(?:<!--\]-->)?<\/h2>\s*<div class="html-renderer[^"]*">([\s\S]*?)<\/div>/)?.[1]?.trim() || null;
+}
+
+/** Annonce Free-Work (texte HTML suivi du « Profil recherché », date, employeur) ; null si la page est illisible. */
 export async function fetchFreeWorkAd(link: string, fetchImpl: typeof fetch = fetch): Promise<(PageDetails & { url: string }) | null> {
   const url = link.startsWith("http") ? link : `${BASE}${link}`;
   try {
     const res = await fetchImpl(url, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(15_000) });
-    return res.ok ? { ...detailsFromPage(await res.text()), url } : null;
+    if (!res.ok) return null;
+    const html = await res.text();
+    const page = detailsFromPage(html);
+    const profile = freeWorkProfile(html);
+    return { ...page, description: page.description && profile ? `${page.description}<h2>Profil recherché</h2>${profile}` : page.description, url };
   } catch {
     return null;
   }

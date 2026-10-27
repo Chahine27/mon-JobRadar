@@ -55,8 +55,9 @@ const adzunaPage = (sourceJobId: string, fetchImpl: typeof fetch) =>
  * Annonce entière d'une offre Adzuna (l'API n'en donne que 500 caractères), lue sur sa page publique :
  * objet `window["az_details"]` de la page, champ `description` (HTML). Testé le 27/10/2026.
  * null = page illisible ou refusée (429, réseau) ; `description: null` = offre retirée (404 / 410) ou page sans texte.
+ * `partner` : site d'où Adzuna tient l'annonce (logo de la page, ex. « Free-Work », « Apec »).
  */
-export async function fetchAdzunaAd(sourceJobId: string, fetchImpl: typeof fetch = fetch): Promise<{ description: string | null } | null> {
+export async function fetchAdzunaAd(sourceJobId: string, fetchImpl: typeof fetch = fetch): Promise<{ description: string | null; partner?: string | null } | null> {
   if (!/^\d+$/.test(sourceJobId)) return { description: null };
   try {
     const res = await adzunaPage(sourceJobId, fetchImpl);
@@ -65,7 +66,8 @@ export async function fetchAdzunaAd(sourceJobId: string, fetchImpl: typeof fetch
       return { description: null };
     }
     if (res.status !== 200) return null;
-    return { description: adzunaDescription(await res.text()) };
+    const html = await res.text();
+    return { description: adzunaDescription(html), partner: html.match(/\/partners\/logo_[^"]+"\s+alt="([^"]+)"/)?.[1]?.trim() || null };
   } catch {
     return null;
   }

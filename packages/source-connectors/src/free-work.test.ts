@@ -16,4 +16,12 @@ describe("Free-Work", () => {
       new Response(`<script type="application/ld+json">{"@type":"JobPosting","description":"<p>Mission</p>","hiringOrganization":{"name":"CELAD"}}</script>`)) as unknown as typeof fetch;
     expect(await fetchFreeWorkAd(link, page)).toMatchObject({ description: "<p>Mission</p>", company: "CELAD", url: `https://www.free-work.com${link}` });
   });
+
+  it("bloc « Profil recherché » (hors du JobPosting) ajouté au texte : il porte l'expérience attendue", async () => {
+    // Forme réelle de la page (27/10/2026, annonce OCTOGONE).
+    const html = `<script type="application/ld+json">{"@type":"JobPosting","description":"<p>Mission</p>"}</script>
+      <div class="p-4"><h2 class="font-semibold text-xl mb-4"><!--[-->Profil recherché<!--]--></h2><div class="html-renderer prose-content"><p>Expérience attendue : 2 à 7 ans</p></div></div>`;
+    const page = (async () => new Response(html)) as unknown as typeof fetch;
+    expect((await fetchFreeWorkAd(link, page))?.description).toBe("<p>Mission</p><h2>Profil recherché</h2><p>Expérience attendue : 2 à 7 ans</p>");
+  });
 });
