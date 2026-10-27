@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { analyzeJobText } from "../../packages/job-normalizer/src/manual-analyze.ts";
-import { buildPayload, findJobPosting, htmlToText, indeedJobUrl, linkedinJobUrl } from "./extract.js";
+import { buildPayload, findJobPosting, htmlToText, indeedJobUrl, linkedinCompanyInfo, linkedinJobUrl } from "./extract.js";
 import { INDEED_SEARCH_PAGE } from "./indeed.fixture.js";
 
 const base = { url: "https://example.com/offre/1", host: "example.com", pageTitle: "", h1: "", selection: "", jsonLd: [], headerTitle: "", headerCompany: "", headerText: "", descriptionText: "", mainText: "", sideText: "" };
@@ -228,6 +228,14 @@ describe("LinkedIn : seulement la carte du poste et « À propos de l'offre d'em
     expect(p.text).toContain("INFOS À CÔTÉ DE L'ANNONCE\nÀ propos de l'entreprise");
     expect(p.text).not.toContain("Viveris");
     expect(p.url).toBe("https://www.linkedin.com/jobs/view/4312345678/");
+  });
+
+  it("bloc « À propos de l'entreprise » : nom, secteur, taille ; ni abonnés, ni « Suivre », ni présentation (VISIAN via Free-Work)", () => {
+    const block = "À propos de l’entreprise\n\nFree-Work\n\n101 192 abonnés\n\nSuivre\n\nServices de ressources humaines\n\n •\n\n11-50 employés\n\n •\n\n1 952 sur LinkedIn\n\nBienvenue chez Free-Work, votre partenaire dédié aux talents IT.\n\nQue vous soyez freelance, salarié…";
+    expect(linkedinCompanyInfo(block)).toBe("À propos de l’entreprise\nFree-Work\nServices de ressources humaines\n11-50 employés");
+    const p = buildPayload({ ...li, linkedinJob: job, linkedinCompany: block });
+    expect(p.text).toContain("INFOS À CÔTÉ DE L'ANNONCE\nÀ propos de l’entreprise\nFree-Work");
+    expect(p.text).not.toMatch(/abonnés|Bienvenue chez|freelance/);
   });
 
   it("adresse LinkedIn : numéro « currentJobId » ou /jobs/view/<id>", () => {

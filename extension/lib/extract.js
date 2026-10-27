@@ -13,6 +13,20 @@ const clean = (s) =>
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
+/** Lignes sans intérêt du bloc LinkedIn « À propos de l'entreprise » : abonnés, « Suivre », puces, employés sur LinkedIn. */
+const LI_NOISE = /^(•|·|suivre|follow)$|\b(abonnés|followers)$|\b(sur|on) linkedin$/i;
+
+/**
+ * Bloc LinkedIn « À propos de l'entreprise » réduit à son titre, au nom, au secteur et à la taille. La présentation qui suit
+ * (publicité, souvent celle du site qui publie comme Free-Work) était lue comme l'annonce. Même règle côté serveur :
+ * trimLinkedinCompany (packages/shared).
+ */
+export function linkedinCompanyInfo(block) {
+  const lines = clean(block).split("\n").map((l) => l.trim()).filter((l) => l && !LI_NOISE.test(l));
+  const size = lines.findIndex((l) => /\b(employés|employees)\b/i.test(l));
+  return lines.slice(0, size >= 0 ? size + 1 : 4).join("\n");
+}
+
 /** HTML de la description (données structurées) → texte lisible, sans navigateur. */
 export function htmlToText(html) {
   return clean(
@@ -247,7 +261,7 @@ export function buildPayload(raw) {
   // LinkedIn : seulement la carte du haut + « À propos de l'offre d'emploi » (+ « À propos de l'entreprise » en infos).
   if (/(^|\.)linkedin\./i.test(raw.host ?? "") && clean(raw.selection).length < 200 && clean(raw.linkedinJob).length >= 200) {
     const li = fromLinkedInTitle(raw.pageTitle);
-    const company = clean(raw.linkedinCompany);
+    const company = linkedinCompanyInfo(raw.linkedinCompany);
     const extra = company ? `\n\nINFOS À CÔTÉ DE L'ANNONCE\n${company}` : "";
     return {
       url: linkedinJobUrl(raw.url),

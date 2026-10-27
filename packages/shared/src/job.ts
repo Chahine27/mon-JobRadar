@@ -72,6 +72,22 @@ export type RawJob = {
 /** Sources dont l'API ne donne qu'un extrait de l'annonce. */
 export const ABRIDGED_SOURCES = ["adzuna", "jooble"];
 
+const LI_NOISE = /^(•|·|suivre|follow)$|\b(abonnés|followers)$|\b(sur|on) linkedin$/i;
+
+/**
+ * Bloc LinkedIn « À propos de l'entreprise » ajouté par l'extension (INFOS À CÔTÉ DE L'ANNONCE) : réduit au nom, au secteur
+ * et à la taille. Abonnés, « Suivre » et présentation (publicité, souvent celle du site qui publie, Free-Work pour VISIAN)
+ * étaient lus comme l'annonce par le score et l'IA. Appliqué à la lecture : vaut aussi pour les textes déjà en base
+ * (24 le 27/10/2026). Même règle que linkedinCompanyInfo de l'extension.
+ */
+export function trimLinkedinCompany(text: string): string {
+  const m = text.match(/(INFOS À CÔTÉ DE L'ANNONCE\s*\n\s*À propos de l['’]entreprise)([\s\S]*)$/);
+  if (!m) return text;
+  const lines = m[2]!.split("\n").map((l) => l.trim()).filter((l) => l && !LI_NOISE.test(l));
+  const size = lines.findIndex((l) => /\b(employés|employees)\b/i.test(l));
+  return `${text.slice(0, m.index)}${m[1]}\n${lines.slice(0, size >= 0 ? size + 1 : 3).join("\n")}`;
+}
+
 /** La source n'a donné aucune description (ex. LinkedIn sans le détail) : il n'y a rien à lire. */
 export const hasNoDescription = (j: { description: string }) => j.description.trim() === "";
 

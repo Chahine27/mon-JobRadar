@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from "@job-radar/db";
 import { buildManualJob, removeManualJob, saveManualJob } from "@job-radar/pipeline";
 import { contractFromTitle, contractOfJob, normalizeContract, salaryOfJob } from "@job-radar/scoring";
 import type { TailoredCvDraft } from "@job-radar/cv-tailor";
-import { type ApplyChannel, type ApplyCv, type CvMaster, CvMasterSchema, CvOverridesSchema, EMPTY_LETTER_KIT, EMPTY_OVERRIDES, LetterKitSchema, parseProfile, type TemplateId } from "@job-radar/shared";
+import { type ApplyChannel, type ApplyCv, type CvMaster, CvMasterSchema, CvOverridesSchema, EMPTY_LETTER_KIT, EMPTY_OVERRIDES, LetterKitSchema, parseProfile, type TemplateId, trimLinkedinCompany } from "@job-radar/shared";
 import { applyEdits, type FullTextInfo, type HomeLocation, type JobEdits, type JobRow, type ProfileRecord, type Stores } from "./stores";
 
 const jobInclude = {
@@ -67,6 +67,8 @@ function toJobRow(j: JobWithRelations): JobRow {
       row.salaryMax = info.salaryMax ?? info.salaryMin;
     }
   }
+  // Bloc LinkedIn « À propos de l'entreprise » de l'extension : seulement nom, secteur, taille (pas la publicité).
+  row.description = trimLinkedinCompany(row.description);
   // Même règle que le score : la pastille « Contrat » affiche ce que le score utilise.
   const stated = normalizeContract(row.contractType) ?? contractFromTitle(row.title);
   Object.assign(row, readFromText(row));
