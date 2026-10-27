@@ -41,6 +41,48 @@ export const AdzunaJobSchema = z.looseObject({
 });
 export type AdzunaJob = z.infer<typeof AdzunaJobSchema>;
 
+const adzunaPage = (sourceJobId: string, fetchImpl: typeof fetch) =>
+  fetchImpl(`https://www.adzuna.fr/details/${sourceJobId}`, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+      Accept: "text/html",
+      "Accept-Language": "fr-FR,fr;q=0.9",
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+
+/**
+ * Annonce entière d'une offre Adzuna (l'API n'en donne que 500 caractères), lue sur sa page publique :
+ * objet `window["az_details"]` de la page, champ `description` (HTML). Testé le 27/10/2026.
+ * null = page illisible ou refusée (429, réseau) ; `description: null` = offre retirée (404 / 410) ou page sans texte.
+ */
+export async function fetchAdzunaAd(sourceJobId: string, fetchImpl: typeof fetch = fetch): Promise<{ description: string | null } | null> {
+  if (!/^\d+$/.test(sourceJobId)) return { description: null };
+  try {
+    const res = await adzunaPage(sourceJobId, fetchImpl);
+    if (res.status === 404 || res.status === 410) {
+      await res.body?.cancel().catch(() => {});
+      return { description: null };
+    }
+    if (res.status !== 200) return null;
+    return { description: adzunaDescription(await res.text()) };
+  } catch {
+    return null;
+  }
+}
+
+/** Description (HTML) de l'objet `az_details` d'une page d'offre Adzuna ; null si absente. */
+export function adzunaDescription(html: string): string | null {
+  const m = html.match(/window\["az_details"\]\s*=\s*(\{[\s\S]*?\})\s*;?\s*<\/script>/);
+  if (!m) return null;
+  try {
+    const d = (JSON.parse(m[1]!) as { description?: unknown }).description;
+    return typeof d === "string" && d.trim() ? d : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * L'offre est-elle encore sur Adzuna ? Page publique adzuna.fr/details/<id> (l'id de l'API) :
  * 200 = en ligne, 404 / 410 = retirée (testé le 27/10/2026), autre chose (403 CloudFront, réseau) = null, on ne conclut rien.
@@ -49,14 +91,7 @@ export type AdzunaJob = z.infer<typeof AdzunaJobSchema>;
 export async function adzunaJobIsOpen(sourceJobId: string, fetchImpl: typeof fetch = fetch): Promise<boolean | null> {
   if (!/^\d+$/.test(sourceJobId)) return null;
   try {
-    const res = await fetchImpl(`https://www.adzuna.fr/details/${sourceJobId}`, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-        Accept: "text/html",
-        "Accept-Language": "fr-FR,fr;q=0.9",
-      },
-      signal: AbortSignal.timeout(15_000),
-    });
+    const res = await adzunaPage(sourceJobId, fetchImpl);
     await res.body?.cancel().catch(() => {}); // seul le code compte : la page (50-90 Ko) n'est pas lue
     if (res.status === 404 || res.status === 410) return false;
     return res.status === 200 ? true : null;

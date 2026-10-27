@@ -102,6 +102,63 @@ export async function completeJobScraperDescriptions(opts: {
   return { checked: links.length, completed };
 }
 
+/**
+ * Offres Adzuna réduites à l'extrait de l'API (500 caractères) : annonce entière lue sur leur page adzuna.fr, puis
+ * repassée par la normalisation → technologies, expérience, télétravail et score calculés sur tout le texte.
+ * Un seul lien par offre (le plus récent). Pas les annonces Free-Work (cf. completeFreeWorkAds, qui trouve aussi
+ * l'employeur), ni celles dont le texte vient déjà d'une autre source. Page retirée ou vide : nouvel essai dans 1 jour.
+ */
+export async function completeAdzunaAds(opts: {
+  prisma: PrismaClient;
+  /** Page de l'offre (fetchAdzunaAd) : null = refusée ou illisible, on arrête ce passage. */
+  fetchAd: (sourceJobId: string) => Promise<{ description: string | null } | null>;
+  /** Pages au plus par passage, 3 s d'écart (Adzuna répond 429 en dessous, cf. expireJobs). */
+  max?: number;
+  sleep?: (ms: number) => Promise<void>;
+  log?: (m: string) => void;
+  zone?: Set<string>;
+}): Promise<{ checked: number; completed: number }> {
+  const { prisma, log = () => {} } = opts;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const all = await prisma.jobSourceLink.findMany({
+    where: { source: "adzuna", job: { fullTextAt: null, status: { in: ["NEW", "SEEN", "SAVED"] } } },
+    select: { id: true, jobId: true, sourceJobId: true, rawData: true, firstSeenAt: true, job: { select: { company: true, description: true, department: true, remoteType: true } } },
+    orderBy: { firstSeenAt: "desc" },
+  });
+  const raw = (l: (typeof all)[number]) => (l.rawData ?? {}) as Record<string, unknown>;
+  // Offre dont une annonce Adzuna a déjà été lue en entier : rien à refaire pour ses autres liens.
+  const done = new Set(all.filter((l) => raw(l)[DETAIL_FETCHED] === true).map((l) => l.jobId));
+  const seen = new Set<string>();
+  const links = all
+    .filter((l) => l.job.company !== FREE_WORK_COMPANY && !done.has(l.jobId))
+    .filter((l) => !opts.zone || !outOfZone(l.job, opts.zone))
+    .filter((l) => (seen.has(l.jobId) ? false : (seen.add(l.jobId), true)))
+    .filter((l) => {
+      const tried = raw(l)[DETAIL_TRIED_AT];
+      return typeof tried !== "string" || Date.now() - Date.parse(tried) > 86_400_000;
+    })
+    .slice(0, opts.max ?? 20);
+  let completed = 0;
+  let checked = 0;
+  for (const link of links) {
+    const n = normalize({ source: "adzuna", sourceJobId: link.sourceJobId, data: link.rawData, collectedAt: link.firstSeenAt });
+    // Texte venu d'une autre source (LinkedIn, Indeed…), plus long que l'extrait : déjà complet.
+    if (!n || link.job.description.trim().length > n.description.trim().length + 50) continue;
+    if (checked++ > 0) await sleep(3000);
+    const ad = await opts.fetchAd(link.sourceJobId);
+    const text = ad?.description ? htmlToText(ad.description).trim() : "";
+    if (!ad || text.length < 100) {
+      await prisma.jobSourceLink.update({ where: { id: link.id }, data: { rawData: { ...raw(link), [DETAIL_TRIED_AT]: new Date().toISOString() } } });
+      if (!ad) break; // Adzuna refuse (429) : on arrête ce passage, insister prolonge le blocage.
+      continue;
+    }
+    const next = normalize({ source: "adzuna", sourceJobId: link.sourceJobId, data: { ...raw(link), description: ad.description, [DETAIL_FETCHED]: true }, collectedAt: link.firstSeenAt });
+    if (next && (await ingestJob(prisma, next)) === "updated") completed++;
+  }
+  if (checked) log(`Offres Adzuna complétées (annonce entière lue sur adzuna.fr) : ${completed} sur ${checked}`);
+  return { checked, completed };
+}
+
 /** Recherche et lecture des annonces Free-Work (cf. searchFreeWork / fetchFreeWorkAd ; remplaçables dans les tests). */
 export type FreeWorkClient = {
   search: (query: string) => Promise<string[] | null>;

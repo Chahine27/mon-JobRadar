@@ -10,7 +10,7 @@ import {
   notifyNewMatches,
   notifyNotice,
 } from "@job-radar/notifications";
-import { type CollectReport, CollectionRunner, type RunnerOptions, completeFreeWorkAds, completeJobScraperDescriptions, renormalizeJobs, splitMergedAds, undoSalarySplits, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
+import { type CollectReport, CollectionRunner, type RunnerOptions, completeAdzunaAds, completeFreeWorkAds, completeJobScraperDescriptions, renormalizeJobs, splitMergedAds, undoSalarySplits, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
 import { OsrmRoutingService, PrimRoutingService, ensureTravelTimes, fillDepartments, geocode } from "@job-radar/routing";
 import { scoreJob, scoringInputFromJob } from "@job-radar/scoring";
 import { parseProfile, zoneDepartments } from "@job-radar/shared";
@@ -28,6 +28,7 @@ import {
   searchFreeWork,
   linkedinJobIsOpen,
   adzunaJobIsOpen,
+  fetchAdzunaAd,
   LaBonneBoiteClient,
 } from "@job-radar/source-connectors";
 import { buildApp } from "./app";
@@ -211,7 +212,11 @@ const runner = new CollectionRunner({
     const completed = await completeFreeWorkAds({ prisma, freeWork: { search: (q) => searchFreeWork(q), ad: (l) => fetchFreeWorkAd(l) }, ...(zone ? { zone } : {}), log: (m) => log(m) })
       .then((r) => r.completed)
       .catch((err) => (log(`Annonces Free-Work : ${String(err)}`), 0));
-    await afterCollect(report, report.created + report.updated + completed > 0);
+    // Autres offres Adzuna : l'API n'en donne que 500 caractères, l'annonce entière est lue sur adzuna.fr.
+    const adzuna = await completeAdzunaAds({ prisma, fetchAd: (id) => fetchAdzunaAd(id), ...(zone ? { zone } : {}), log: (m) => log(m) })
+      .then((r) => r.completed)
+      .catch((err) => (log(`Annonces Adzuna : ${String(err)}`), 0));
+    await afterCollect(report, report.created + report.updated + completed + adzuna > 0);
   },
 });
 
