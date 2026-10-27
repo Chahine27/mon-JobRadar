@@ -246,6 +246,9 @@ describe("stages : réservé aux étudiants, débouché, POEI / PMSMP", () => {
     ["Tous nos stages sont conventionnés.", "stages sont conventionnes"],
     ["Currently pursuing a Master's degree (M1 or M2).", "currently pursuing"],
     ["Vous êtes actuellement en Bac+4 ou Bac+5.", "actuellement en bac"],
+    // Siemens, 27/10/2026 : « en formation en école » n'était pas reconnu (stage noté 70).
+    ["Vous êtes en formation en école d'ingénieur ou en Master en mathématiques ou informatique (Bac+5).", "vous etes en formation"],
+    ["Profil : en formation en Master informatique.", "en formation en master"],
     ["Stage de 6 mois en React, rejoins une équipe de 10 personnes.", null],
     ["Une première expérience en développement.", null],
   ])("studentOnlyInternship « %s » → %s", (text, expected) => expect(studentOnlyInternship(text)).toBe(expected));
