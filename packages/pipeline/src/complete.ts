@@ -285,3 +285,87 @@ export async function completeFreeWorkAds(opts: {
   if (links.length) log(`Offres Adzuna / Free-Work complétées (annonce entière, employeur) : ${completed} sur ${links.length}`);
   return { checked: links.length, completed };
 }
+
+/** Recherche HelloWork et lecture d'une annonce (cf. searchHelloWork / fetchJobScraperDetails ; remplaçables dans les tests). */
+export type HelloWorkClient = {
+  search: (query: string) => Promise<string[] | null>;
+  ad: (url: string) => Promise<{ description: string | null } | null>;
+};
+
+/**
+ * Offres Jooble venues de HelloWork : Jooble n'en donne qu'un extrait de 300 caractères et ses pages refusent les robots
+ * (Cloudflare). Annonce retrouvée par la recherche de HelloWork (titre + entreprise, puis titre seul), prise seulement si
+ * elle contient le début de l'extrait Jooble (même titre chez un autre client = refusée), puis repassée par la
+ * normalisation avec le texte entier. HelloWork : 117 des 317 offres actives vues sur Jooble seul (28/10/2026).
+ * Pas trouvée : nouvel essai dans 1 jour. Seulement les offres encore utiles dont le texte est encore l'extrait Jooble.
+ */
+export async function completeJoobleAds(opts: {
+  prisma: PrismaClient;
+  helloWork: HelloWorkClient;
+  /** Offres au plus par passage (jusqu'à 2 recherches et `pages` annonces lues pour chacune). */
+  max?: number;
+  pages?: number;
+  sleep?: (ms: number) => Promise<void>;
+  log?: (m: string) => void;
+  zone?: Set<string>;
+}): Promise<{ checked: number; completed: number }> {
+  const { prisma, log = () => {}, pages = 4 } = opts;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const raw = (l: { rawData: unknown }) => (l.rawData ?? {}) as Record<string, unknown>;
+  const links = (
+    await prisma.jobSourceLink.findMany({
+      where: { source: "jooble", job: { fullTextAt: null, status: { in: ["NEW", "SEEN", "SAVED"] } } },
+      select: { id: true, sourceJobId: true, rawData: true, firstSeenAt: true, job: { select: { title: true, company: true, description: true, department: true, remoteType: true } } },
+      orderBy: { firstSeenAt: "desc" },
+    })
+  )
+    .filter((l) => raw(l).source === "hellowork.com" && raw(l)[DETAIL_FETCHED] !== true)
+    .filter((l) => !opts.zone || !outOfZone(l.job, opts.zone))
+    .filter((l) => {
+      const tried = raw(l)[DETAIL_TRIED_AT];
+      return typeof tried !== "string" || Date.now() - Date.parse(tried) > 86_400_000;
+    })
+    .slice(0, opts.max ?? 8);
+  let completed = 0;
+  let checked = 0;
+  let requests = 0;
+  const pause = () => (requests++ > 0 ? sleep(1500) : Promise.resolve());
+  for (const link of links) {
+    const n = normalize({ source: "jooble", sourceJobId: link.sourceJobId, data: link.rawData, collectedAt: link.firstSeenAt });
+    // Texte venu d'une autre source (LinkedIn, Indeed…), plus long que l'extrait : déjà complet.
+    if (!n || link.job.description.trim().length > n.description.trim().length + 50) continue;
+    const excerpt = textKey(n.description).slice(0, 40);
+    if (excerpt.length < 30) continue;
+    checked++;
+    const title = freeWorkQuery(link.job.title);
+    let found: { description: string; url: string } | null = null;
+    let refused = false;
+    for (const query of [...new Set([link.job.company ? `${title} ${link.job.company}` : title, title])]) {
+      await pause();
+      const ads = await opts.helloWork.search(query);
+      if (!ads) {
+        refused = true;
+        break;
+      }
+      for (const url of ads.slice(0, pages)) {
+        await pause();
+        const page = await opts.helloWork.ad(url);
+        if (page?.description && textKey(htmlToText(page.description)).includes(excerpt)) {
+          found = { description: page.description, url };
+          break;
+        }
+      }
+      if (found) break;
+    }
+    if (!found) {
+      await prisma.jobSourceLink.update({ where: { id: link.id }, data: { rawData: { ...raw(link), [DETAIL_TRIED_AT]: new Date().toISOString() } } });
+      if (refused) break; // HelloWork refuse : on arrête ce passage (insister prolonge un blocage).
+      continue;
+    }
+    const data = { ...raw(link), snippet: found.description, helloWorkUrl: found.url, [DETAIL_FETCHED]: true };
+    const next = normalize({ source: "jooble", sourceJobId: link.sourceJobId, data, collectedAt: link.firstSeenAt });
+    if (next && (await ingestJob(prisma, next)) === "updated") completed++;
+  }
+  if (checked) log(`Offres Jooble / HelloWork complétées (annonce entière) : ${completed} sur ${checked}`);
+  return { checked, completed };
+}

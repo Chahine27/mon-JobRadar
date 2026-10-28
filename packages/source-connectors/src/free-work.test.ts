@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fetchFreeWorkAd, freeWorkAdLinks, searchFreeWork } from "./free-work";
+import { helloWorkAdLinks, searchHelloWork } from "./hellowork";
 
 const link = "/fr/tech-it/job-mission/developpeur-java-kotlin-groovy-scala/developpeur-java-backend-spring-batch-tdd-29";
 
@@ -23,5 +24,14 @@ describe("Free-Work", () => {
       <div class="p-4"><h2 class="font-semibold text-xl mb-4"><!--[-->Profil recherché<!--]--></h2><div class="html-renderer prose-content"><p>Expérience attendue : 2 à 7 ans</p></div></div>`;
     const page = (async () => new Response(html)) as unknown as typeof fetch;
     expect((await fetchFreeWorkAd(link, page))?.description).toBe("<p>Mission</p><h2>Profil recherché</h2><p>Expérience attendue : 2 à 7 ans</p>");
+  });
+});
+
+describe("HelloWork (offres Jooble)", () => {
+  it("liens des annonces d'une page de résultats, adresse complète, sans doublon", async () => {
+    const html = `<a href="/fr-fr/emplois/84686451.html?from=x">A</a><a href="/fr-fr/emplois/84686451.html">A</a><a href="/fr-fr/entreprises/fayat.html">F</a><a href="/fr-fr/emplois/69420897.html">B</a>`;
+    expect(helloWorkAdLinks(html)).toEqual(["https://www.hellowork.com/fr-fr/emplois/84686451.html", "https://www.hellowork.com/fr-fr/emplois/69420897.html"]);
+    const refused = (async () => new Response("", { status: 403 })) as unknown as typeof fetch;
+    expect(await searchHelloWork("dev", refused)).toBeNull();
   });
 });
