@@ -110,8 +110,9 @@ const WTTJ_HEADERS = {
   Referer: "https://www.welcometothejungle.com/",
   Origin: "https://www.welcometothejungle.com",
 };
+// « temporary » = le filtre « CDD / Temporaire » du site (contrats publics, remplacements), pas de l'intérim.
 const WTTJ_CONTRACTS: Record<string, string> = {
-  full_time: "cdi", part_time: "cdi", fixed_term: "cdd", temporary: "interim",
+  full_time: "cdi", part_time: "cdi", fixed_term: "cdd", temporary: "cdd",
   internship: "stage", apprenticeship: "alternance", freelance: "freelance", vie: "cdd",
 };
 

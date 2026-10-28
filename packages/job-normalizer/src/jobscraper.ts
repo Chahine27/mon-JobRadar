@@ -34,7 +34,11 @@ export function normalizeJobScraper(raw: RawJob): NormalizedJob | null {
   const remoteType = job.workplace === "hybrid" ? "hybrid" : job.remote == null ? "unknown" : job.remote ? "remote" : "onsite";
   // LinkedIn n'a pas de type « CDI » : JobScraper traduit « Temps plein » (le temps de travail) en « cdi ».
   // Un stage à temps plein serait donc un CDI → inconnu ; le contrat est lu dans le titre ou la description.
-  const contractType = provider === "linkedin" && job.contract_type === "cdi" ? null : contractFromLabel(job.contract_type);
+  // WTTJ « CDD / Temporaire » était collecté en « interim » avant 2026-10-28 : c'est un CDD.
+  const contractType =
+    provider === "linkedin" && job.contract_type === "cdi" ? null
+    : provider === "wttj" && job.contract_type === "interim" ? "CDD"
+    : contractFromLabel(job.contract_type);
   const publishedAt = job.posted_at ? parseParisDate(job.posted_at) : null;
   // LinkedIn « Mid-Senior level » / « Confirmé » (mis sur presque toutes les annonces) arrive en « senior » : ne dit rien.
   const level = provider === "linkedin" && job.experience_level === "senior" ? null : job.experience_level;

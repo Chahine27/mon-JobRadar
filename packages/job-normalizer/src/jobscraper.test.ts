@@ -40,6 +40,11 @@ describe("JobScraper normalization", () => {
     expect(wttj?.contractType).toBe("CDI");
   });
 
+  it("WTTJ : « interim » des anciennes collectes = « CDD / Temporaire » → CDD", () => {
+    const data = { id: "w-9", source: "wttj", url: "https://example.test/jobs/9", title: "Développeur Full Stack", company: "PSL", location: "Paris", contract_type: "interim" };
+    expect(normalize({ source: "jobscraper:wttj", sourceJobId: "w-9", collectedAt: new Date(), data })?.contractType).toBe("CDD");
+  });
+
   it("LinkedIn : « senior » vient de « Mid-Senior level » (quasi systématique) → ignoré ; WTTJ le garde", () => {
     const base = { id: "li-8", url: "https://example.test/jobs/8", title: "Dev Front", experience_level: "senior" };
     const li = normalize({ source: "jobscraper:linkedin", sourceJobId: "li-8", collectedAt: new Date(), data: { ...base, source: "linkedin" } });
