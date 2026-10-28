@@ -11,7 +11,7 @@ import {
   notifyNotice,
 } from "@job-radar/notifications";
 import { type CollectReport, CollectionRunner, type RunnerOptions, completeAdzunaAds, completeFreeWorkAds, completeJobScraperDescriptions, completeJoobleAds, renormalizeJobs, splitMergedAds, undoSalarySplits, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
-import { OsrmRoutingService, PrimRoutingService, ensureTravelTimes, fillDepartments, geocode } from "@job-radar/routing";
+import { OsrmRoutingService, PrimRoutingService, ensureTravelTimes, fillDepartments, geocode, recheckAddressPoints } from "@job-radar/routing";
 import { scoreJob, scoringInputFromJob } from "@job-radar/scoring";
 import { parseProfile, zoneDepartments } from "@job-radar/shared";
 import {
@@ -409,6 +409,8 @@ void splitMergedAds({ prisma, log: (m) => log(m) })
   .catch((err) => log(`Séparation des annonces : ${String(err)}`))
   .then(() => renormalizeJobs({ prisma, log: (m) => log(m) }))
   .catch((err) => log(`Réapplication des règles : ${String(err)}`))
+  .then(() => recheckAddressPoints({ prisma, log: (m) => log(m) }))
+  .catch((err) => log(`Positions des offres : ${String(err)}`))
   .then(() => warmFeed());
 
 const on = notifiers.filter((n) => n.isConfigured()).map((n) => n.channel);

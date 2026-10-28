@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { geocode } from "./geocode";
 import { PrimRoutingService, nextWeekdayMorning } from "./prim";
-import { originKeyOf, routeKeyOf, travelModeOf } from "./travel";
+import { originKeyOf, routeKeyOf, statedDepartment, travelModeOf } from "./travel";
 import { OsrmRoutingService } from "./osrm";
 import { findCompanySite } from "./company";
 import { communeOf } from "./departments";
@@ -51,6 +51,22 @@ describe("géocodage", () => {
           : json({ features: [{ geometry: { coordinates: [2.4686, 49.2635] }, properties: { name: "Gare de Creil", city: "Creil", score: 0.9 } }] }),
     });
     expect(res[0]!.label).toBe("Gare de Creil Creil");
+  });
+
+  it("département écrit dans l'adresse : résultats ailleurs écartés (ISAGRI Beauvais placé dans le Loir-et-Cher)", async () => {
+    const fetch = async () =>
+      json({
+        features: [
+          { geometry: { coordinates: [1.80777, 47.243949] }, properties: { label: "Rue de Beauvais 41130 Selles-sur-Cher", citycode: "41242", score: 0.6 } },
+          { geometry: { coordinates: [2.08, 49.43] }, properties: { label: "Beauvais", citycode: "60057", score: 0.5 } },
+        ],
+      });
+    expect((await geocode("Beauvais (60), locaux Groupe ISAGRI", { fetch }))[0]!.lat).toBe(47.243949);
+    expect((await geocode("Beauvais (60), locaux Groupe ISAGRI", { fetch, department: "60" }))[0]!.lat).toBe(49.43);
+    expect(statedDepartment("Beauvais (60), locaux Groupe ISAGRI")).toBe("60");
+    expect(statedDepartment("2 BOULEVARD CONDORCET 95000 NEUVILLE-SUR-OISE")).toBe("95");
+    expect(statedDepartment("12 rue de Paris, Creil")).toBeNull(); // un nom de ville n'est pas un département
+    expect(statedDepartment("Base 217, Brétigny-sur-Orge")).toBeNull();
   });
 
   it("requête trop courte → rien", async () => {

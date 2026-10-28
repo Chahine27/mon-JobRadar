@@ -14,6 +14,7 @@ type Feature = {
     toponym?: string;
     city?: string | string[];
     postcode?: string | string[];
+    citycode?: string | string[];
   };
 };
 
@@ -23,6 +24,12 @@ const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v
 function pointOf(f: Feature): [number, number] | null {
   const c = f.geometry?.coordinates;
   return Array.isArray(c) && typeof c[0] === "number" && typeof c[1] === "number" ? [c[0], c[1]] : null;
+}
+
+/** Département d'un résultat (code commune INSEE, sinon code postal : 60057 → 60, 97411 → 974) ; null s'il n'en donne pas. */
+function departmentOf(f: Feature): string | null {
+  const code = first(f.properties?.citycode) ?? first(f.properties?.postcode);
+  return code ? code.slice(0, code.startsWith("97") ? 3 : 2) : null;
 }
 
 function labelOf(f: Feature, fallback: string): string {
@@ -48,10 +55,12 @@ async function search(
 /**
  * Adresse, gare ou ville → coordonnées. Cherche d'abord dans les adresses (BAN), puis dans les lieux
  * nommés (gares, bâtiments… : index « poi »). Résultat peu sûr (score < 0,3) → écarté plutôt qu'un faux point.
+ * `department` : résultats hors de ce département écartés (« Beauvais (60), locaux Groupe ISAGRI » placé dans le
+ * Loir-et-Cher : 207 min de trajet au lieu de 45, 28/10/2026).
  */
 export async function geocode(
   query: string,
-  opts: { fetch?: FetchLike; cityOnly?: boolean; limit?: number; debug?: (features: Feature[]) => void } = {},
+  opts: { fetch?: FetchLike; cityOnly?: boolean; limit?: number; department?: string | null; debug?: (features: Feature[]) => void } = {},
 ): Promise<GeocodeResult[]> {
   const q = query.trim();
   if (q.length < 3) return [];
@@ -59,7 +68,7 @@ export async function geocode(
   const limit = opts.limit ?? 1;
   const toResults = (features: Feature[]) =>
     features
-      .filter((f) => (f.properties?.score ?? 1) >= 0.3 && pointOf(f))
+      .filter((f) => (f.properties?.score ?? 1) >= 0.3 && pointOf(f) && (!opts.department || departmentOf(f) === opts.department))
       .map((f) => {
         const [lng, lat] = pointOf(f)!;
         return {
