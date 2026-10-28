@@ -353,10 +353,13 @@ const app = await buildApp({
     status: () => generalAi.status(),
     analyze: (job, profile) => analyzeJobWithAi(generalAi, job, profile),
     // Offres : Sonnet écrit, Haiku (chaîne « general ») choisit l'angle, vérifie les faits et corrige. Spontanées : IA gratuites.
-    writeLetter: (job, kit, opts) =>
-      opts?.spontaneous
-        ? writeCoverLetter(spontaneousLetterAi, job, kit, new Date(), opts, spontaneousLetterAi)
-        : writeCoverLetter(letterAi, job, kit, new Date(), opts, generalAi),
+    writeLetter: async (job, kit, opts) => {
+      const letter = opts?.spontaneous
+        ? await writeCoverLetter(spontaneousLetterAi, job, kit, new Date(), opts, spontaneousLetterAi)
+        : await writeCoverLetter(letterAi, job, kit, new Date(), opts, generalAi);
+      for (const s of letter.removed) log(`Lettre « ${job.title} » : phrase retirée ou réécrite ${s}`);
+      return letter;
+    },
     readJob: (text, hints) => readJobWithAi(generalAi, text, hints),
     // Relecture avant envoi : LanguageTool (gratuit) + IA gratuite seulement (comme la lecture des mails).
     reviewLetter: (text, ctx) => reviewLetter(text, ctx, { ai: mailAi, factAi: ctx.spontaneous ? mailAi : generalAi }),

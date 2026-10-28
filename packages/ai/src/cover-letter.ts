@@ -804,7 +804,7 @@ export async function writeCoverLetter(
    * La plume (client, Sonnet) n'écrit que la lettre. Par défaut, la même IA fait tout.
    */
   helper: Pick<AiClient, "chatJson"> = client,
-): Promise<{ content: string; model: string; durationMs: number }> {
+): Promise<{ content: string; model: string; durationMs: number; removed: string[] }> {
   const started = Date.now();
   const jobText = `${job.title}\n${job.description}`;
   const objet = opts.spontaneous ? `Candidature spontanée – ${cleanTitle(job.title)}` : `Candidature au poste ${posteDe(cleanTitle(job.title))}`;
@@ -859,7 +859,31 @@ export async function writeCoverLetter(
   if (!best) throw new Error(`Réponse de l'IA hors format : ${lastError}`);
 
   // Vérification des faits par l'IA, puis réécriture ciblée des phrases fautives ou inventées.
-  const invented = await findInventions(helper, best.draft, kit, opts, jobText);
-  const draft = await rewriteFlaggedSentences(helper, best.draft, kit, invented, issuesBySentence(best.draft, best.issues));
-  return { content: fixTypos(assembleLetter(kit, draft, now)), model: client.model, durationMs: Date.now() - started };
+  // Rend aussi les phrases signalées qui ont disparu (retirées ou réécrites), avec la raison.
+  const check = async (c: Candidate) => {
+    const invented = await findInventions(helper, c.draft, kit, opts, jobText);
+    const issues = issuesBySentence(c.draft, c.issues);
+    const draft = await rewriteFlaggedSentences(helper, c.draft, kit, invented, issues);
+    const kept = draft.paragraphes.join(" ");
+    const gone = c.draft.paragraphes.flatMap(splitSentences).filter((s) => !kept.includes(s) && (invented.has(s) || issues.has(s)));
+    return { draft, gone: gone.map((s) => `« ${s} » (${invented.get(s) ?? issues.get(s)})`) };
+  };
+  let { draft, gone } = await check(best);
+  // Des phrases retirées laissent une lettre trop courte, avec des renvois dans le vide (« J'y ai… ») : la plume la
+  // réécrit une fois en entier, même payante (un appel de plus, seulement dans ce cas), en sachant ce qui a été retiré.
+  const removed = [...gone];
+  const words = wordCount(draft);
+  if (words < MIN_WORDS && Date.now() - started < LETTER_BUDGET_MS) {
+    const why = [...best.issues.filter((i) => !i.startsWith("Lettre trop courte")), `Lettre trop courte après relecture (${words} mots) : écris ${MIN_WORDS} à ${MAX_WORDS} mots en développant les blocs.`];
+    if (gone.length) why.push(`Phrases retirées par la vérification des faits, à ne pas redire : ${gone.join(" ; ")}`);
+    const retry = await generate(fixTurns(prompt, best.raw, why), 0.4).catch(() => null);
+    if (retry) {
+      const second = await check(retry);
+      removed.push(...second.gone);
+      if (wordCount(second.draft) > words) draft = second.draft;
+    }
+  }
+  return { content: fixTypos(assembleLetter(kit, draft, now)), model: client.model, durationMs: Date.now() - started, removed };
 }
+
+const wordCount = (d: LetterBody) => d.paragraphes.join(" ").split(/\s+/).length;

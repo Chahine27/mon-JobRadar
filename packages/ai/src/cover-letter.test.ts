@@ -134,6 +134,20 @@ describe("écriture en deux temps : l'angle et les blocs, puis la lettre", () =>
     expect(content).not.toContain("Kafka");
   });
 
+  it("IA payante : lettre trop courte après retrait d'une phrase inventée → réécrite une fois en entier par la plume", async () => {
+    const invented = "Ma collègue du backend écrivait les fonctions serveur pendant que je branchais les écrans.";
+    const short = GOOD.replace("Ce travail en parallèle demandait de bien se parler chaque jour. ".repeat(6), "").replace(/Les équipes métier[^.]*\. /g, "");
+    const pen = fakeClient([short, GOOD], { paid: true });
+    const helper = fakeClient([], { inventions: [{ phrase: invented, raison: "collaboration non prouvée" }] });
+    const { content, removed } = await writeCoverLetter(pen, JOB, KIT, new Date(), {}, helper);
+    expect(pen.calls.map((c) => c.kind)).toEqual(["lettre", "lettre"]);
+    const fix = pen.calls[1]!.user as Array<{ content: string }>;
+    expect(fix[2]!.content).toMatch(/trop courte après relecture/);
+    expect(fix[2]!.content).toMatch(/collaboration non prouvée/);
+    expect(content).toContain("Ce travail en parallèle");
+    expect(removed[0]).toMatch(/Ma collègue du backend/);
+  });
+
   it("candidature spontanée : objet imposé et pas de « votre offre »", async () => {
     const company = { name: "ALPHA LOGICIELS", sector: "Programmation informatique", city: "Creil", department: "60", headcountMin: 10, headcountMax: 19 };
     const job = spontaneousJobInput(company, "Développeur full stack");
