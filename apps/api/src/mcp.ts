@@ -1,5 +1,5 @@
 /**
- * Serveur MCP en LECTURE SEULE : offres, notes et suivi des candidatures, pour Claude Code.
+ * Serveur MCP en LECTURE SEULE : offres, notes, suivi des candidatures et profil, pour Claude Code.
  * Pas de port ouvert : Claude Code le lance sur le serveur par SSH (donc par Tailscale), échange sur stdin/stdout.
  *   claude mcp add --scope user jobradar -- "C:\Program Files\Git\usr\bin\ssh.exe" jobradar "bash -lc 'cd ~/jobradar/apps/api && node_modules/.bin/tsx src/mcp-server.ts'"
  *   (ssh de Git : celui de Windows refuse ~/.ssh/config, dont les droits incluent un autre compte)
@@ -135,6 +135,21 @@ export async function buildMcpServer(databaseUrl: string, env: Record<string, st
         .filter((x) => !stage || x.stage === stage.toUpperCase())
         .sort((x, y) => new Date(y.lastMail?.receivedAt ?? y.date ?? 0).getTime() - new Date(x.lastMail?.receivedAt ?? x.date ?? 0).getTime());
       return json({ total: all.length, byStage, shown: Math.min(limit, kept.length), of: kept.length, applications: kept.slice(0, limit) });
+    },
+  );
+
+  server.registerTool(
+    "voir_profil",
+    {
+      description: "Profil de recherche tel qu'enregistré sur le site : contrats, compétences, expérience, salaire, zones, seuils.",
+      inputSchema: {},
+      annotations: readOnly,
+    },
+    async () => {
+      const rec = await stores.profiles.get(userId);
+      if (!rec) return fail("Aucun profil en base");
+      // Le domicile : seulement son nom, pas ses coordonnées.
+      return json({ ...rec.profile, home: rec.home?.label ?? null, updatedAt: rec.updatedAt });
     },
   );
 

@@ -25,7 +25,7 @@ async function connect() {
 const text = (r: unknown) => (r as { content: Array<{ text: string }> }).content[0]!.text;
 
 describe("serveur MCP (base réelle, lecture seule)", () => {
-  it("liste les offres, détaille l'une d'elles et donne le suivi", async () => {
+  it("liste les offres, détaille l'une d'elles donne le suivi et le profil", async () => {
     const { client, close } = await connect();
     const list = JSON.parse(text(await client.callTool({ name: "lister_offres", arguments: {} })));
     expect(list.offers).toHaveLength(1);
@@ -35,6 +35,8 @@ describe("serveur MCP (base réelle, lecture seule)", () => {
     expect(detail.scoreSteps.length).toBeGreaterThan(0);
     const follow = JSON.parse(text(await client.callTool({ name: "suivi_candidatures", arguments: {} })));
     expect(follow).toMatchObject({ total: 0, applications: [] });
+    const profile = JSON.parse(text(await client.callTool({ name: "voir_profil", arguments: {} })));
+    expect(profile.contracts).toEqual(DEFAULT_PROFILE.contracts);
     await close();
   });
 
