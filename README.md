@@ -6,6 +6,24 @@ Elle collecte des offres sur plusieurs sites, les note selon mon profil, me pré
 > **Comment ce projet a été fait.** Job Radar a été conçu et piloté par moi, Chahine Mehadji, et codé par l'IA **Claude Code**.
 > Je n'ai pas écrit le code moi-même. J'ai fixé les besoins (cahier des charges : [docs/CAHIER-DES-CHARGES.md](docs/CAHIER-DES-CHARGES.md)), discuté longuement de la méthode et des priorités, donné à l'IA les informations dont elle avait besoin, puis testé chaque fonction pour dire ce qui marchait et ce qui ne marchait pas.
 
+## Aperçu
+
+**Les offres** : toutes les sources au même endroit, notées sur 100 et triées selon mon profil.
+
+![Liste des offres](docs/images/offres.png)
+
+**La fiche d'une offre** : avis de l'IA, détail du score, compétences, lettre de motivation et CV adapté.
+
+![Fiche d'une offre](docs/images/fiche-offre.png)
+
+**Les statistiques** : compétences les plus demandées, ce qui me manque, expérience exigée.
+
+![Statistiques](docs/images/statistiques.png)
+
+**Sur téléphone** :
+
+<img src="docs/images/mobile.png" alt="Liste des offres sur téléphone" width="320">
+
 ## Ce que fait l'application
 
 1. **Collecte des offres** automatiquement, toutes les quelques minutes : France Travail, Adzuna, Jooble, pages carrières d'entreprises (Greenhouse, Lever, Ashby, Recruitee, Workable, Personio) et, en option, LinkedIn, Indeed, HelloWork et Welcome to the Jungle.
