@@ -229,9 +229,18 @@ const addLearnable = (skill: string) =>
     job.value = await api.getJob(props.id);
   });
 
-const links = computed(() =>
-  (job.value?.sources ?? []).map((s) => ({ ...s, safe: safeUrl(s.url) })).filter((s) => s.safe),
-);
+// Un bouton par source : une agence qui republie la même annonce ajoute des dizaines de liens identiques.
+const links = computed(() => {
+  const bySource = new Map<string, { source: string; url: string; safe: string; count: number }>();
+  for (const s of job.value?.sources ?? []) {
+    const safe = safeUrl(s.url);
+    if (!safe) continue;
+    const seen = bySource.get(s.source);
+    if (seen) seen.count++;
+    else bySource.set(s.source, { ...s, safe, count: 1 });
+  }
+  return [...bySource.values()];
+});
 // ───── « Pas pour moi » : ignore l'offre et, au choix, ajoute une règle pour les prochaines ─────
 type NotForMeReason = "stack" | "role" | "company" | "expired" | "other";
 const notForMe = ref(false);
@@ -381,8 +390,10 @@ const ruleLabel = (r: ScoreRule) =>
       </span>
     </div>
     <section class="card actions">
-      <a v-for="l in links" :key="l.url" class="btn primary" :href="l.safe!" target="_blank" rel="noopener noreferrer">
+      <a v-for="l in links" :key="l.source" class="btn primary" :href="l.safe" target="_blank" rel="noopener noreferrer"
+         :title="l.count > 1 ? `${l.count} annonces identiques sur cette source` : undefined">
         <SourceLogo :source="l.source" :size="22" /> Voir l'offre sur {{ linkLabel(l.source, l.url) }}
+        <small v-if="l.count > 1">({{ l.count }} annonces)</small>
         <Icon name="external" :size="15" />
       </a>
       <span class="sep" />
