@@ -410,11 +410,7 @@ const dupKey = (appId: string, from: string, kind: string, date: Date) => `${app
 /** `bounced` : candidatures spontanées revenues « adresse introuvable ». */
 export type MailTrackingReport = { read: number; matched: number; recorded: number; rejected: number; bounced: number };
 
-/**
- * Lit les nouveaux mails (lecture seule), reconnaît les réponses à tes candidatures et met les statuts à jour :
- * un refus passe l'offre en « Refusée ». Les mails sans candidature correspondante sont ignorés.
- */
-export async function trackApplicationMails(opts: {
+export type TrackOptions = {
   prisma: PrismaClient;
   inbox: Inbox;
   /** Tes adresses : leurs mails (envois, notifications Job Radar) ne sont jamais des réponses. */
@@ -433,11 +429,10 @@ export async function trackApplicationMails(opts: {
   ignored?: Set<string>;
   now?: Date;
   log?: (m: string) => void;
-}): Promise<MailTrackingReport> {
-  const { prisma, log = () => {} } = opts;
-  const report: MailTrackingReport = { read: 0, matched: 0, recorded: 0, rejected: 0, bounced: 0 };
-  const self = opts.self.map((s) => s.toLowerCase());
+};
 
+/** Candidatures à suivre : offres postulées (ou refusées) et candidatures spontanées envoyées. */
+async function loadApplications(prisma: PrismaClient) {
   const applied = await prisma.jobEvent.findMany({
     where: { type: "STATUS_CHANGED", toValue: "APPLIED", job: { status: { in: ["APPLIED", "REJECTED"] } } },
     orderBy: { createdAt: "asc" },
@@ -452,7 +447,12 @@ export async function trackApplicationMails(opts: {
     ...applied.map((e): JobApplicationRef => ({ kind: "job", id: e.job.id, company: e.job.company, title: e.job.title, since: e.createdAt })),
     ...sent.map((s): SpontaneousRef => ({ kind: "spontaneous", id: s.id, company: s.lead.name, since: s.sentAt!, messageId: s.messageId, sentTo: s.sentTo })),
   ];
-  if (apps.length === 0) return report; // rien à suivre : on ne lit pas la boîte
+  return { apps, sent };
+}
+type SentRow = Awaited<ReturnType<typeof loadApplications>>["sent"][number];
+
+/** Expéditeurs et genres de réponses déjà enregistrés pour chaque candidature (aident à retrouver les suivantes). */
+async function attachKnownReplies(prisma: PrismaClient, apps: ApplicationRef[]) {
   for (const m of await prisma.applicationMail.findMany({ where: { dismissed: false }, select: { jobId: true, spontaneousId: true, fromAddress: true, kind: true } })) {
     const app = apps.find((a) => a.id === (m.jobId ?? m.spontaneousId));
     if (app) {
@@ -460,7 +460,11 @@ export async function trackApplicationMails(opts: {
       app.kinds = [...(app.kinds ?? []), m.kind];
     }
   }
+}
 
+/** Lit les nouveaux mails de la boîte (jamais ceux déjà traités ni tes envois) et note jusqu'où on les a lus. */
+async function fetchMails(opts: TrackOptions, apps: ApplicationRef[], self: string[]) {
+  const { prisma } = opts;
   const since = new Date(Math.min(...apps.map((a) => a.since.getTime())) - 86_400_000);
   const cursorRows = await prisma.mailCursor.findMany({ select: { folder: true, uidValidity: true, lastUid: true, checkedAt: true } });
   const cursors = cursorRows.map(({ checkedAt: _, ...c }) => c);
@@ -485,8 +489,11 @@ export async function trackApplicationMails(opts: {
     ...(rescanSince ? { rescanSince } : {}),
     skip: (m) => done.has(m.messageId) || !!opts.ignored?.has(m.messageId) || self.includes(m.from.toLowerCase()),
   });
-  report.read = mails.length;
+  return { mails, next, since };
+}
 
+/** Mails déjà en base (`known`) et réponses déjà reçues par expéditeur / genre / jour (`seen`, pour ne pas compter deux fois la même). */
+async function loadHandled(prisma: PrismaClient, mails: InboxMail[], since: Date) {
   const known = new Set(
     (await prisma.applicationMail.findMany({ where: { messageId: { in: mails.map((m) => m.messageId) } }, select: { messageId: true } })).map((m) => m.messageId),
   );
@@ -498,243 +505,328 @@ export async function trackApplicationMails(opts: {
       })
     ).map((m) => dupKey(m.jobId ?? m.spontaneousId ?? "", m.fromAddress, m.kind, m.receivedAt)),
   );
-  /** Mail sans rapport : pas en base, seulement retenu en mémoire pour ne pas le redonner à l'IA. */
-  const forget = (mail: InboxMail) => {
-    opts.ignored?.add(mail.messageId);
-    known.add(mail.messageId);
-  };
-  /**
-   * Enregistre une réponse. false = déjà en base : un autre passage l'a lue en même temps (l'API au démarrage pendant
-   * « pnpm mails:retrack ») ; on la saute au lieu de tout arrêter.
-   */
-  const save = (data: Parameters<typeof prisma.applicationMail.create>[0]["data"]) =>
-    prisma.applicationMail.create({ data }).then(
-      () => true,
-      (err: unknown) => {
-        if ((err as { code?: string }).code === "P2002") return false;
-        throw err;
+  return { known, seen };
+}
+
+/** Ce qu'un passage lit et modifie : candidatures suivies, mails déjà traités, compteurs. */
+type Pass = {
+  prisma: PrismaClient;
+  opts: TrackOptions;
+  self: string[];
+  log: (m: string) => void;
+  /** Candidatures suivies ; une candidature à refaire en sort. */
+  apps: ApplicationRef[];
+  sent: SentRow[];
+  known: Set<string>;
+  seen: Set<string>;
+  report: MailTrackingReport;
+};
+
+type MailData = Parameters<PrismaClient["applicationMail"]["create"]>[0]["data"];
+
+/**
+ * Enregistre une réponse. false = déjà en base : un autre passage l'a lue en même temps (l'API au démarrage pendant
+ * « pnpm mails:retrack ») ; on la saute au lieu de tout arrêter.
+ */
+const saveMail = (prisma: PrismaClient, data: MailData) =>
+  prisma.applicationMail.create({ data }).then(
+    () => true,
+    (err: unknown) => {
+      if ((err as { code?: string }).code === "P2002") return false;
+      throw err;
+    },
+  );
+
+/** Mail gardé sans lien (jamais affiché), quand il a changé quelque chose (adresse rejetée, personne partie…). */
+const rememberMail = (prisma: PrismaClient, mail: InboxMail, kind: string, detail: string | null) =>
+  prisma.applicationMail.create({
+    data: { messageId: mail.messageId, kind, detail, subject: mail.subject.slice(0, 500), fromAddress: mail.from.slice(0, 320), receivedAt: mail.date, dismissed: true },
+  });
+
+/** Mail sans rapport : pas en base, seulement retenu en mémoire pour ne pas le redonner à l'IA. */
+function forget(p: Pass, mail: InboxMail) {
+  p.opts.ignored?.add(mail.messageId);
+  p.known.add(mail.messageId);
+}
+
+/**
+ * L'adresse n'était pas la bonne (rejetée, personne partie, support client) : la candidature n'est pas arrivée
+ * au recrutement. Elle redevient « à envoyer » (lettre gardée), l'entreprise « À contacter », avec une note ;
+ * nouvelle adresse donnée par la réponse → elle remplace l'ancienne.
+ */
+async function wrongAddress(p: Pass, spontaneousId: string, mail: InboxMail, w: { kind: string; detail: string; note: string; newEmail?: string | null }) {
+  const { prisma } = p;
+  const s = p.sent.find((x) => x.id === spontaneousId)!;
+  const bad = s.sentTo ?? "";
+  const lead = await prisma.companyLead.findUnique({ where: { id: s.leadId }, select: { status: true, contactEmail: true, notes: true } });
+  const sameEmail = lead?.contactEmail?.toLowerCase() === bad.toLowerCase();
+  await prisma.$transaction([
+    rememberMail(prisma, mail, w.kind, w.detail),
+    prisma.spontaneousApplication.update({ where: { id: s.id }, data: { sentAt: null, sentTo: null, messageId: null } }),
+    prisma.companyLead.update({
+      where: { id: s.leadId },
+      data: {
+        ...(lead?.status === "CONTACTED" ? { status: "TO_CONTACT" } : {}),
+        ...(sameEmail || !lead?.contactEmail ? { contactEmail: w.newEmail ?? null } : {}),
+        notes: [lead?.notes, `${w.note} (${mail.date.toLocaleDateString("fr-FR")})`].filter(Boolean).join("\n").slice(0, 2000),
       },
-    );
-  /** Mail gardé sans lien (jamais affiché), quand il a changé quelque chose (adresse rejetée, personne partie…). */
-  const remember = (mail: InboxMail, kind: string, detail: string | null) =>
-    prisma.applicationMail.create({
-      data: { messageId: mail.messageId, kind, detail, subject: mail.subject.slice(0, 500), fromAddress: mail.from.slice(0, 320), receivedAt: mail.date, dismissed: true },
-    });
+    }),
+  ]);
+  p.known.add(mail.messageId);
+  s.sentTo = null;
+  const i = p.apps.findIndex((a) => a.id === s.id);
+  if (i >= 0) p.apps.splice(i, 1);
+  p.report.bounced++;
+  p.log(`Candidature spontanée à refaire (${s.lead.name}) : ${w.detail}`);
+}
 
-  /**
-   * L'adresse n'était pas la bonne (rejetée, personne partie, support client) : la candidature n'est pas arrivée
-   * au recrutement. Elle redevient « à envoyer » (lettre gardée), l'entreprise « À contacter », avec une note ;
-   * nouvelle adresse donnée par la réponse → elle remplace l'ancienne.
-   */
-  async function wrongAddress(spontaneousId: string, mail: InboxMail, p: { kind: string; detail: string; note: string; newEmail?: string | null }) {
-    const s = sent.find((x) => x.id === spontaneousId)!;
-    const bad = s.sentTo ?? "";
-    const lead = await prisma.companyLead.findUnique({ where: { id: s.leadId }, select: { status: true, contactEmail: true, notes: true } });
-    const sameEmail = lead?.contactEmail?.toLowerCase() === bad.toLowerCase();
-    await prisma.$transaction([
-      remember(mail, p.kind, p.detail),
-      prisma.spontaneousApplication.update({ where: { id: s.id }, data: { sentAt: null, sentTo: null, messageId: null } }),
-      prisma.companyLead.update({
-        where: { id: s.leadId },
-        data: {
-          ...(lead?.status === "CONTACTED" ? { status: "TO_CONTACT" } : {}),
-          ...(sameEmail || !lead?.contactEmail ? { contactEmail: p.newEmail ?? null } : {}),
-          notes: [lead?.notes, `${p.note} (${mail.date.toLocaleDateString("fr-FR")})`].filter(Boolean).join("\n").slice(0, 2000),
-        },
-      }),
-    ]);
-    known.add(mail.messageId);
-    s.sentTo = null;
-    const i = apps.findIndex((a) => a.id === s.id);
-    if (i >= 0) apps.splice(i, 1);
-    report.bounced++;
-    log(`Candidature spontanée à refaire (${s.lead.name}) : ${p.detail}`);
-  }
+/** Rejet du serveur (adresse introuvable, ou n'accepte pas les mails extérieurs). true = traité. */
+async function handleBounce(p: Pass, mail: InboxMail): Promise<boolean> {
+  const pending = p.sent.filter((x) => x.sentTo && x.sentAt && mail.date.getTime() >= x.sentAt.getTime() - 3_600_000);
+  const bounced = bouncedAddress(mail, pending.map((x) => x.sentTo!));
+  if (!bounced) return false;
+  const s = pending.find((x) => x.sentTo!.toLowerCase() === bounced.toLowerCase())!;
+  const reason = bounceReason(mail.text);
+  await wrongAddress(p, s.id, mail, { kind: "BOUNCE", detail: `${bounced} : ${reason}`, note: `Email ${bounced} rejeté : ${reason}. Cherche une autre adresse.` });
+  return true;
+}
 
-  for (let mail of mails.sort((a, b) => a.date.getTime() - b.date.getTime())) {
-    if (known.has(mail.messageId)) continue;
-    // Rejet du serveur (adresse introuvable, ou n'accepte pas les mails extérieurs).
-    const pending = sent.filter((x) => x.sentTo && x.sentAt && mail.date.getTime() >= x.sentAt.getTime() - 3_600_000);
-    const bounced = bouncedAddress(mail, pending.map((x) => x.sentTo!));
-    if (bounced) {
-      const s = pending.find((x) => x.sentTo!.toLowerCase() === bounced.toLowerCase())!;
-      const reason = bounceReason(mail.text);
-      await wrongAddress(s.id, mail, { kind: "BOUNCE", detail: `${bounced} : ${reason}`, note: `Email ${bounced} rejeté : ${reason}. Cherche une autre adresse.` });
-      continue;
-    }
-    if (isNoise(mail, self)) continue;
-    // Le mail entier sert à retrouver la candidature (le message cité dessous la nomme souvent) ;
-    // tout ce qui suit lit la réponse seule, sans ce message d'origine.
-    const candidates = candidateApplications(mail, apps);
-    if (!candidates.length) continue;
-    const full = mail;
-    mail = { ...mail, text: replyOnly(mail.text) };
-    // Message d'absence : pas une réponse, pas besoin de l'IA. La relance attendra le retour.
-    const away = outOfOffice(mail, self);
-    const awayApp = away ? (candidates.length === 1 ? candidates[0]! : matchApplication(full, apps)) : null;
-    if (away && awayApp) {
-      const when = away.back.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
-      await save({
-        messageId: mail.messageId,
-        ...(awayApp.kind === "job" ? { jobId: awayApp.id } : { spontaneousId: awayApp.id }),
-        kind: "AWAY",
-        detail: isoDay(away.back),
-        summary: `Absent : relance possible à partir du ${when}.${away.contact ? ` Autre contact donné : ${away.contact}.` : ""}`,
-        subject: mail.subject.slice(0, 500),
-        fromAddress: mail.from.slice(0, 320),
-        receivedAt: mail.date,
-      });
-      known.add(mail.messageId);
-      report.matched++;
-      report.recorded++;
-      continue;
-    }
+/** Message d'absence : pas une réponse, pas besoin de l'IA. La relance attendra le retour. true = traité. */
+async function handleAway(p: Pass, mail: InboxMail, full: InboxMail, candidates: ApplicationRef[]): Promise<boolean> {
+  const away = outOfOffice(mail, p.self);
+  const awayApp = away ? (candidates.length === 1 ? candidates[0]! : matchApplication(full, p.apps)) : null;
+  if (!away || !awayApp) return false;
+  const when = away.back.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+  await saveMail(p.prisma, {
+    messageId: mail.messageId,
+    ...(awayApp.kind === "job" ? { jobId: awayApp.id } : { spontaneousId: awayApp.id }),
+    kind: "AWAY",
+    detail: isoDay(away.back),
+    summary: `Absent : relance possible à partir du ${when}.${away.contact ? ` Autre contact donné : ${away.contact}.` : ""}`,
+    subject: mail.subject.slice(0, 500),
+    fromAddress: mail.from.slice(0, 320),
+    receivedAt: mail.date,
+  });
+  p.known.add(mail.messageId);
+  p.report.matched++;
+  p.report.recorded++;
+  return true;
+}
 
-    let app: ApplicationRef | null = null;
-    let verdict: MailVerdict | null = null;
-    let summary: string | null = null;
-    let review = false;
-    let answered = Boolean(opts.classify); // false = pas d'IA ou IA en panne : règles, et le mail sera relu
-    if (opts.classify) {
-      try {
-        const r = await opts.classify(
-          { subject: mail.subject, from: mail.from, text: mail.text.slice(0, 4000) },
-          candidates.map((a) => ({ company: a.company ?? "", title: a.kind === "job" ? a.title : null, since: a.since })),
-        );
-        // Aucune candidature : sauf réponse dans le fil d'une spontanée (départ, support, site carrière, vus plus bas).
-        const thread = candidates.length === 1 && candidates[0]!.kind === "spontaneous" ? candidates[0]! : null;
-        // Vraie réponse (refus, accusé…) sans candidature choisie : l'IA hésite entre plusieurs postes de la même
-        // entreprise. La plus probable d'après l'entreprise, à vérifier par toi.
-        const unsure = r.index === null && r.verdict ? matchApplication(full, apps) : null;
-        app = r.index !== null ? candidates[r.index]! : (unsure ?? thread);
-        verdict = r.index !== null || unsure ? r.verdict : null;
-        summary = r.summary || null;
-        review = !r.certain || !!unsure;
-      } catch {
-        answered = false;
-      }
-    }
-    if (!answered) {
-      // Rattachement par l'entreprise seulement (pas par l'expéditeur : outil partagé), et règles.
-      // Un mail ambigu (accusé + mot « entretien ») est pris pour un accusé.
-      app = matchApplication(full, apps);
-      if (!app) continue;
-      const byRules = classifyMail(mail.subject, mail.text);
-      verdict = byRules === "AMBIGUOUS" ? { kind: "ACK", detail: null } : byRules;
-    }
-    if (!app) {
-      // Lu par l'IA : ne répond à aucune candidature. Gardé pour ne pas le redonner à l'IA.
-      forget(mail);
-      continue;
-    }
-    // Le mail nomme un autre poste que celui choisi : la candidature chez cette entreprise qui lui correspond, sinon
-    // aucune (postulé hors de Job Radar). Gardé sans lien, avec le poste, pour ne pas le redonner à l'IA.
-    if (app.kind === "job" && samePost(mail, app.title) === false) {
-      const other = candidates.find((a) => a.kind === "job" && samePost(mail, a.title) === true);
-      if (!other) {
-        await save({ messageId: mail.messageId, kind: "OTHER_POST", detail: postInMail(mail)!.slice(0, 200), subject: mail.subject.slice(0, 500), fromAddress: mail.from.slice(0, 320), receivedAt: mail.date, dismissed: true });
-        known.add(mail.messageId);
-        continue;
-      }
-      app = other;
-    }
-    report.matched++;
+/** Ce qu'on a compris d'un mail : à quelle candidature il répond, quel genre de réponse, et si tu dois le vérifier. */
+type Reading = { app: ApplicationRef; verdict: MailVerdict | null; summary: string | null; review: boolean; answered: boolean };
 
-    if (app.kind === "spontaneous" && app.sentTo) {
-      // « X ne fait plus partie de la société, écrivez à Y » : Y devient l'adresse de contact, la candidature est à renvoyer.
-      const moved = movedContact(mail, app.sentTo, self);
-      if (moved) {
-        const detail = moved.newEmail ? `${app.sentTo} a quitté l'entreprise, nouvelle adresse : ${moved.newEmail}` : `${app.sentTo} a quitté l'entreprise`;
-        await wrongAddress(app.id, mail, {
-          kind: "MOVED",
-          detail,
-          note: moved.newEmail ? `${detail} : candidature à renvoyer.` : `${detail} : cherche une autre adresse.`,
-          newEmail: moved.newEmail,
-        });
-        continue;
-      }
-      // Ticket ouvert par le support client : la lettre n'arrivera pas au recrutement.
-      if (isHelpdeskReply(mail)) {
-        await wrongAddress(app.id, mail, {
-          kind: "WRONG_ADDRESS",
-          detail: `${app.sentTo} est l'adresse du support client`,
-          note: `${app.sentTo} est l'adresse du support client (ticket ouvert), pas du recrutement : cherche une adresse RH.`,
-        });
-        continue;
-      }
-    }
-
-    // « Postulez sur notre site » : pour une spontanée, la candidature s'arrête là (à refaire sur leur site).
-    // Pour une offre, ce n'est qu'un accusé qui cite leurs autres offres.
-    const career = !verdict || verdict.kind === "ACK" ? careerSiteUrl(mail) : null;
-    if (career) verdict = app.kind === "spontaneous" ? { kind: "CAREER_SITE", detail: career } : { kind: "ACK", detail: `Te renvoie vers son site carrière : ${career}` };
-    if (app.kind === "spontaneous" && verdict?.kind === "ACK" && NO_OPENING.test(plain(mail.text))) verdict = { kind: "REJECTION", detail: null };
-    // Une personne a répondu à la spontanée, même sans étape reconnue (« je ne gère pas les recrutements, je fais suivre,
-    // supprimez-moi de votre liste ») : gardée quand même, sinon une relance part vers quelqu'un qui a déjà répondu (Amelkis).
-    if (app.kind === "spontaneous" && (!verdict || verdict.kind === "ACK") && repliesTo(app, mail)) {
-      const optOut = OPT_OUT.test(plain(mail.text));
-      if (!verdict || optOut) verdict = { kind: "ACK", detail: optOut ? `Ne plus écrire à ${app.sentTo ?? "cette adresse"} : demandé dans sa réponse` : "Réponse reçue" };
-    }
-    if (!verdict) {
-      // Lu et sans rapport avec une étape de candidature : gardé pour ne pas redemander à l'IA à chaque relecture.
-      if (answered || !opts.classify) {
-        forget(mail);
-      }
-      continue;
-    }
-    // Refus arrivé avant le clic « postulé » : sans doute une candidature précédente au même poste, à vérifier par toi.
-    if (verdict.kind === "REJECTION" && mail.date < app.since) review = true;
-    // Même réponse déjà reçue pour cette candidature, sans nom de poste (4 refus Theodo identiques pour 4 offres) :
-    // elle va à une autre candidature chez cette entreprise qui ne l'a pas encore, à vérifier par toi.
-    if (app.kind === "job" && app.kinds?.includes(verdict.kind) && samePost(mail, app.title) === null) {
-      const kind = verdict.kind;
-      const sibling = candidates.find((a) => a !== app && a.kind === "job" && !a.kinds?.includes(kind) && mentionsCompany(full, a.company));
-      if (sibling) {
-        app = sibling;
-        review = true;
-      }
-    }
-    if (seen.has(dupKey(app.id, mail.from, verdict.kind, mail.date))) {
-      forget(mail);
-      continue;
-    }
-    if (career && app.kind === "spontaneous") {
-      const s = sent.find((x) => x.id === app!.id)!;
-      const lead = await prisma.companyLead.findUnique({ where: { id: s.leadId }, select: { notes: true } });
-      if (!lead?.notes?.includes(career)) {
-        await prisma.companyLead.update({ where: { id: s.leadId }, data: { notes: [lead?.notes, `Réponse : postuler sur leur site carrière ${career}`].filter(Boolean).join("\n").slice(0, 2000) } });
-      }
-    }
-
-    const fresh = await save({
-      messageId: mail.messageId,
-      ...(app.kind === "job" ? { jobId: app.id } : { spontaneousId: app.id }),
-      kind: verdict.kind,
-      detail: verdict.detail,
-      summary,
-      needsReview: review,
-      subject: mail.subject.slice(0, 500),
-      fromAddress: mail.from.slice(0, 320),
-      receivedAt: mail.date,
-    });
-    known.add(mail.messageId);
-    if (!fresh) continue;
-    seen.add(dupKey(app.id, mail.from, verdict.kind, mail.date));
-    app.senders = [...(app.senders ?? []), mail.from];
-    app.kinds = [...(app.kinds ?? []), verdict.kind];
-    report.recorded++;
-    // Un refus change le statut tout seul seulement si l'IA est sûre d'elle (sinon : « à vérifier »).
-    if (verdict.kind === "REJECTION" && app.kind === "job" && !review) {
-      const job = await prisma.job.findUnique({ where: { id: app.id }, select: { status: true } });
-      if (job?.status === "APPLIED") {
-        await prisma.$transaction([
-          prisma.job.update({ where: { id: app.id }, data: { status: "REJECTED" } }),
-          prisma.jobEvent.create({ data: { jobId: app.id, type: "STATUS_CHANGED", fromValue: "APPLIED", toValue: "REJECTED" } }),
-        ]);
-        report.rejected++;
-      }
+/** Retrouve la candidature et le genre de réponse : par l'IA si elle répond, sinon par les règles. null = rien à enregistrer. */
+async function identify(p: Pass, mail: InboxMail, full: InboxMail, candidates: ApplicationRef[]): Promise<Reading | null> {
+  const { opts, apps } = p;
+  let app: ApplicationRef | null = null;
+  let verdict: MailVerdict | null = null;
+  let summary: string | null = null;
+  let review = false;
+  let answered = Boolean(opts.classify); // false = pas d'IA ou IA en panne : règles, et le mail sera relu
+  if (opts.classify) {
+    try {
+      const r = await opts.classify(
+        { subject: mail.subject, from: mail.from, text: mail.text.slice(0, 4000) },
+        candidates.map((a) => ({ company: a.company ?? "", title: a.kind === "job" ? a.title : null, since: a.since })),
+      );
+      // Aucune candidature : sauf réponse dans le fil d'une spontanée (départ, support, site carrière, vus plus bas).
+      const thread = candidates.length === 1 && candidates[0]!.kind === "spontaneous" ? candidates[0]! : null;
+      // Vraie réponse (refus, accusé…) sans candidature choisie : l'IA hésite entre plusieurs postes de la même
+      // entreprise. La plus probable d'après l'entreprise, à vérifier par toi.
+      const unsure = r.index === null && r.verdict ? matchApplication(full, apps) : null;
+      app = r.index !== null ? candidates[r.index]! : (unsure ?? thread);
+      verdict = r.index !== null || unsure ? r.verdict : null;
+      summary = r.summary || null;
+      review = !r.certain || !!unsure;
+    } catch {
+      answered = false;
     }
   }
+  if (!answered) {
+    // Rattachement par l'entreprise seulement (pas par l'expéditeur : outil partagé), et règles.
+    // Un mail ambigu (accusé + mot « entretien ») est pris pour un accusé.
+    app = matchApplication(full, apps);
+    if (!app) return null;
+    const byRules = classifyMail(mail.subject, mail.text);
+    verdict = byRules === "AMBIGUOUS" ? { kind: "ACK", detail: null } : byRules;
+  }
+  if (!app) {
+    // Lu par l'IA : ne répond à aucune candidature. Gardé pour ne pas le redonner à l'IA.
+    forget(p, mail);
+    return null;
+  }
+  return { app, verdict, summary, review, answered };
+}
+
+/**
+ * Le mail nomme un autre poste que celui choisi : la candidature chez cette entreprise qui lui correspond, sinon
+ * aucune (postulé hors de Job Radar). Gardé sans lien, avec le poste, pour ne pas le redonner à l'IA. null = traité.
+ */
+async function otherPost(p: Pass, mail: InboxMail, app: ApplicationRef, candidates: ApplicationRef[]): Promise<ApplicationRef | null> {
+  if (app.kind !== "job" || samePost(mail, app.title) !== false) return app;
+  const other = candidates.find((a) => a.kind === "job" && samePost(mail, a.title) === true);
+  if (other) return other;
+  await saveMail(p.prisma, { messageId: mail.messageId, kind: "OTHER_POST", detail: postInMail(mail)!.slice(0, 200), subject: mail.subject.slice(0, 500), fromAddress: mail.from.slice(0, 320), receivedAt: mail.date, dismissed: true });
+  p.known.add(mail.messageId);
+  return null;
+}
+
+/** Réponse d'une spontanée qui prouve que l'adresse n'était pas la bonne (personne partie, support client). true = traité. */
+async function redirectSpontaneous(p: Pass, mail: InboxMail, app: ApplicationRef): Promise<boolean> {
+  if (app.kind !== "spontaneous" || !app.sentTo) return false;
+  // « X ne fait plus partie de la société, écrivez à Y » : Y devient l'adresse de contact, la candidature est à renvoyer.
+  const moved = movedContact(mail, app.sentTo, p.self);
+  if (moved) {
+    const detail = moved.newEmail ? `${app.sentTo} a quitté l'entreprise, nouvelle adresse : ${moved.newEmail}` : `${app.sentTo} a quitté l'entreprise`;
+    await wrongAddress(p, app.id, mail, {
+      kind: "MOVED",
+      detail,
+      note: moved.newEmail ? `${detail} : candidature à renvoyer.` : `${detail} : cherche une autre adresse.`,
+      newEmail: moved.newEmail,
+    });
+    return true;
+  }
+  // Ticket ouvert par le support client : la lettre n'arrivera pas au recrutement.
+  if (isHelpdeskReply(mail)) {
+    await wrongAddress(p, app.id, mail, {
+      kind: "WRONG_ADDRESS",
+      detail: `${app.sentTo} est l'adresse du support client`,
+      note: `${app.sentTo} est l'adresse du support client (ticket ouvert), pas du recrutement : cherche une adresse RH.`,
+    });
+    return true;
+  }
+  return false;
+}
+
+/** Une réponse prête à être enregistrée. */
+type Verdicted = { app: ApplicationRef; verdict: MailVerdict; summary: string | null; review: boolean; career: string | null };
+
+/** Précise le genre de réponse (site carrière, aucune ouverture, désinscription…) et la candidature visée. null = rien à enregistrer. */
+function refineVerdict(p: Pass, mail: InboxMail, full: InboxMail, reading: Reading, candidates: ApplicationRef[]): Verdicted | null {
+  let { app, verdict, review } = reading;
+  // « Postulez sur notre site » : pour une spontanée, la candidature s'arrête là (à refaire sur leur site).
+  // Pour une offre, ce n'est qu'un accusé qui cite leurs autres offres.
+  const career = !verdict || verdict.kind === "ACK" ? careerSiteUrl(mail) : null;
+  if (career) verdict = app.kind === "spontaneous" ? { kind: "CAREER_SITE", detail: career } : { kind: "ACK", detail: `Te renvoie vers son site carrière : ${career}` };
+  if (app.kind === "spontaneous" && verdict?.kind === "ACK" && NO_OPENING.test(plain(mail.text))) verdict = { kind: "REJECTION", detail: null };
+  // Une personne a répondu à la spontanée, même sans étape reconnue (« je ne gère pas les recrutements, je fais suivre,
+  // supprimez-moi de votre liste ») : gardée quand même, sinon une relance part vers quelqu'un qui a déjà répondu (Amelkis).
+  if (app.kind === "spontaneous" && (!verdict || verdict.kind === "ACK") && repliesTo(app, mail)) {
+    const optOut = OPT_OUT.test(plain(mail.text));
+    if (!verdict || optOut) verdict = { kind: "ACK", detail: optOut ? `Ne plus écrire à ${app.sentTo ?? "cette adresse"} : demandé dans sa réponse` : "Réponse reçue" };
+  }
+  if (!verdict) {
+    // Lu et sans rapport avec une étape de candidature : gardé pour ne pas redemander à l'IA à chaque relecture.
+    if (reading.answered || !p.opts.classify) {
+      forget(p, mail);
+    }
+    return null;
+  }
+  // Refus arrivé avant le clic « postulé » : sans doute une candidature précédente au même poste, à vérifier par toi.
+  if (verdict.kind === "REJECTION" && mail.date < app.since) review = true;
+  // Même réponse déjà reçue pour cette candidature, sans nom de poste (4 refus Theodo identiques pour 4 offres) :
+  // elle va à une autre candidature chez cette entreprise qui ne l'a pas encore, à vérifier par toi.
+  if (app.kind === "job" && app.kinds?.includes(verdict.kind) && samePost(mail, app.title) === null) {
+    const kind = verdict.kind;
+    const current = app;
+    const sibling = candidates.find((a) => a !== current && a.kind === "job" && !a.kinds?.includes(kind) && mentionsCompany(full, a.company));
+    if (sibling) {
+      app = sibling;
+      review = true;
+    }
+  }
+  return { app, verdict, summary: reading.summary, review, career };
+}
+
+/** Un refus change le statut de l'offre tout seul seulement si l'IA est sûre d'elle (sinon : « à vérifier »). */
+async function markRejected(p: Pass, app: ApplicationRef, verdict: MailVerdict, review: boolean) {
+  if (verdict.kind !== "REJECTION" || app.kind !== "job" || review) return;
+  const job = await p.prisma.job.findUnique({ where: { id: app.id }, select: { status: true } });
+  if (job?.status !== "APPLIED") return;
+  await p.prisma.$transaction([
+    p.prisma.job.update({ where: { id: app.id }, data: { status: "REJECTED" } }),
+    p.prisma.jobEvent.create({ data: { jobId: app.id, type: "STATUS_CHANGED", fromValue: "APPLIED", toValue: "REJECTED" } }),
+  ]);
+  p.report.rejected++;
+}
+
+/** Enregistre la réponse (sauf doublon) et met à jour ce qui en découle : site carrière noté sur l'entreprise, refus de l'offre. */
+async function recordReply(p: Pass, mail: InboxMail, r: Verdicted) {
+  const { prisma } = p;
+  const { app, verdict, summary, review, career } = r;
+  if (p.seen.has(dupKey(app.id, mail.from, verdict.kind, mail.date))) {
+    forget(p, mail);
+    return;
+  }
+  if (career && app.kind === "spontaneous") {
+    const s = p.sent.find((x) => x.id === app.id)!;
+    const lead = await prisma.companyLead.findUnique({ where: { id: s.leadId }, select: { notes: true } });
+    if (!lead?.notes?.includes(career)) {
+      await prisma.companyLead.update({ where: { id: s.leadId }, data: { notes: [lead?.notes, `Réponse : postuler sur leur site carrière ${career}`].filter(Boolean).join("\n").slice(0, 2000) } });
+    }
+  }
+  const fresh = await saveMail(prisma, {
+    messageId: mail.messageId,
+    ...(app.kind === "job" ? { jobId: app.id } : { spontaneousId: app.id }),
+    kind: verdict.kind,
+    detail: verdict.detail,
+    summary,
+    needsReview: review,
+    subject: mail.subject.slice(0, 500),
+    fromAddress: mail.from.slice(0, 320),
+    receivedAt: mail.date,
+  });
+  p.known.add(mail.messageId);
+  if (!fresh) return;
+  p.seen.add(dupKey(app.id, mail.from, verdict.kind, mail.date));
+  app.senders = [...(app.senders ?? []), mail.from];
+  app.kinds = [...(app.kinds ?? []), verdict.kind];
+  p.report.recorded++;
+  await markRejected(p, app, verdict, review);
+}
+
+/** Traite un mail : rejet du serveur, absence, puis retrouve la candidature, précise la réponse et l'enregistre. */
+async function processMail(p: Pass, original: InboxMail): Promise<void> {
+  if (p.known.has(original.messageId)) return;
+  if (await handleBounce(p, original)) return;
+  if (isNoise(original, p.self)) return;
+  // Le mail entier sert à retrouver la candidature (le message cité dessous la nomme souvent) ;
+  // tout ce qui suit lit la réponse seule, sans ce message d'origine.
+  const candidates = candidateApplications(original, p.apps);
+  if (!candidates.length) return;
+  const full = original;
+  const mail = { ...original, text: replyOnly(original.text) };
+  if (await handleAway(p, mail, full, candidates)) return;
+  const reading = await identify(p, mail, full, candidates);
+  if (!reading) return;
+  const app = await otherPost(p, mail, reading.app, candidates);
+  if (!app) return;
+  p.report.matched++;
+  if (await redirectSpontaneous(p, mail, app)) return;
+  const verdicted = refineVerdict(p, mail, full, { ...reading, app }, candidates);
+  if (!verdicted) return;
+  await recordReply(p, mail, verdicted);
+}
+
+/**
+ * Lit les nouveaux mails (lecture seule), reconnaît les réponses à tes candidatures et met les statuts à jour :
+ * un refus passe l'offre en « Refusée ». Les mails sans candidature correspondante sont ignorés.
+ */
+export async function trackApplicationMails(opts: TrackOptions): Promise<MailTrackingReport> {
+  const { prisma, log = () => {} } = opts;
+  const report: MailTrackingReport = { read: 0, matched: 0, recorded: 0, rejected: 0, bounced: 0 };
+  const self = opts.self.map((s) => s.toLowerCase());
+
+  const { apps, sent } = await loadApplications(prisma);
+  if (apps.length === 0) return report; // rien à suivre : on ne lit pas la boîte
+  await attachKnownReplies(prisma, apps);
+  const { mails, next, since } = await fetchMails(opts, apps, self);
+  report.read = mails.length;
+  const { known, seen } = await loadHandled(prisma, mails, since);
+
+  const pass: Pass = { prisma, opts, self, log, apps, sent, known, seen, report };
+  for (const mail of mails.sort((a, b) => a.date.getTime() - b.date.getTime())) await processMail(pass, mail);
   for (const c of next) {
     await prisma.mailCursor.upsert({ where: { folder: c.folder }, create: { ...c, checkedAt: new Date() }, update: { ...c, checkedAt: new Date() } });
   }

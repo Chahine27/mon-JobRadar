@@ -202,6 +202,36 @@ describe("suivi des candidatures par les mails (base réelle)", () => {
     expect((await prisma.companyLead.findUniqueOrThrow({ where: { id: rmc.id } })).notes).toContain("https://jobs.cmacgm-group.com/");
   });
 
+  it("message d'absence : enregistré sans l'IA avec la date de retour, jamais pris pour un refus", async () => {
+    const job = await prisma.job.create({
+      data: { fingerprint: "away", contentHash: "h", title: "Développeur Vue.js", company: "Seenovate", description: "", technologies: [], status: "APPLIED" },
+    });
+    await prisma.jobEvent.create({ data: { jobId: job.id, type: "STATUS_CHANGED", toValue: "APPLIED", createdAt: new Date(Date.now() - 86_400_000) } });
+    const inbox = inboxOf([
+      mail({ messageId: "<away@x>", from: "alain@seenovate.com", subject: "Réponse automatique : Candidature", text: "Seenovate. Bonjour, je suis actuellement absent du bureau, de retour le 20 décembre 2099. Autre contact : paul@seenovate.com" }),
+    ]);
+    let asked = 0;
+    const r = await trackApplicationMails({ prisma, inbox, self: [], classify: async () => (asked++, { index: 0, verdict: { kind: "REJECTION", detail: null }, summary: "", certain: true }) });
+    expect(asked).toBe(0); // pas besoin de l'IA
+    expect(r).toMatchObject({ matched: 1, recorded: 1, rejected: 0 });
+    expect(await prisma.applicationMail.findFirstOrThrow({ where: { jobId: job.id } })).toMatchObject({ kind: "AWAY", detail: "2099-12-20" });
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("APPLIED");
+  });
+
+  it("ticket du support client : l'adresse n'était pas celle du recrutement, candidature à refaire", async () => {
+    const lead = await prisma.companyLead.create({ data: { siret: "321", name: "ZENCORP", contactEmail: "support@zencorp.com", status: "CONTACTED" } });
+    const sp = await prisma.spontaneousApplication.create({
+      data: { leadId: lead.id, inputHash: "", model: "m", letter: "…", sentAt: new Date(Date.now() - 3_600_000), sentTo: "support@zencorp.com", messageId: "<z@gmail.com>" },
+    });
+    const inbox = inboxOf([
+      mail({ messageId: "<ticket@x>", from: "support@zencorp.com", fromName: "Zencorp Support", subject: "RE: Candidature spontanée", text: "Bonjour, votre demande n° 48213 a été enregistrée. Nous reviendrons vers vous.", replyTo: ["<z@gmail.com>"] }),
+    ]);
+    expect((await trackApplicationMails({ prisma, inbox, self: [] })).bounced).toBe(1);
+    expect(await prisma.companyLead.findUniqueOrThrow({ where: { id: lead.id } })).toMatchObject({ status: "TO_CONTACT", contactEmail: null });
+    expect(await prisma.spontaneousApplication.findUniqueOrThrow({ where: { id: sp.id } })).toMatchObject({ sentAt: null, sentTo: null });
+    expect(await prisma.applicationMail.findFirstOrThrow({ where: { messageId: "<ticket@x>" } })).toMatchObject({ kind: "WRONG_ADDRESS", dismissed: true });
+  });
+
   it("clic « Actualiser » : relit depuis la date d'envoi, sans retélécharger ce qui est déjà traité", async () => {
     const sentAt = new Date(Date.now() - 7 * 86_400_000);
     const lead = await prisma.companyLead.create({ data: { siret: "999", name: "Globex" } });

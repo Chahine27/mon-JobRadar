@@ -55,7 +55,7 @@ export function linkVerdict(
 
 export type ExpiryReport = { checked: number; expired: number; ftChecks: number; linkedinChecks: number; adzunaChecks: number; linksRemoved: number };
 
-export async function expireJobs(opts: {
+export type ExpireOptions = {
   prisma: PrismaClient;
   /** Vérification France Travail (FranceTravailSource.isStillOnline). */
   ftIsOnline?: (id: string) => Promise<boolean | null>;
@@ -69,22 +69,26 @@ export async function expireJobs(opts: {
   zone?: Set<string>;
   now?: Date;
   log?: (m: string) => void;
-}): Promise<ExpiryReport> {
-  const { prisma, log = () => {} } = opts;
-  const now = opts.now ?? new Date();
-  const report: ExpiryReport = { checked: 0, expired: 0, ftChecks: 0, linkedinChecks: 0, adzunaChecks: 0, linksRemoved: 0 };
-  const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
-  /** Sites dont on lit la page de l'offre. `failures` : réponses illisibles d'affilée (429, blocage) ; au-delà de 3, on arrête de lui demander pour ce passage. */
-  const pageChecks = {
-    "jobscraper:linkedin": { isOpen: opts.linkedinIsOpen, max: EXPIRY.maxLinkedinChecks, pauseMs: 1500, key: "linkedinChecks" as const, failures: 0, checkAll: false },
-    // Adzuna répond 429 au-delà d'une dizaine de pages à 1 s d'écart ; 40 pages à 3 s passent (27/10/2026).
-    adzuna: { isOpen: opts.adzunaIsOpen, max: EXPIRY.maxAdzunaChecks, pauseMs: 3000, key: "adzunaChecks" as const, failures: 0, checkAll: true },
-  };
-  /** Pages demandées dans ce passage, tous sites confondus (pause entre deux). */
-  let pages = 0;
+};
 
-  // Candidates : pas revues depuis au moins 1 jour, ou venues de LinkedIn (une offre peut y fermer en quelques heures).
-  const jobs = await prisma.job.findMany({
+/** Un site dont on lit la page de l'offre. `failures` : réponses illisibles d'affilée (429, blocage) ; au-delà de 3, on arrête de lui demander pour ce passage. */
+type PageSite = { isOpen: ((id: string) => Promise<boolean | null>) | undefined; max: number; pauseMs: number; key: "linkedinChecks" | "adzunaChecks"; failures: number; checkAll: boolean };
+
+/** L'état d'un passage : compteurs, pause entre deux pages, sites dont on lit la page. */
+type Run = {
+  prisma: PrismaClient;
+  opts: ExpireOptions;
+  now: Date;
+  report: ExpiryReport;
+  sleep: (ms: number) => Promise<void>;
+  pageChecks: Record<string, PageSite>;
+  /** Pages demandées dans ce passage, tous sites confondus (pause entre deux). */
+  pages: number;
+};
+
+/** Offres à vérifier : pas revues depuis au moins 1 jour, ou venues de LinkedIn (une offre peut y fermer en quelques heures). */
+function findCandidates(opts: ExpireOptions, now: Date) {
+  return opts.prisma.job.findMany({
     where: {
       // Tous statuts sauf déjà expirée : les liens morts d'une offre ignorée, sauvegardée ou postulée sont retirés aussi.
       status: { not: "EXPIRED" },
@@ -109,62 +113,100 @@ export async function expireJobs(opts: {
     orderBy: { lastSeenAt: "asc" },
     take: 500,
   });
+}
+type ExpiryJob = Awaited<ReturnType<typeof findCandidates>>[number];
 
-  for (const job of jobs) {
-    report.checked++;
-    const verdicts: ExpiryVerdict[] = [];
-    /** Liens dont la page répond « retirée » : supprimés si l'offre reste en ligne ailleurs. */
-    const deadLinks: { source: string; sourceJobId: string }[] = [];
-    for (const link of job.sources) {
-      let ftOnline: boolean | null | undefined;
-      const needsFt =
-        link.source === "france-travail" &&
-        (now.getTime() - link.lastSeenAt.getTime()) / DAY >= EXPIRY.ftUnseenDays &&
-        opts.ftIsOnline &&
-        report.ftChecks < EXPIRY.maxFtChecks;
-      if (needsFt) {
-        report.ftChecks++;
-        ftOnline = await opts.ftIsOnline!(link.sourceJobId);
-        // Encore en ligne : on la note « revue » pour ne pas redemander avant 7 jours.
-        if (ftOnline === true) {
-          await prisma.jobSourceLink.updateMany({ where: { source: link.source, sourceJobId: link.sourceJobId }, data: { lastSeenAt: now } });
-        }
-      }
-      const page = pageChecks[link.source as keyof typeof pageChecks];
-      // Déjà une source en ligne : l'offre ne sera pas expirée, inutile de demander d'autres pages (sauf Adzuna, dont chaque lien mort est retiré).
-      const skip = page?.checkAll ? false : verdicts.includes("online");
-      if (page?.isOpen && !skip &&!(opts.zone && outOfZone(job, opts.zone)) && report[page.key] < page.max && page.failures < 3) {
-        // Une page à la fois, espacées : une rafale de 100 pages faisait bloquer l'IP par LinkedIn (HTTP 429).
-        if (pages++ > 0) await sleep(page.pauseMs);
-        report[page.key]++;
-        ftOnline = await page.isOpen(link.sourceJobId);
-        page.failures = ftOnline === null ? page.failures + 1 : 0;
-        // Encore ouverte : notée « revue », elle passe en fin de file (tri par lastSeenAt) et les suivantes ont leur tour.
-        if (ftOnline === true) {
-          await prisma.$transaction([
-            prisma.jobSourceLink.updateMany({ where: { source: link.source, sourceJobId: link.sourceJobId }, data: { lastSeenAt: now } }),
-            prisma.job.update({ where: { id: job.id }, data: { lastSeenAt: now } }),
-          ]);
-        }
-      }
-      if (page && ftOnline === false) deadLinks.push(link);
-      verdicts.push(linkVerdict(link, job, now, ftOnline));
-    }
-    const allGone = verdicts.length > 0 && verdicts.every((v) => v === "gone");
-    // L'offre vit encore ailleurs : les liens morts (Adzuna republie la même annonce des dizaines de fois) ne servent plus qu'à afficher des « page introuvable ».
-    if (!allGone && deadLinks.length > 0) {
-      await prisma.jobSourceLink.deleteMany({ where: { jobId: job.id, OR: deadLinks.map(({ source, sourceJobId }) => ({ source, sourceJobId })) } });
-      report.linksRemoved += deadLinks.length;
-    }
-    // « Nouvelle », « Vue » et « Ignorée » passent en « Expirée » ; sauvegardée et postulée gardent leurs liens et leur statut.
-    if (allGone && (job.status === "NEW" || job.status === "SEEN" || job.status === "IGNORED")) {
-      await prisma.$transaction([
-        prisma.job.update({ where: { id: job.id }, data: { status: "EXPIRED" } }),
-        prisma.jobEvent.create({ data: { jobId: job.id, type: "STATUS_CHANGED", toValue: "EXPIRED", fromValue: "auto" } }),
-      ]);
-      report.expired++;
+/**
+ * Demande à la source si ce lien est encore en ligne : France Travail (offre pas revue depuis 7 jours) ou la page de
+ * l'offre (LinkedIn, Adzuna). undefined = pas demandé.
+ */
+async function askSource(run: Run, job: ExpiryJob, link: ExpiryJob["sources"][number], verdicts: ExpiryVerdict[]): Promise<boolean | null | undefined> {
+  const { prisma, opts, now, report } = run;
+  let ftOnline: boolean | null | undefined;
+  const needsFt =
+    link.source === "france-travail" &&
+    (now.getTime() - link.lastSeenAt.getTime()) / DAY >= EXPIRY.ftUnseenDays &&
+    opts.ftIsOnline &&
+    report.ftChecks < EXPIRY.maxFtChecks;
+  if (needsFt) {
+    report.ftChecks++;
+    ftOnline = await opts.ftIsOnline!(link.sourceJobId);
+    // Encore en ligne : on la note « revue » pour ne pas redemander avant 7 jours.
+    if (ftOnline === true) {
+      await prisma.jobSourceLink.updateMany({ where: { source: link.source, sourceJobId: link.sourceJobId }, data: { lastSeenAt: now } });
     }
   }
+  const page = run.pageChecks[link.source];
+  // Déjà une source en ligne : l'offre ne sera pas expirée, inutile de demander d'autres pages (sauf Adzuna, dont chaque lien mort est retiré).
+  const skip = page?.checkAll ? false : verdicts.includes("online");
+  if (page?.isOpen && !skip && !(opts.zone && outOfZone(job, opts.zone)) && report[page.key] < page.max && page.failures < 3) {
+    // Une page à la fois, espacées : une rafale de 100 pages faisait bloquer l'IP par LinkedIn (HTTP 429).
+    if (run.pages++ > 0) await run.sleep(page.pauseMs);
+    report[page.key]++;
+    ftOnline = await page.isOpen(link.sourceJobId);
+    page.failures = ftOnline === null ? page.failures + 1 : 0;
+    // Encore ouverte : notée « revue », elle passe en fin de file (tri par lastSeenAt) et les suivantes ont leur tour.
+    if (ftOnline === true) {
+      await prisma.$transaction([
+        prisma.jobSourceLink.updateMany({ where: { source: link.source, sourceJobId: link.sourceJobId }, data: { lastSeenAt: now } }),
+        prisma.job.update({ where: { id: job.id }, data: { lastSeenAt: now } }),
+      ]);
+    }
+  }
+  return ftOnline;
+}
+
+/** Tire la conclusion pour une offre : liens morts retirés si elle vit ailleurs, « Expirée » si toutes ses sources la donnent retirée. */
+async function settle(run: Run, job: ExpiryJob, verdicts: ExpiryVerdict[], deadLinks: { source: string; sourceJobId: string }[]) {
+  const { prisma, report } = run;
+  const allGone = verdicts.length > 0 && verdicts.every((v) => v === "gone");
+  // L'offre vit encore ailleurs : les liens morts (Adzuna republie la même annonce des dizaines de fois) ne servent plus qu'à afficher des « page introuvable ».
+  if (!allGone && deadLinks.length > 0) {
+    await prisma.jobSourceLink.deleteMany({ where: { jobId: job.id, OR: deadLinks.map(({ source, sourceJobId }) => ({ source, sourceJobId })) } });
+    report.linksRemoved += deadLinks.length;
+  }
+  // « Nouvelle », « Vue » et « Ignorée » passent en « Expirée » ; sauvegardée et postulée gardent leurs liens et leur statut.
+  if (allGone && (job.status === "NEW" || job.status === "SEEN" || job.status === "IGNORED")) {
+    await prisma.$transaction([
+      prisma.job.update({ where: { id: job.id }, data: { status: "EXPIRED" } }),
+      prisma.jobEvent.create({ data: { jobId: job.id, type: "STATUS_CHANGED", toValue: "EXPIRED", fromValue: "auto" } }),
+    ]);
+    report.expired++;
+  }
+}
+
+/** Vérifie une offre : un verdict par source, les liens dont la page est retirée, puis la conclusion. */
+async function expireOne(run: Run, job: ExpiryJob) {
+  run.report.checked++;
+  const verdicts: ExpiryVerdict[] = [];
+  /** Liens dont la page répond « retirée » : supprimés si l'offre reste en ligne ailleurs. */
+  const deadLinks: { source: string; sourceJobId: string }[] = [];
+  for (const link of job.sources) {
+    const online = await askSource(run, job, link, verdicts);
+    if (run.pageChecks[link.source] && online === false) deadLinks.push(link);
+    verdicts.push(linkVerdict(link, job, run.now, online));
+  }
+  await settle(run, job, verdicts, deadLinks);
+}
+
+export async function expireJobs(opts: ExpireOptions): Promise<ExpiryReport> {
+  const { prisma, log = () => {} } = opts;
+  const now = opts.now ?? new Date();
+  const report: ExpiryReport = { checked: 0, expired: 0, ftChecks: 0, linkedinChecks: 0, adzunaChecks: 0, linksRemoved: 0 };
+  const run: Run = {
+    prisma,
+    opts,
+    now,
+    report,
+    sleep: opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms))),
+    pages: 0,
+    pageChecks: {
+      "jobscraper:linkedin": { isOpen: opts.linkedinIsOpen, max: EXPIRY.maxLinkedinChecks, pauseMs: 1500, key: "linkedinChecks", failures: 0, checkAll: false },
+      // Adzuna répond 429 au-delà d'une dizaine de pages à 1 s d'écart ; 40 pages à 3 s passent (27/10/2026).
+      adzuna: { isOpen: opts.adzunaIsOpen, max: EXPIRY.maxAdzunaChecks, pauseMs: 3000, key: "adzunaChecks", failures: 0, checkAll: true },
+    },
+  };
+  for (const job of await findCandidates(opts, now)) await expireOne(run, job);
   if (report.expired) log(`Offres expirées : ${report.expired} (sur ${report.checked} vérifiées)`);
   if (report.linksRemoved) log(`Liens morts retirés : ${report.linksRemoved}`);
   return report;
