@@ -72,6 +72,12 @@ export type RawJob = {
 /** Sources dont l'API ne donne qu'un extrait de l'annonce. */
 export const ABRIDGED_SOURCES = ["adzuna", "jooble"];
 
+/**
+ * Offre « encore en ligne » : une source la donnait à une collecte de moins de STILL_LISTED_DAYS jours. Seules ces
+ * offres passent à l'IA automatiquement (les autres sont sans doute pourvues : « Relancer » à la demande).
+ */
+export const STILL_LISTED_DAYS = 7;
+
 const LI_NOISE = /^(•|·|suivre|follow)$|\b(abonnés|followers)$|\b(sur|on) linkedin$/i;
 
 /**

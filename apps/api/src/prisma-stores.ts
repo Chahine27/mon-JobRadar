@@ -101,6 +101,7 @@ const jobSelect = {
   technologies: true,
   publishedAt: true,
   firstSeenAt: true,
+  lastSeenAt: true,
   status: true,
   fullText: true,
   fullTextAt: true,

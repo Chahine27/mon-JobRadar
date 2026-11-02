@@ -144,6 +144,17 @@ describe("vérification automatique des meilleures offres affichées", () => {
     expect(aiCalls.length).toBe(calls + 1);
   });
 
+  it("offre que la collecte ne voit plus depuis plus de 7 jours : pas d'analyse automatique, « Relancer » reste possible", async () => {
+    const { req, aiCalls, jobs } = await setup();
+    const top = (await req("GET", "/api/jobs?limit=10")).json().items[0] as { id: string };
+    jobs.set(top.id, { ...jobs.get(top.id)!, lastSeenAt: new Date(Date.now() - 8 * 86_400_000) });
+    await req("POST", "/api/ai/auto", { jobIds: [top.id] });
+    await waitIdle(req);
+    expect(aiCalls).toHaveLength(0);
+    await req("POST", `/api/jobs/${top.id}/analysis?force=true`);
+    expect(aiCalls).toHaveLength(1);
+  });
+
   it("réponse inutilisable : pas de nouvel essai automatique à chaque collecte", async () => {
     const { req, aiState, aiCalls } = await setup();
     aiState.badFormat = true;

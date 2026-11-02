@@ -1,4 +1,4 @@
-import { type ApplyChannel, type ApplyCv, JOB_STATUSES, type JobStatus, type Profile } from "@job-radar/shared";
+import { type ApplyChannel, type ApplyCv, JOB_STATUSES, type JobStatus, type Profile, STILL_LISTED_DAYS } from "@job-radar/shared";
 import { similarOffer } from "@job-radar/job-normalizer";
 import { DEFAULT_RULES, consultingFirm, detectSeniority, hashProfile, scoreJob, scoringInputFromJob, trainingOffered, type ScoreResult, type ScoringRules } from "@job-radar/scoring";
 import { checkNote } from "@job-radar/ai";
@@ -493,9 +493,12 @@ export function createJobService(stores: Stores, rules: ScoringRules = DEFAULT_R
       const { profile, hash } = await loadProfile(userId);
       const verdictOf = await loadVerdicts();
       const out: string[] = [];
+      const listedSince = Date.now() - STILL_LISTED_DAYS * 86_400_000;
       for (const id of ids) {
         const job = await stores.jobs.get(id);
         if (!job || OUT_OF_FEED.includes(job.status)) continue;
+        // Plus vue par la collecte (sans doute pourvue) : une règle changée ne relance pas l'IA payante dessus. Annonce ajoutée à la main : jamais recollectée.
+        if (!isManual(job) && job.lastSeenAt && job.lastSeenAt.getTime() < listedSince) continue;
         const s = scoreOf(job, profile, hash);
         // Un extrait (Adzuna, Jooble) biaiserait l'IA : on attend l'annonce complète.
         if (isAbridged(job)) continue;

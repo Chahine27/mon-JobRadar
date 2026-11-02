@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@job-radar/db";
+import type { JobStatus, PrismaClient } from "@job-radar/db";
 import { DEFAULT_RULES, type ScorableJob, type ScoringRules, scoreJob, scoringInputFromJob } from "@job-radar/scoring";
 import { isAbridged, type Profile } from "@job-radar/shared";
 import { REMOTE_LABEL, salaryLabel } from "./format";
@@ -10,7 +10,18 @@ export type CandidateJob = ScorableJob & {
   city: string | null;
   sources: Array<{ source: string }>;
   fullTextAt: Date | null;
+  /** Date de publication donnée par la source (null : inconnue, la date où Job Radar l'a vue compte). */
+  publishedAt?: Date | null;
+  /** Même entreprise et même titre qu'une offre plus ancienne déjà annoncée ou triée par toi (cf. REPOST_DAYS). */
+  repost?: boolean;
 };
+
+/** Annonce publiée il y a plus longtemps : déjà vieille quand Job Radar la découvre (nouvelle source, nouvelle recherche). */
+export const FRESH_DAYS = 7;
+/** Republication d'une offre déjà annoncée, sauvegardée, postulée, refusée ou ignorée depuis moins longtemps : pas de mail. */
+export const REPOST_DAYS = 60;
+const DAY = 86_400_000;
+const HANDLED: JobStatus[] = ["SAVED", "APPLIED", "REJECTED", "IGNORED"];
 
 export type NotificationSettingsLite = { emailEnabled: boolean; pushEnabled: boolean };
 
@@ -87,6 +98,8 @@ async function deliver(repo: NotifyRepo, active: Notifier[], matches: Match[], r
  * Annonce complète → « à postuler ». Annonce incomplète (extrait) → « à compléter » : son score n'est
  * que provisoire. Une fois l'annonce collée, aucun mail : l'offre est déjà sous tes yeux.
  * Une offre retrouvée plus tard ne redéclenche rien (README §11) : table Notification unique (offre, canal, type) + Job.notifiedAt.
+ * Ni une annonce déjà vieille (FRESH_DAYS : 59 mails sur 269 au 02/11/2026, surtout au 1er passage d'une source), ni une
+ * republication (REPOST_DAYS : Isagri republiée et réannoncée 9 jours après ton refus).
  */
 export async function notifyNewMatches(opts: {
   repo: NotifyRepo;
@@ -109,7 +122,9 @@ export async function notifyNewMatches(opts: {
 
   const candidates = await repo.candidates(opts.since);
   result.candidates = candidates.length;
+  const oldest = Date.now() - FRESH_DAYS * DAY;
   const matches = candidates
+    .filter((job) => !job.repost && (!job.publishedAt || job.publishedAt.getTime() >= oldest))
     .flatMap((job) => {
       const score = scoreJob(scoringInputFromJob(job), profile, opts.rules ?? DEFAULT_RULES);
       if (!opts.aiScores || isAbridged(job)) return [{ job, score }]; // extrait : l'IA ne le vérifie pas
@@ -172,10 +187,26 @@ export function createPrismaNotifyRepo(prisma: PrismaClient): NotifyRepo {
           department: true,
           remoteType: true,
           fullTextAt: true,
+          publishedAt: true,
+          firstSeenAt: true,
+          dedupeKey: true,
           sources: { select: { source: true, rawData: true } },
           travel: { select: { minutes: true, mode: true } },
         },
       });
+      const keys = [...new Set(rows.flatMap((j) => (j.dedupeKey ? [j.dedupeKey] : [])))];
+      const twins = keys.length
+        ? await prisma.job.findMany({
+            where: {
+              dedupeKey: { in: keys },
+              firstSeenAt: { gte: new Date(Date.now() - REPOST_DAYS * DAY) },
+              OR: [{ notifiedAt: { not: null } }, { status: { in: HANDLED } }],
+            },
+            select: { id: true, dedupeKey: true, firstSeenAt: true },
+          })
+        : [];
+      const repost = (j: (typeof rows)[number]) =>
+        twins.some((t) => t.dedupeKey === j.dedupeKey && t.id !== j.id && t.firstSeenAt < j.firstSeenAt);
       // Offre JobScraper (LinkedIn, HelloWork) arrivée sans description et dont la page n'a pas encore été lue :
       // elle attend completeJobScraperDescriptions, sinon « à compléter » partirait avant que le texte arrive.
       // « detailTriedAt » = DETAIL_TRIED_AT de @job-radar/pipeline : lecture ratée, là le mail « à compléter » est juste.
@@ -184,12 +215,16 @@ export function createPrismaNotifyRepo(prisma: PrismaClient): NotifyRepo {
         j.sources.some((s) => s.source.startsWith("jobscraper:") && !(s.rawData as Record<string, unknown> | null)?.detailTriedAt);
       return rows
         .filter((j) => !awaitingPage(j))
-        .map(({ travel, sources, ...j }) => ({
-          ...j,
-          sources: sources.map(({ source }) => ({ source })),
-          travelMinutes: travel?.minutes ?? null,
-          travelMode: travel?.mode ?? null,
-        }));
+        .map((row) => {
+          const { travel, sources, dedupeKey: _key, firstSeenAt: _seen, ...j } = row;
+          return {
+            ...j,
+            repost: repost(row),
+            sources: sources.map(({ source }) => ({ source })),
+            travelMinutes: travel?.minutes ?? null,
+            travelMode: travel?.mode ?? null,
+          };
+        });
     },
     async claim(jobId, channel, kind) {
       try {

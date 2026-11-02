@@ -1,5 +1,18 @@
-import type { PrismaClient } from "@job-radar/db";
+import type { JobStatus, PrismaClient } from "@job-radar/db";
 import { type NormalizedJob, comparable, normalize, sameSalary, withoutFreeWorkIntro } from "@job-radar/job-normalizer";
+import { STILL_LISTED_DAYS } from "@job-radar/shared";
+
+const DAY = 86_400_000;
+/**
+ * Offres archivées : expirées, ignorées ou refusées, et plus vues par la collecte depuis ARCHIVE_DAYS jours. Les
+ * règles ne leur sont plus réappliquées (la base grossit, elles ne bougeront plus) ; `archived: true` les reprend.
+ */
+export const ARCHIVE_DAYS = 90;
+const ARCHIVED_STATUSES: JobStatus[] = ["EXPIRED", "IGNORED", "REJECTED"];
+/** Champs réécrits que l'IA lit aussi (cf. toJobInput de l'API) : les changer rend son analyse périmée. */
+const AI_FIELDS = ["contractType", "remoteType", "salaryMin", "salaryMax"] as const;
+/** Statuts dont l'analyse IA est refaite automatiquement (le flux, cf. OUT_OF_FEED de l'API). */
+const AUTO_AI_STATUSES: JobStatus[] = ["NEW", "SEEN", "SAVED"];
 
 /**
  * Champs que les règles tirent du texte de l'annonce et dont le score dépend : les seuls réécrits.
@@ -105,20 +118,36 @@ export async function renormalizeJobs(opts: {
   prisma: PrismaClient;
   /** false : compte seulement ce qui changerait. */
   apply?: boolean;
+  /** true : aussi les offres archivées (cf. ARCHIVE_DAYS). */
+  archived?: boolean;
   log?: (m: string) => void;
-}): Promise<{ checked: number; changed: number; fields: Partial<Record<RuleField, number>> }> {
+}): Promise<{
+  checked: number;
+  changed: number;
+  fields: Partial<Record<RuleField, number>>;
+  /** Analyses IA rendues périmées ; `aiAuto` : celles que le serveur refera seul (offre du flux encore en ligne, appel payant). */
+  aiStale: number;
+  aiAuto: number;
+}> {
   const { prisma, log = () => {} } = opts;
+  const now = Date.now();
   const jobs = await prisma.job.findMany({
-    where: { sources: { none: { source: "manual" } } },
+    where: {
+      sources: { none: { source: "manual" } },
+      ...(opts.archived ? {} : { NOT: { status: { in: ARCHIVED_STATUSES }, lastSeenAt: { lt: new Date(now - ARCHIVE_DAYS * DAY) } } }),
+    },
     select: {
       id: true, description: true, remoteType: true, contractType: true, experienceText: true, experienceMinYrs: true, experienceMaxYrs: true,
-      technologies: true, salaryMin: true, salaryMax: true, salaryPeriod: true, salaryText: true,
+      technologies: true, salaryMin: true, salaryMax: true, salaryPeriod: true, salaryText: true, status: true, lastSeenAt: true,
+      _count: { select: { analyses: true } },
       sources: { select: { source: true, sourceJobId: true, rawData: true, firstSeenAt: true }, orderBy: { firstSeenAt: "asc" } },
     },
   });
   const fields: Partial<Record<RuleField, number>> = {};
   let checked = 0;
   let changed = 0;
+  let aiStale = 0;
+  let aiAuto = 0;
   for (const job of jobs) {
     const all = job.sources
       .map((l) => normalize({ source: l.source, sourceJobId: l.sourceJobId, data: l.rawData, collectedAt: l.firstSeenAt }))
@@ -137,9 +166,13 @@ export async function renormalizeJobs(opts: {
     if (diff.length === 0) continue;
     changed++;
     for (const k of diff) fields[k] = (fields[k] ?? 0) + 1;
+    if (job._count.analyses > 0 && diff.some((k) => (AI_FIELDS as readonly string[]).includes(k))) {
+      aiStale++;
+      if (AUTO_AI_STATUSES.includes(job.status) && job.lastSeenAt.getTime() >= now - STILL_LISTED_DAYS * DAY) aiAuto++;
+    }
     if (opts.apply !== false) await prisma.job.update({ where: { id: job.id }, data: Object.fromEntries(diff.map((k) => [k, next[k]])) });
   }
   const detail = Object.entries(fields).sort((a, b) => b[1] - a[1]).map(([k, c]) => `${k} ${c}`).join(", ");
-  if (changed) log(`Règles actuelles réappliquées : ${changed} offre(s) mise(s) à jour (${detail})`);
-  return { checked, changed, fields };
+  if (changed) log(`Règles actuelles réappliquées : ${changed} offre(s) mise(s) à jour (${detail}) ; ${aiStale} analyse(s) IA périmée(s), dont au plus ${aiAuto} refaite(s) automatiquement`);
+  return { checked, changed, fields, aiStale, aiAuto };
 }

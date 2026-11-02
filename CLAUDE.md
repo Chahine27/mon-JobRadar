@@ -10,7 +10,7 @@ Monorepo pnpm, TypeScript, Node >= 20 (24 en CI et sur le serveur). Code, commen
 - `pnpm test:int` : tests d'intégration (`*.int.test.ts`) sur une vraie base PostgreSQL `jobradar_test`.
 - `pnpm dev` : API (Fastify, port 3000) + site (Vite, http://localhost:5173).
 - `pnpm db:generate` après une modif de `packages/db/prisma/schema.prisma`, `pnpm db:migrate` pour créer la migration.
-- `pnpm jobs:renormalize` : réapplique normalisation et score aux offres déjà en base.
+- `pnpm jobs:renormalize [--apply] [--all]` : réapplique normalisation et score aux offres déjà en base. Sans `--apply` : simulation, avec le nombre d'analyses IA rendues périmées (à lancer dans le bac à sable avant de pousser une règle). Les offres archivées (expirées / ignorées / refusées, plus vues depuis 90 j) sont sautées sauf avec `--all`.
 - `pnpm --filter @job-radar/api ai:eval [--detail]` : compare l'avis de l'IA à tes décisions (sauvegardée / postulée contre ignorée), sans appel IA. À lancer dans le bac à sable avant et après un changement de consigne.
 - `pnpm mails:retrack [--apply]` : relit les réponses de candidature des 60 derniers jours avec les règles actuelles de rattachement (sur le serveur).
 - `scripts/sandbox.sh [commande]` : bac à sable sur le serveur (code du PC, copie fraîche de la vraie base, sans collecte, mails ni clé Claude). `SANDBOX_DB=keep` pour ne pas recopier la base.

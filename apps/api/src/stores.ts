@@ -57,6 +57,8 @@ export type JobRow = {
   technologies: string[];
   publishedAt: Date | null;
   firstSeenAt: Date;
+  /** Dernière collecte où une source donnait encore l'offre. */
+  lastSeenAt?: Date;
   status: JobStatus;
   travelMinutes: number | null;
   /** « car » : voiture depuis le domicile ; « transit » : transports depuis la gare d'arrivée. */

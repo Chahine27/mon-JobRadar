@@ -232,6 +232,19 @@ describe("notifyNewMatches", () => {
     expect(res.errors).toEqual([]);
   });
 
+  it("pas de mail pour une annonce publiée il y a plus de 7 jours, ni pour une republication", async () => {
+    const days = (n: number) => new Date(Date.now() - n * 86_400_000);
+    const { repo } = memoryRepo([
+      job("fraiche", { publishedAt: days(2) }),
+      job("date-inconnue", { publishedAt: null }),
+      job("vieille", { publishedAt: days(20) }),
+      job("republiee", { repost: true }),
+    ]);
+    const email = fakeNotifier("email");
+    await run(repo, [email]);
+    expect(email.batches.flat().map((a) => a.jobId).sort()).toEqual(["date-inconnue", "fraiche"]);
+  });
+
   it("IA branchée : seulement après sa vérification, avec son score", async () => {
     const { repo, notified } = memoryRepo([job("ok"), job("declassee"), job("pas-vue"), job("extrait", { sources: [{ source: "adzuna" }] })]);
     const email = fakeNotifier("email");
