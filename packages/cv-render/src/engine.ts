@@ -30,6 +30,14 @@ export async function readPdfText(pdf: Buffer): Promise<{ text: string; pages: n
 }
 
 /**
+ * Navigateurs essayés dans l'ordre. Edge d'abord sous Windows ; ailleurs Chrome d'abord : Edge peut être installé sur
+ * Linux (serveur de la CI) sans se lancer, et Playwright attend alors 30 s avant d'abandonner (test de rendu perdu).
+ * undefined = Chromium téléchargé par Playwright (serveur Linux ARM, sans Edge ni Chrome).
+ */
+export const browserChannels = (platform: string = process.platform) =>
+  platform === "win32" ? (["msedge", "chrome", undefined] as const) : (["chrome", "msedge", undefined] as const);
+
+/**
  * Edge déjà installé sous Windows (sans téléchargement), sinon Chrome. Un seul navigateur sans fenêtre,
  * lancé à la première demande et réutilisé ; close() à l'arrêt de Job Radar.
  */
@@ -37,8 +45,7 @@ export function createBrowserEngine(): CvEngine {
   let browser: Promise<Browser> | null = null;
   const launch = async (): Promise<Browser> => {
     const { chromium } = await import("playwright-core");
-    // undefined = Chromium téléchargé par Playwright (serveur Linux ARM, sans Edge ni Chrome).
-    for (const channel of ["msedge", "chrome", undefined]) {
+    for (const channel of browserChannels()) {
       try {
         return await chromium.launch({ channel, headless: true });
       } catch {

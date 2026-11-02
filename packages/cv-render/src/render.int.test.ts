@@ -12,7 +12,8 @@ import { renderCvHtml } from "./templates";
 const engine = createBrowserEngine();
 afterAll(() => engine.close());
 
-describe("rendu PDF avec Edge", () => {
+// Marge large : le premier test attend le lancement du navigateur (lent sur le serveur de la CI).
+describe("rendu PDF avec un vrai navigateur", { timeout: 120_000 }, () => {
   for (const template of ["une-colonne", "deux-colonnes"] as TemplateId[]) {
     it(`${template} : une page, texte lisible (nom, e-mail, titre)`, async () => {
       const draft = await fitToPage(tailorCv(MASTER, JOBS.front, template), MASTER, JOBS.front, EMPTY_OVERRIDES, engine);

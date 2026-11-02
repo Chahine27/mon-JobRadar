@@ -2,9 +2,17 @@ import { tailorCv } from "@job-radar/cv-tailor";
 import { EMPTY_OVERRIDES, type TemplateId } from "@job-radar/shared";
 import { describe, expect, it } from "vitest";
 import { JOBS, MASTER } from "../../cv-tailor/src/fixtures";
-import type { CvEngine } from "./engine";
+import { browserChannels, type CvEngine } from "./engine";
 import { fitToPage } from "./pdf";
 import { renderCvHtml } from "./templates";
+
+describe("navigateur du rendu PDF", () => {
+  it("Edge d'abord sous Windows, Chrome d'abord ailleurs (Edge installé mais inutilisable sur le serveur de la CI)", () => {
+    expect(browserChannels("win32")).toEqual(["msedge", "chrome", undefined]);
+    expect(browserChannels("linux")).toEqual(["chrome", "msedge", undefined]);
+    expect(browserChannels("darwin")[0]).toBe("chrome");
+  });
+});
 
 /** Faux navigateur : la « hauteur » est le nombre de lignes + 2 par projet ; la page en tient `limit`. */
 const engine = (limit: number): CvEngine => ({
