@@ -161,6 +161,38 @@ describe("IA locale (Ollama)", () => {
   });
 });
 
+describe("valeurs limites", () => {
+  const answer = (extra: object) => new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify({ ...GOOD, experience_min_ans: null, adequation: "forte", note: 90, points_attention: [], competences_obligatoires: ["Vue.js"], ...extra }) } }) });
+  const job = { ...JOB, title: "Développeur Vue.js", description: "Développeur Vue.js pour un produit interne." }; // aucune année écrite dans l'annonce
+
+  it("expérience demandée : jusqu'à ta limite + 1 an l'IA décide, au-delà le code force « faible »", async () => {
+    const adequation = async (years: number) => (await analyzeJobWithAi(answer({ experience_min_ans: years }), job, PROFILE)).result.adequation; // PROFILE : 0 à 3 ans
+    expect([await adequation(3), await adequation(4), await adequation(5)]).toEqual(["forte", "forte", "faible"]);
+  });
+
+  it("compétences : 4 mots au plus, jamais une phrase", async () => {
+    const { result } = await analyzeJobWithAi(answer({ competences_obligatoires: ["Domain Driven Design pratique", "une compétence de cinq mots"] }), job, PROFILE);
+    expect(result.competences_obligatoires).toEqual(["Domain Driven Design pratique"]);
+  });
+
+  it("salaire : lu dans l'annonce = annuel, sinon inconnu", async () => {
+    const paid = { ...job, description: `${job.description} Salaire : 42 000 € à 48 000 € brut annuel.` };
+    const read = (j: typeof job) => analyzeJobWithAi(answer({ salaire_min: 42000, salaire_max: 48000, salaire_periode: "annuel" }), j, PROFILE);
+    expect((await read(paid)).result.salaire_periode).toBe("annuel");
+    expect((await read(job)).result).toMatchObject({ salaire_periode: "inconnu", salaire_min: null, salaire_max: null });
+  });
+
+  it("annonce envoyée à l'IA : salaire (même d'un seul côté) et télétravail", () => {
+    const user = (extra: object) => buildAnalysisPrompt({ ...job, ...extra }, PROFILE).user;
+    expect(user({})).toContain("Salaire : non indiqué");
+    expect(user({ salaryMin: 40000, salaryMax: 45000 })).toContain("Salaire : 40000 à 45000 € brut par an");
+    expect(user({ salaryMin: 40000 })).toContain("Salaire : 40000 à ? € brut par an");
+    expect(user({ salaryMax: 45000 })).toContain("Salaire : ? à 45000 € brut par an");
+    expect(user({ remoteType: "unknown" })).toContain("Télétravail : non indiqué");
+    expect(user({ remoteType: "hybrid" })).toContain("Télétravail : hybrid");
+  });
+});
+
 describe("points d'attention sur le contrat", () => {
   it("« Contrat CDD » retiré si le candidat accepte les CDD, gardé sinon", async () => {
     const answer = { ...GOOD, points_attention: ["Contrat CDD", "Le contrat est un CDD.", "Anglais professionnel exigé"] };

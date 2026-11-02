@@ -68,7 +68,50 @@ describe("parseSalaryText", () => {
   });
 });
 
+describe("parseSalaryText : valeurs limites", () => {
+  it.each([
+    // Garde-fous du résultat : au moins 12 000 €, au plus 400 000 €, maximum d'au plus 3 fois le minimum.
+    ["1 000 € par mois", r(12000)],
+    ["999 € par mois", null],
+    ["400 000 € par an", r(400000)],
+    ["400 001 € par an", null],
+    ["40 000 € - 120 000 €", r(40000, 120000)],
+    ["40 000 € - 120 001 €", null],
+    // Mensuel : sous 15 000 € c'est un mois (×12, ×13…), à partir de 15 000 € c'est déjà l'année.
+    ["14 999 € par mois", r(179988)],
+    ["15 000 € par mois", r(15000)],
+    ["10 000 € x 13", r(130000)],
+    ["800 € x 16", r(12800)],
+    ["799 € x 16", null],
+    // Sans « par mois » : seulement entre 1 200 € et 8 000 € la ligne est lue comme un mois.
+    ["Salaire : 1 200 € brut", r(14400)],
+    ["Salaire : 1 199 € brut", null],
+    ["Salaire : 8 000 € brut", r(96000)],
+    ["Salaire : 8 001 € brut", null],
+    // Fourchette dont un seul bout porte le € : le nombre voisin relié par « - » en fait partie, un nombre isolé non.
+    ["40 000 € - 45 000", r(40000, 45000)],
+    ["40 000 - 45 000 €", r(40000, 45000)],
+    ["45 000 € 60 000", r(45000)],
+    // Ligne sans mot « salaire » (strict par défaut : non) : un nombre nu de plus de 1 000 compte, sauf en mode strict.
+    ["45 000", r(45000)],
+    ["1 000 par mois", r(12000)], // nombre nu de 1 000 : compte
+    ["50 000 dollars", null], // autre devise écrite en toutes lettres
+  ] as const)("%s", (text, expected) => {
+    expect(parseSalaryText(text)).toEqual(expected);
+  });
+
+  it("mode strict : un nombre nu ne suffit pas", () => {
+    expect(parseSalaryText("45 000", true)).toBeNull();
+    expect(parseSalaryText("45 000 €", true)).toEqual(r(45000));
+  });
+});
+
 describe("salaryFromText", () => {
+  it("une ligne avec le mot « salaire » l'emporte sur un montant seul vu avant", () => {
+    expect(salaryFromText("Poste basé à Paris, 45 000 € - 50 000 €\nSalaire : 60 000 €")).toEqual(r(60000));
+    expect(salaryFromText("Poste basé à Paris, 45 000 € - 50 000 €")).toEqual(r(45000, 50000));
+  });
+
   it("lit la ligne de salaire d'une annonce LinkedIn en anglais", () => {
     const text = [
       "Offer details",
@@ -97,5 +140,8 @@ describe("salaryOfJob", () => {
     expect(salaryOfJob({ salaryMin: 40000, salaryMax: 45000, description: "Salaire : 60k€" })).toEqual({ salaryMin: 40000, salaryMax: 45000 });
     expect(salaryOfJob({ salaryMin: null, salaryMax: null, description: "Salaire : 60k€" })).toEqual({ salaryMin: 60000, salaryMax: 60000 });
     expect(salaryOfJob({ salaryMin: null, salaryMax: null, description: "Rien" })).toEqual({ salaryMin: null, salaryMax: null });
+    // Un seul bout connu à la source : l'annonce n'est pas lue.
+    expect(salaryOfJob({ salaryMin: 40000, salaryMax: null, description: "Salaire : 60k€" })).toEqual({ salaryMin: 40000, salaryMax: null });
+    expect(salaryOfJob({ salaryMin: null, salaryMax: 50000, description: "Salaire : 60k€" })).toEqual({ salaryMin: null, salaryMax: 50000 });
   });
 });

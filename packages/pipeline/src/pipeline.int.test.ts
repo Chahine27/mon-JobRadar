@@ -125,7 +125,7 @@ describe("source → normalisation → base (README §32)", () => {
     expect(state.nextRunAt.getTime()).toBeLessThan(slowed.getTime());
   });
 
-  it("offres expirées : seulement quand toutes les sources le confirment, jamais les sauvegardées", async () => {
+  it("offres expirées : seulement quand toutes les sources le confirment ; une sauvegardée est vérifiée (liens morts) mais garde son statut", async () => {
     const now = new Date();
     const old = new Date(now.getTime() - 10 * 86_400_000);
     await ingestJob(prisma, normalize(raw(FT_SAMPLE_OFFER))!, old);
@@ -143,7 +143,7 @@ describe("source → normalisation → base (README §32)", () => {
       },
     });
     expect(r.expired).toBe(1);
-    expect(asked.sort()).toEqual(["199XYZT", "ENCORE"]);
+    expect(asked.sort()).toEqual(["199XYZT", "ENCORE", "SAUVEE"]); // la sauvegardée aussi (SAUVEE est retirée en ligne), sans changer d'étape
     const byTitle = Object.fromEntries((await prisma.job.findMany()).map((j) => [j.title, j.status]));
     expect(byTitle["Développeur Full Stack Vue.js / Node.js (H/F)"]).toBe("EXPIRED");
     expect(byTitle["Dev encore en ligne"]).toBe("NEW");
@@ -173,7 +173,7 @@ describe("source → normalisation → base (README §32)", () => {
 
   it("Adzuna : expirée seulement si toutes ses pages sont retirées ; une page en ligne suffit, et les liens morts sont supprimés", async () => {
     const adz = (id: string, title: string) =>
-      ({ source: "adzuna", sourceJobId: id, data: { id, title, description: "Développeur Node.js pour une banque.", company: { display_name: `Boîte ${title}` }, location: { display_name: "Paris", area: ["France", "Ile-de-France", "Paris"] }, created: new Date(Date.now() - 5 * 86_400_000).toISOString() }, collectedAt: new Date() }) satisfies RawJob;
+      ({ source: "adzuna", sourceJobId: id, data: { id, title, redirect_url: `https://www.adzuna.fr/details/${id}`, description: "Développeur Node.js pour une banque.", company: { display_name: `Boîte ${title}` }, location: { display_name: "Paris", area: ["France", "Ile-de-France", "Paris"] }, created: new Date(Date.now() - 5 * 86_400_000).toISOString() }, collectedAt: new Date() }) satisfies RawJob;
     const old = (d: number) => new Date(Date.now() - d * 86_400_000);
     await ingestJob(prisma, normalize(adz("101", "Dev retiré"))!, old(3));
     await ingestJob(prisma, normalize(adz("201", "Dev en ligne"))!, old(3));
@@ -296,6 +296,25 @@ describe("source → normalisation → base (README §32)", () => {
     expect(fixed).toMatchObject({ experienceText: null, remoteType: "hybrid" }); // « inconnu » n'efface pas une valeur connue
     expect((await prisma.job.findUniqueOrThrow({ where: { id: merged.id } })).experienceText).toBe("Niveau senior"); // plusieurs sources : pas touchée
     expect((await renormalizeJobs({ prisma })).changed).toBe(0); // déjà à jour
+  });
+
+  it("règles changées : les archivées (ignorée / expirée / refusée, plus vues depuis 90 j) sautées, analyses IA périmées comptées", async () => {
+    const day = 86_400_000;
+    const li = (id: string) =>
+      normalize(mapJobScraperOfferToRawJob({ id, source: "linkedin", url: `https://www.linkedin.com/jobs/view/${id.slice(9)}`, title: `Dev ${id}`, company: `Boîte ${id}`, location: "Paris" }, "linkedin")!)!;
+    for (const id of ["linkedin_4400001", "linkedin_4400002", "linkedin_4400003"]) await ingestJob(prisma, li(id));
+    // Ancienne règle de contrat : « CDD » en base, alors que l'annonce ne le dit pas ; chacune a déjà un avis de l'IA.
+    await prisma.job.updateMany({ data: { contractType: "CDD" } });
+    for (const job of await prisma.job.findMany()) {
+      await prisma.jobAnalysis.create({ data: { jobId: job.id, inputHash: "x", model: "m", summary: "s", matchedSkills: [], missingSkills: [], risks: [] } });
+    }
+    await prisma.job.updateMany({ where: { title: "Dev linkedin_4400002" }, data: { status: "IGNORED", lastSeenAt: new Date(Date.now() - 100 * day) } });
+    await prisma.job.updateMany({ where: { title: "Dev linkedin_4400003" }, data: { lastSeenAt: new Date(Date.now() - 10 * day) } });
+
+    // Sans les archivées : 4400001 (en ligne, refaite par l'IA) et 4400003 (plus vue depuis 10 j : périmée mais pas refaite seule).
+    expect(await renormalizeJobs({ prisma, apply: false })).toMatchObject({ checked: 2, changed: 2, aiStale: 2, aiAuto: 1 });
+    expect(await renormalizeJobs({ prisma, apply: false, archived: true })).toMatchObject({ checked: 3, changed: 3, aiStale: 3, aiAuto: 1 });
+    expect((await prisma.job.findFirstOrThrow({ where: { title: "Dev linkedin_4400001" } })).contractType).toBe("CDD"); // simulation : rien écrit
   });
 
   it("page illisible : essai noté, pas retentée au passage suivant (seulement le lendemain)", async () => {

@@ -7,7 +7,7 @@ Monorepo pnpm, TypeScript, Node >= 20 (24 en CI et sur le serveur). Code, commen
 
 - `pnpm check` : types + tests unitaires. À lancer avant tout commit (c'est ce que fait la CI).
 - `pnpm test` / `pnpm typecheck` séparément ; un seul fichier : `npx vitest run <chemin>`.
-- `pnpm test:int` : tests d'intégration (`*.int.test.ts`) sur une vraie base PostgreSQL `jobradar_test`.
+- `pnpm test:int` : tests d'intégration (`*.int.test.ts`) sur une vraie base PostgreSQL `jobradar_test`. Lancés aussi par la CI (PostgreSQL de GitHub) : un échec bloque le déploiement. Sur le PC : `pnpm db:server` dans un terminal (PostgreSQL embarqué, port de `.env`), puis `pnpm test:int`.
 - `pnpm dev` : API (Fastify, port 3000) + site (Vite, http://localhost:5173).
 - `pnpm db:generate` après une modif de `packages/db/prisma/schema.prisma`, `pnpm db:migrate` pour créer la migration.
 - `pnpm jobs:renormalize [--apply] [--all]` : réapplique normalisation et score aux offres déjà en base. Sans `--apply` : simulation, avec le nombre d'analyses IA rendues périmées (à lancer dans le bac à sable avant de pousser une règle). Les offres archivées (expirées / ignorées / refusées, plus vues depuis 90 j) sont sautées sauf avec `--all`.

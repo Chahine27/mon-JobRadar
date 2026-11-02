@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createEmailNotifier } from "./email";
 import { gmailQuery } from "./inbox";
 import { emailHtml, emailSubject, escapeHtml, pushPayload } from "./format";
-import { type CandidateJob, type NotifyRepo, notifyNewMatches, notifyNotice } from "./notify";
+import { type CandidateJob, type NotifyRepo, notifyNewMatches, notifyNotice, toAlert } from "./notify";
 import type { Channel, JobAlert, Notifier } from "./types";
 import { createWebPushNotifier, type PushSubscriptionRecord } from "./webpush";
 
@@ -243,6 +243,26 @@ describe("notifyNewMatches", () => {
     const email = fakeNotifier("email");
     await run(repo, [email]);
     expect(email.batches.flat().map((a) => a.jobId).sort()).toEqual(["date-inconnue", "fraiche"]);
+  });
+
+  it("valeurs limites : seuil de notification atteint pile, annonce de 7 jours", async () => {
+    const threshold = DEFAULT_PROFILE.minScoreForNotification;
+    const aiScores = new Map([["pile", threshold], ["dessous", threshold - 1]]);
+    const { repo } = memoryRepo([job("pile"), job("dessous")]);
+    const email = fakeNotifier("email");
+    await notifyNewMatches({ repo, notifiers: [email], profile: DEFAULT_PROFILE, since: new Date(0), appUrl: "http://x", aiScores });
+    expect(email.batches.flat().map((a) => a.jobId)).toEqual(["pile"]);
+
+    const ago = (days: number) => new Date(Date.now() - days * 86_400_000);
+    const week = memoryRepo([job("six-jours", { publishedAt: ago(6.9) }), job("huit-jours", { publishedAt: ago(7.1) })]);
+    const sent = fakeNotifier("email");
+    await run(week.repo, [sent]);
+    expect(sent.batches.flat().map((a) => a.jobId)).toEqual(["six-jours"]);
+  });
+
+  it("lieu de l'alerte : ville et département, l'un ou l'autre, ou rien", () => {
+    const place = (extra: object) => toAlert({ id: "j", title: "Dev", company: null, city: null, department: null, contractType: null, salaryMin: null, salaryMax: null, remoteType: "unknown", ...extra }, { final: 80, matchedSkills: [], missingSkills: [] }, "http://x", "apply").place;
+    expect([place({ city: "Paris", department: "75" }), place({ city: "Paris" }), place({ department: "75" }), place({})]).toEqual(["Paris (75)", "Paris", "(75)", null]);
   });
 
   it("IA branchée : seulement après sa vérification, avec son score", async () => {

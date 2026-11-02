@@ -607,6 +607,46 @@ describe("zone : départements, rayon, télétravail", () => {
   });
 });
 
+describe("valeurs limites des paliers", () => {
+  const adj = (r: ReturnType<typeof score>, re: RegExp) => r.adjustments.find((a) => re.test(a.label));
+
+  it("expérience : l'écart avec ta cible (1 à 3 ans) fait le malus", () => {
+    const e = (extra: object) => score({ ...PERFECT, title: "Développeur Vue.js", experienceMinYears: null, description: "Vue 3, TypeScript, Node.js.", ...extra });
+    expect(adj(e({ experienceMinYears: 3 }), /xpérience/)).toBeUndefined(); // pile ta cible : pas de malus
+    expect(adj(e({ experienceMinYears: 4 }), /xpérience/)).toEqual({ label: "Expérience au-dessus de ta cible", points: -25 });
+    expect(adj(e({ experienceMinYears: 7 }), /xpérience/)).toEqual({ label: "Expérience au-dessus de ta cible", points: -25 });
+    expect(adj(e({ experienceMinYears: 8 }), /xpérience/)).toEqual({ label: "Expérience très au-dessus de ta cible", points: -40 });
+    // « Lead » sans années écrites : 15, pile à la limite du « très au-dessus » ; « senior » : 30.
+    expect(adj(e({ title: "Lead développeur Vue.js" }), /xpérience/)).toEqual({ label: "Expérience très au-dessus de ta cible", points: -40 });
+    expect(adj(e({ title: "Développeur senior Vue.js" }), /xpérience/)).toEqual({ label: "Expérience au-dessus de ta cible", points: -25 });
+  });
+
+  it("salaire : pile ta cible, pile ton minimum, pile 3 000 € sous ton minimum, pile 8 000 €", () => {
+    const profile = { ...DEFAULT_PROFILE, salaryTarget: 40000, salaryMinimum: 36000 };
+    const s = (salary: number) => {
+      const r = score({ ...PERFECT, salaryMin: salary, salaryMax: salary }, profile);
+      return [r.breakdown.salary, adj(r, /^Salaire/)?.points ?? 0];
+    };
+    expect([s(45000), s(44999), s(40000), s(39999)]).toEqual([[100, 5], [95, 5], [95, 5], [80, 0]]);
+    expect([s(36000), s(35999), s(33000), s(32999)]).toEqual([[80, 0], [50, -10], [50, -10], [20, -20]]);
+    expect([s(8000), s(7999)]).toEqual([[20, -20], [50, 0]]); // sous 8 000 € : pas un salaire annuel, inconnu
+  });
+
+  it("trajet en transports : 30, 45 et 60 minutes sont encore dans leur palier", () => {
+    const t = (m: number) => adj(score({ ...PERFECT, travelMinutes: m, travelMode: "transit" }), /transports/)?.points ?? 0;
+    expect([t(30), t(31), t(45), t(46), t(60), t(61)]).toEqual([0, -5, -5, -15, -15, -25]);
+  });
+
+  it("stage : reconnu par le contrat OU par le titre", () => {
+    const profile = { ...DEFAULT_PROFILE, contracts: ["CDI", "Stage"] };
+    const student = "Vue 3, TypeScript, Node.js. Étudiant(e) en école d'ingénieur, tu recherches un stage de fin d'études.";
+    const byContract = score({ ...PERFECT, title: "Développeur Vue.js", contractType: "STAGE", experienceMinYears: null, description: student }, profile);
+    expect(byContract.capLabel).toContain("stage réservé aux étudiants");
+    const byTitle = score({ ...PERFECT, title: "Stage - Développeur Vue.js", contractType: "CDI", experienceMinYears: null, description: student }, profile);
+    expect(byTitle.capLabel).toContain("stage réservé aux étudiants");
+  });
+});
+
 describe("trajet selon le mode", () => {
   it("transports depuis la gare d'arrivée : rien jusqu'à 30 min, puis malus", () => {
     const t = (m: number) => score({ ...PERFECT, travelMinutes: m, travelMode: "transit" }).adjustments.find((a) => a.label.includes("transports"));

@@ -14,6 +14,22 @@ jobs:
   verifier:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Base PostgreSQL jetable pour les tests d'intégration (jobradar_test y est créée par les tests eux-mêmes).
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: jobradar
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: jobradar
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U jobradar"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://jobradar:test@127.0.0.1:5432/jobradar
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -23,6 +39,7 @@ jobs:
           cache: pnpm
       - run: CI=true pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm test:int
       - run: pnpm --filter @job-radar/web build
 
   deployer:
