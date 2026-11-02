@@ -10,7 +10,8 @@ import { outOfZone } from "@job-radar/shared";
  *  - LinkedIn (JobScraper) : on DEMANDE à la page publique ; bandeau « candidatures plus acceptées » ou offre supprimée → close.
  *  - Démo : jamais.
  * Une offre trouvée sur plusieurs sources n'expire que si TOUTES ses sources la donnent retirée.
- * Seules les offres « Nouvelle » / « Vue » passent en « Expirée » : sauvegardées et postulées ne bougent pas.
+ * Seules les offres « Nouvelle » / « Vue » / « Ignorée » passent en « Expirée » : sauvegardées et postulées ne bougent pas.
+ * Les liens Adzuna / LinkedIn dont la page est retirée sont supprimés de l'offre (tous statuts) tant qu'il en reste un autre.
  */
 export const EXPIRY = { ftUnseenDays: 7, careersUnseenDays: 2, adzunaMaxAgeDays: 45, maxFtChecks: 40, maxLinkedinChecks: 100, maxAdzunaChecks: 60 };
 
@@ -85,7 +86,8 @@ export async function expireJobs(opts: {
   // Candidates : pas revues depuis au moins 1 jour, ou venues de LinkedIn (une offre peut y fermer en quelques heures).
   const jobs = await prisma.job.findMany({
     where: {
-      status: { in: ["NEW", "SEEN"] },
+      // Tous statuts sauf déjà expirée : les liens morts d'une offre ignorée, sauvegardée ou postulée sont retirés aussi.
+      status: { not: "EXPIRED" },
       OR: [
         { lastSeenAt: { lt: new Date(now.getTime() - DAY) } },
         ...(opts.linkedinIsOpen ? [{ sources: { some: { source: "jobscraper:linkedin" } } }] : []),
@@ -96,6 +98,7 @@ export async function expireJobs(opts: {
     },
     select: {
       id: true,
+      status: true,
       publishedAt: true,
       firstSeenAt: true,
       department: true,
@@ -153,7 +156,8 @@ export async function expireJobs(opts: {
       await prisma.jobSourceLink.deleteMany({ where: { jobId: job.id, OR: deadLinks.map(({ source, sourceJobId }) => ({ source, sourceJobId })) } });
       report.linksRemoved += deadLinks.length;
     }
-    if (allGone) {
+    // « Nouvelle », « Vue » et « Ignorée » passent en « Expirée » ; sauvegardée et postulée gardent leurs liens et leur statut.
+    if (allGone && (job.status === "NEW" || job.status === "SEEN" || job.status === "IGNORED")) {
       await prisma.$transaction([
         prisma.job.update({ where: { id: job.id }, data: { status: "EXPIRED" } }),
         prisma.jobEvent.create({ data: { jobId: job.id, type: "STATUS_CHANGED", toValue: "EXPIRED", fromValue: "auto" } }),
