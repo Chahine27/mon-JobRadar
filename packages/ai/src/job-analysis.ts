@@ -12,6 +12,8 @@ import type { OllamaClient } from "./ollama";
  * 2026-10-21 : technos « à apprendre » (formation proposée, poste junior, liste du candidat) jamais une raison de « faible ».
  * Pas changé pour la note sur 100 (2026-10-25) : réanalyser toutes les offres coûterait des crédits Claude. Seules les
  * nouvelles analyses ont une note ; les anciennes gardent le score du code.
+ * Pas changé pour le contrat retiré de la consigne et l'avis placé avant la note (2026-11-02) : même raison ; le contrat
+ * des anciennes analyses est de toute façon revérifié par le code.
  */
 export const ANALYSIS_PROMPT_VERSION = "2026-10-21.1";
 
@@ -64,9 +66,10 @@ export const JOB_ANALYSIS_JSON_SCHEMA = {
     exigees_en_entreprise: { type: "array", items: { type: "string" } },
     exigees_en_projets: { type: "array", items: { type: "string" } },
     exigees_manquantes: { type: "array", items: { type: "string" } },
+    // L'avis avant le verdict : le modèle écrit dans l'ordre, il justifie puis note (sinon il note puis invente une raison).
+    avis: { type: "string" },
     adequation: { type: "string", enum: ["forte", "moyenne", "faible"] },
     note: { type: "integer" },
-    avis: { type: "string" },
     contrat: { type: "string", enum: ["CDI", "CDD", "INTERIM", "ALTERNANCE", "STAGE", "FREELANCE", "inconnu"] },
     salaire_min: { type: ["number", "null"] },
     salaire_max: { type: ["number", "null"] },
@@ -85,9 +88,9 @@ export const JOB_ANALYSIS_JSON_SCHEMA = {
     "exigees_en_entreprise",
     "exigees_en_projets",
     "exigees_manquantes",
+    "avis",
     "adequation",
     "note",
-    "avis",
     "contrat",
     "salaire_min",
     "salaire_max",
@@ -149,16 +152,16 @@ Règles :
 - exigees_en_entreprise / exigees_en_projets / exigees_manquantes : range chaque élément de competences_obligatoires dans une seule de ces 3 listes, d'après le PROFIL DU CANDIDAT.
 - Technologie À APPRENDRE : une technologie absente de son profil qui est dans sa liste « peut apprendre vite », OU n'importe quelle technologie absente quand l'annonce propose une formation (formation interne, « vous serez formé », montée en compétences, mentorat) ou vise un junior / débutant. SAUF si l'annonce exige une maîtrise ou des années d'expérience sur elle : elle manque alors vraiment. Une technologie à apprendre n'est jamais à elle seule une raison de « faible », même si c'est la technologie principale ; dans avis et points_attention, écris « à apprendre (formation proposée) », pas « te manque ».
 - Ce qui correspond au parcours du candidat (secteur où il a déjà travaillé, technologie de son CV) est un ATOUT : cite-le dans avis, jamais dans points_attention.
-- Type de contrat : compare-le aux « Contrats souhaités » du candidat. Si le contrat est connu et non souhaité, indique-le dans points_attention et considère l'adéquation comme faible. S'il est souhaité, ne le mets pas dans points_attention. Si l'annonce propose PLUSIEURS contrats (« CDI ou Freelance ») dont au moins un est souhaité, le contrat convient : ne le mets ni dans points_attention ni dans avis.
+- Type de contrat : il est comparé aux souhaits du candidat par un autre programme. Ne le juge pas : n'en parle ni dans points_attention, ni dans avis, et il ne change ni adequation ni note.
 - points_attention : les pièges concrets pour le candidat (poste senior, mission chez un client, astreintes, déplacements, anglais exigé, habilitation, salaire non indiqué, technologie principale absente de son profil…). 5 maximum.
-- adequation : compare l'annonce au PROFIL DU CANDIDAT donné, y compris le contrat souhaité.
+- adequation : compare l'annonce au PROFIL DU CANDIDAT donné.
   forte = il a EN ENTREPRISE la plupart des compétences exigées, dont la technologie principale, ET l'expérience demandée ne dépasse pas la sienne.
-  faible = contrat connu non souhaité, OU expérience demandée nettement au-dessus de la sienne, OU technologie principale absente de son profil et pas à apprendre, OU au moins 2 compétences exigées manquantes et pas à apprendre, OU poste très orienté vers un domaine absent de son expérience en entreprise (concevoir des modèles d'IA ou de LLM, data science…).
+  faible = expérience demandée nettement au-dessus de la sienne, OU technologie principale absente de son profil et pas à apprendre, OU au moins 2 compétences exigées manquantes et pas à apprendre, OU poste très orienté vers un domaine absent de son expérience en entreprise (concevoir des modèles d'IA ou de LLM, data science…).
   Développer AVEC des agents de code IA (Claude Code, Cursor, Copilot, Codex) est une méthode de travail, pas un domaine : traite-le comme une compétence (en entreprise, en projets ou manquante), jamais à lui seul comme une raison de « faible ». S'il est demandé ou cité (IA appliquée au développement, agentic engineering…), mets-le dans les compétences, exigées ou bonus, avec les mots de l'annonce.
   Technologie principale vue seulement en projets, ou à apprendre : au mieux moyenne.
   moyenne = entre les deux.
-- note : sur 100, à quel point l'offre convient au candidat, d'après TOUT le contexte (missions, stack, niveau, contrat, secteur, ce qu'il a en entreprise ou en projets). Elle doit rester dans la fourchette de l'adequation : forte = 75 à 100, moyenne = 45 à 74, faible = 0 à 40. Dans la fourchette, place-la selon le nombre de compétences exigées qu'il a et l'importance de ce qui manque. Ne tiens pas compte du lieu, du trajet ni du salaire.
-- avis : une phrase directe, en TUTOYANT le candidat (« tu », jamais « vous »), qui dit pourquoi ça colle ou pas, en distinguant ce qu'il a en entreprise, ce qu'il n'a vu qu'en projets et ce qui lui manque. Même règle pour points_attention.
+- note : sur 100, à quel point l'offre convient au candidat, d'après TOUT le contexte (missions, stack, niveau, secteur, ce qu'il a en entreprise ou en projets). Elle doit rester dans la fourchette de l'adequation : forte = 75 à 100, moyenne = 45 à 74, faible = 0 à 40. Dans la fourchette, place-la selon le nombre de compétences exigées qu'il a et l'importance de ce qui manque. Ne tiens pas compte du lieu, du trajet, du salaire ni du contrat.
+- avis : écrit AVANT adequation et note, qui en découlent. Une phrase directe, en TUTOYANT le candidat (« tu », jamais « vous »), qui dit pourquoi ça colle ou pas, en distinguant ce qu'il a en entreprise, ce qu'il n'a vu qu'en projets et ce qui lui manque. Même règle pour points_attention.
 - contrat / salaire_min / salaire_max / salaire_periode / adresse : ce que dit VRAIMENT le texte de l'annonce, même si les champs « Contrat » ou « Salaire » au-dessus disent autre chose (ils viennent d'un robot qui se trompe parfois).
   contrat : CDI, CDD, INTERIM, ALTERNANCE, STAGE, FREELANCE (freelance / portage / TJM), sinon inconnu.
   salaire : seulement un montant écrit pour CE poste, en euros, tel qu'écrit (« 45k€ » → 45000), avec sa période ; un seul montant → min = max ; rien d'écrit → null et inconnu. Jamais le chiffre d'affaires ni une « estimation » du site.
@@ -182,7 +185,6 @@ PROFIL DU CANDIDAT
 - Compétences vues SEULEMENT EN PROJETS (pas en entreprise) : ${inProjects.join(", ") || "aucune"}
 - Technologies qu'il peut APPRENDRE VITE (absentes de son profil, choisies par lui) : ${profile.learnableSkills?.join(", ") || "aucune"}
 - Expérience visée : ${profile.experienceMin} à ${profile.experienceMax} ans
-- Contrats souhaités : ${profile.contracts.join(", ") || "non renseignés"}
 - Zones : ${profile.locations.join(", ") || "non renseignées"}
 ${profile.cv ? `\nCV DU CANDIDAT\n"""\n${profile.cv.slice(0, MAX_CV)}\n"""\n` : ""}`;
   const user = `ANNONCE

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ANALYSIS_SYSTEM_PROMPT, analyzeJobWithAi, buildAnalysisPrompt } from "./job-analysis";
+import { ANALYSIS_SYSTEM_PROMPT, analyzeJobWithAi, buildAnalysisPrompt, JOB_ANALYSIS_JSON_SCHEMA } from "./job-analysis";
 import { OllamaClient } from "./ollama";
 
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
@@ -114,8 +114,15 @@ describe("IA locale (Ollama)", () => {
 
   it("consigne : « au moins une de A, B ou C » en un seul élément ; avis et années d'accord", () => {
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("au moins une de ces technologies");
-    expect(ANALYSIS_SYSTEM_PROMPT).toContain("« CDI ou Freelance »");
     expect(ANALYSIS_SYSTEM_PROMPT).toContain("TOUJOURS celui de experience_min_ans");
+  });
+
+  it("contrat jugé par le code seul ; l'avis écrit avant le verdict", () => {
+    expect(ANALYSIS_SYSTEM_PROMPT).toContain("Type de contrat : il est comparé aux souhaits du candidat par un autre programme");
+    expect(fullPrompt(JOB, { ...PROFILE, contracts: ["CDI", "Stage"] })).not.toContain("Stage");
+    const order = JOB_ANALYSIS_JSON_SCHEMA.required;
+    expect(order.indexOf("avis")).toBeLessThan(order.indexOf("adequation"));
+    expect(Object.keys(JOB_ANALYSIS_JSON_SCHEMA.properties).indexOf("avis")).toBeLessThan(Object.keys(JOB_ANALYSIS_JSON_SCHEMA.properties).indexOf("note"));
   });
 
   it("consigne : tutoiement et « A ou B » en un seul élément", () => {
