@@ -41,6 +41,116 @@ async function cachedPoint(prisma: PrismaClient, query: string, find: () => Prom
   return { point, fresh: true };
 }
 
+const findTravelJobs = (prisma: PrismaClient, jobIds: string[]) =>
+  prisma.job.findMany({
+    // `not: "99"` seul exclurait aussi les départements inconnus (NULL en SQL) : la ville ne serait jamais localisée.
+    where: { id: { in: jobIds }, remoteType: { not: "remote" }, OR: [{ department: null }, { department: { not: "99" } }] },
+    select: {
+      id: true, company: true, latitude: true, longitude: true, city: true, department: true, address: true, locationPrecision: true, userEdits: true,
+      travel: { select: { mode: true, originKey: true, provider: true } },
+    },
+  });
+type TravelJob = Awaited<ReturnType<typeof findTravelJobs>>[number];
+
+type Located = { dest: Point; precision: "address" | "city_centroid" };
+
+/**
+ * Où va-t-on : l'adresse saisie à la main prime, puis l'adresse précise de l'annonce, l'établissement de l'entreprise dans
+ * la ville de l'offre, la ville écrite dans l'adresse, et enfin le centre de la ville. null = introuvable.
+ */
+async function locateJob(prisma: PrismaClient, job: TravelJob, userAddress: string | undefined, report: TravelReport): Promise<Located | null> {
+  let dest: Point | null = null;
+  let precision: "address" | "city_centroid" = "city_centroid";
+  // Adresse saisie à la main : prime sur tout, sans toucher aux coordonnées de la source.
+  if (userAddress) {
+    const r = await cachedPoint(prisma, userAddress, async () => (await geocode(userAddress))[0] ?? null, "address");
+    if (r.fresh) report.geocoded++;
+    dest = r.point;
+  }
+  if (dest) precision = "address";
+  else if (job.latitude != null && job.longitude != null && job.locationPrecision === "address") {
+    dest = { lat: job.latitude, lng: job.longitude };
+    precision = "address";
+  }
+  // Adresse précise lue dans l'annonce.
+  // Département écrit dans l'adresse : résultat ailleurs écarté (clé de cache propre : les anciens résultats ne servent plus).
+  if (!dest && job.address && /\d/.test(job.address)) {
+    const query = job.address.trim();
+    const department = statedDepartment(query);
+    const key = department ? `${query}|dep:${department}` : query;
+    const r = await cachedPoint(prisma, key, async () => (await geocode(query, { department }))[0] ?? null, "address");
+    if (r.fresh) report.geocoded++;
+    if (r.point) [dest, precision] = [r.point, "address"];
+  }
+  // Établissement de l'entreprise dans la ville de l'offre (API Recherche d'entreprises).
+  if (!dest && job.company && (job.city || job.department)) {
+    const query = `entreprise|${job.company}|${job.city ?? ""}|${job.department ?? ""}`;
+    const r = await cachedPoint(prisma, query, () => findCompanySite(job.company!, { city: job.city, department: job.department }), "address");
+    if (r.fresh) report.geocoded++;
+    if (r.point) [dest, precision] = [r.point, "address"];
+  }
+  if (dest && !userAddress && precision === "address" && job.locationPrecision !== "address") {
+    await prisma.job.update({ where: { id: job.id }, data: { latitude: dest.lat, longitude: dest.lng, locationPrecision: "address" } });
+  }
+  // « Beauvais (60), locaux Groupe ISAGRI » introuvable à l'adresse près : la ville écrite dans l'adresse, plus précise
+  // que le lieu de la source (Adzuna : « Oise », centre du département).
+  const named = job.address?.match(/^\s*([^,(\d]+?)\s*\((\d{2,3})\)/);
+  if (!dest && named) {
+    const query = `${named[1]} ${named[2]}`;
+    const r = await cachedPoint(prisma, `${query}|dep:${named[2]}`, async () => (await geocode(query, { cityOnly: true, department: named[2] }))[0] ?? null, "city_centroid");
+    if (r.fresh) report.geocoded++;
+    dest = r.point;
+    if (dest) await prisma.job.update({ where: { id: job.id }, data: { latitude: dest.lat, longitude: dest.lng, locationPrecision: "city_centroid" } });
+  }
+  // Sinon : coordonnées déjà connues (centre de la ville), ou la commune à localiser.
+  if (!dest && job.latitude != null && job.longitude != null) dest = { lat: job.latitude, lng: job.longitude };
+  if (!dest && job.city) {
+    const query = `${job.city} ${job.department ?? ""}`.trim();
+    const r = await cachedPoint(prisma, query, async () => (await geocode(query, { cityOnly: true }))[0] ?? null, "city_centroid");
+    if (r.fresh) report.geocoded++;
+    dest = r.point;
+    if (dest) await prisma.job.update({ where: { id: job.id }, data: { latitude: dest.lat, longitude: dest.lng, locationPrecision: "city_centroid" } });
+  }
+  return dest ? { dest, precision } : null;
+}
+
+/** Appels d'itinéraire de ce passage, et appels déjà faits aujourd'hui par un calculateur (quota du jour). */
+type RouteBudget = { calls: number; max: number; usedToday: (provider: string) => Promise<number> };
+
+/** Durée du trajet : en cache, sinon calculée (dans la limite du quota). null = on arrête là (quota atteint ou erreur du calculateur). */
+async function routeMinutes(
+  prisma: PrismaClient,
+  routing: RoutingService,
+  origin: Point,
+  dest: Point,
+  budget: RouteBudget,
+  report: TravelReport,
+  log: (m: string) => void,
+): Promise<{ minutes: number | null } | null> {
+  const key = routeKeyOf(routing.name, origin, dest);
+  const cached = await prisma.travelCache.findUnique({ where: { key } });
+  if (cached) {
+    report.fromCache++;
+    return { minutes: cached.minutes };
+  }
+  if (budget.calls >= budget.max || (await budget.usedToday(routing.name)) >= DAILY_ROUTE_BUDGET) {
+    report.skipped = "quota atteint : la suite sera calculée plus tard";
+    return null;
+  }
+  let minutes: number | null;
+  try {
+    minutes = (await routing.estimateTravelTime(origin, dest)).minutes;
+  } catch (err) {
+    report.skipped = err instanceof Error ? err.message : String(err);
+    log(`Trajets : ${report.skipped}`);
+    return null; // erreur (clé, quota…) : on ne gaspille pas d'appels
+  }
+  budget.calls++;
+  report.computed++;
+  await prisma.travelCache.create({ data: { key, minutes } });
+  return { minutes };
+}
+
 /**
  * Calcule le temps de trajet de CERTAINES offres (celles qu'on ouvre, ou les nouvelles offres
  * susceptibles d'être notifiées) — pas de calcul en masse, pour ménager les quotas.
@@ -69,17 +179,13 @@ export async function ensureTravelTimes(opts: {
     car: { routing: opts.car, origin: home, missing: "point de départ non renseigné" },
   };
 
-  const jobs = await prisma.job.findMany({
-    // `not: "99"` seul exclurait aussi les départements inconnus (NULL en SQL) : la ville ne serait jamais localisée.
-    where: { id: { in: opts.jobIds }, remoteType: { not: "remote" }, OR: [{ department: null }, { department: { not: "99" } }] },
-    select: {
-      id: true, company: true, latitude: true, longitude: true, city: true, department: true, address: true, locationPrecision: true, userEdits: true,
-      travel: { select: { mode: true, originKey: true, provider: true } },
-    },
-  });
+  const jobs = await findTravelJobs(prisma, opts.jobIds);
   const since = new Date(Date.now() - 86_400_000);
-  const usedToday = async (provider: string) => prisma.travelCache.count({ where: { createdAt: { gte: since }, key: { startsWith: `${provider}|` } } });
-  let calls = 0;
+  const budget: RouteBudget = {
+    calls: 0,
+    max: opts.maxRoutes ?? 20,
+    usedToday: async (provider) => prisma.travelCache.count({ where: { createdAt: { gte: since }, key: { startsWith: `${provider}|` } } }),
+  };
 
   for (const job of jobs) {
     // Corrections à la main (page de l'offre) : elles décident du mode, comme à l'affichage (même règle qu'applyEdits).
@@ -100,83 +206,13 @@ export async function ensureTravelTimes(opts: {
     if (job.travel?.mode === mode && job.travel.originKey === originKey && job.travel.provider === routing.name) continue;
     report.considered++;
 
-    let dest: Point | null = null;
-    let precision: "address" | "city_centroid" = "city_centroid";
-    // Adresse saisie à la main : prime sur tout, sans toucher aux coordonnées de la source.
-    if (userAddress) {
-      const r = await cachedPoint(prisma, userAddress, async () => (await geocode(userAddress))[0] ?? null, "address");
-      if (r.fresh) report.geocoded++;
-      dest = r.point;
-    }
-    if (dest) precision = "address";
-    else if (job.latitude != null && job.longitude != null && job.locationPrecision === "address") {
-      dest = { lat: job.latitude, lng: job.longitude };
-      precision = "address";
-    }
-    // Adresse précise lue dans l'annonce.
-    // Département écrit dans l'adresse : résultat ailleurs écarté (clé de cache propre : les anciens résultats ne servent plus).
-    if (!dest && job.address && /\d/.test(job.address)) {
-      const query = job.address.trim();
-      const department = statedDepartment(query);
-      const key = department ? `${query}|dep:${department}` : query;
-      const r = await cachedPoint(prisma, key, async () => (await geocode(query, { department }))[0] ?? null, "address");
-      if (r.fresh) report.geocoded++;
-      if (r.point) [dest, precision] = [r.point, "address"];
-    }
-    // Établissement de l'entreprise dans la ville de l'offre (API Recherche d'entreprises).
-    if (!dest && job.company && (job.city || job.department)) {
-      const query = `entreprise|${job.company}|${job.city ?? ""}|${job.department ?? ""}`;
-      const r = await cachedPoint(prisma, query, () => findCompanySite(job.company!, { city: job.city, department: job.department }), "address");
-      if (r.fresh) report.geocoded++;
-      if (r.point) [dest, precision] = [r.point, "address"];
-    }
-    if (dest && !userAddress && precision === "address" && job.locationPrecision !== "address") {
-      await prisma.job.update({ where: { id: job.id }, data: { latitude: dest.lat, longitude: dest.lng, locationPrecision: "address" } });
-    }
-    // « Beauvais (60), locaux Groupe ISAGRI » introuvable à l'adresse près : la ville écrite dans l'adresse, plus précise
-    // que le lieu de la source (Adzuna : « Oise », centre du département).
-    const named = job.address?.match(/^\s*([^,(\d]+?)\s*\((\d{2,3})\)/);
-    if (!dest && named) {
-      const query = `${named[1]} ${named[2]}`;
-      const r = await cachedPoint(prisma, `${query}|dep:${named[2]}`, async () => (await geocode(query, { cityOnly: true, department: named[2] }))[0] ?? null, "city_centroid");
-      if (r.fresh) report.geocoded++;
-      dest = r.point;
-      if (dest) await prisma.job.update({ where: { id: job.id }, data: { latitude: dest.lat, longitude: dest.lng, locationPrecision: "city_centroid" } });
-    }
-    // Sinon : coordonnées déjà connues (centre de la ville), ou la commune à localiser.
-    if (!dest && job.latitude != null && job.longitude != null) dest = { lat: job.latitude, lng: job.longitude };
-    if (!dest && job.city) {
-      const query = `${job.city} ${job.department ?? ""}`.trim();
-      const r = await cachedPoint(prisma, query, async () => (await geocode(query, { cityOnly: true }))[0] ?? null, "city_centroid");
-      if (r.fresh) report.geocoded++;
-      dest = r.point;
-      if (dest) await prisma.job.update({ where: { id: job.id }, data: { latitude: dest.lat, longitude: dest.lng, locationPrecision: "city_centroid" } });
-    }
-    if (!dest) continue;
+    const located = await locateJob(prisma, job, userAddress, report);
+    if (!located) continue;
+    const route = await routeMinutes(prisma, routing, origin, located.dest, budget, report, log);
+    if (!route) break;
 
-    const key = routeKeyOf(routing.name, origin, dest);
-    let minutes: number | null;
-    const cached = await prisma.travelCache.findUnique({ where: { key } });
-    if (cached) {
-      minutes = cached.minutes;
-      report.fromCache++;
-    } else {
-      if (calls >= (opts.maxRoutes ?? 20) || (await usedToday(routing.name)) >= DAILY_ROUTE_BUDGET) {
-        report.skipped = "quota atteint : la suite sera calculée plus tard";
-        break;
-      }
-      try {
-        minutes = (await routing.estimateTravelTime(origin, dest)).minutes;
-      } catch (err) {
-        report.skipped = err instanceof Error ? err.message : String(err);
-        log(`Trajets : ${report.skipped}`);
-        break; // erreur (clé, quota…) : on ne gaspille pas d'appels
-      }
-      calls++;
-      report.computed++;
-      await prisma.travelCache.create({ data: { key, minutes } });
-    }
-
+    const { minutes } = route;
+    const { precision } = located;
     await prisma.travelEstimate.upsert({
       where: { jobId: job.id },
       create: { jobId: job.id, minutes, provider: routing.name, mode, precision, originKey },
