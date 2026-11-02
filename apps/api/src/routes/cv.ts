@@ -9,6 +9,7 @@ import { z } from "zod";
 import { requireAuth } from "../auth";
 import { createCvService } from "../cv";
 import type { Stores, TailoredCvRow } from "../stores";
+import { issuesOf } from "./http";
 
 export type CvRoutesOptions = {
   stores: Stores;
@@ -24,7 +25,6 @@ const TemplateQuery = z.object({ template: TemplateIdSchema });
 const RefParams = z.object({ ref: z.string().min(1).max(130) });
 const TEMPLATE_LABELS: Record<TemplateId, string> = { "une-colonne": "Une colonne", "deux-colonnes": "Deux colonnes" };
 
-const issuesOf = (e: z.ZodError) => e.issues.map((i) => ({ path: i.path.join("."), message: i.message }));
 
 /** « Chahine Mehadji » → « MEHADJI_CHAHINE » (le nom que voit le recruteur). */
 export function cvFileBase(fullName: string): string {

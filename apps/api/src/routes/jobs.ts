@@ -7,6 +7,7 @@ import { UrlReadError, readJobFromUrl } from "../job-from-url";
 import type { JobService } from "../jobs/service";
 import { periodStats } from "../jobs/stats";
 import type { Stores } from "../stores";
+import { issuesOf } from "./http";
 
 /** Temps max d'attente du trajet avant d'afficher l'offre (au-delà, il arrive en différé). */
 const TRAVEL_WAIT_MS = 400;
@@ -115,7 +116,7 @@ export async function jobRoutes(
     if (!body.success) {
       return reply.code(400).send({
         error: "INVALID_JOB",
-        issues: body.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+        issues: issuesOf(body.error),
       });
     }
     const saved = await opts.stores.jobs.addManual(request.body);

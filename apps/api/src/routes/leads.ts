@@ -4,6 +4,7 @@ import { LeadFiltersSchema, ProfileSchema } from "@job-radar/shared";
 import { z } from "zod";
 import { requireAuth } from "../auth";
 import { LEAD_STATUSES, type LeadInput, type LeadRow, type Stores } from "../stores";
+import { issuesOf } from "./http";
 
 export type LeadsOptions = {
   stores: Stores;
@@ -145,7 +146,7 @@ export async function leadRoutes(app: FastifyInstance, opts: LeadsOptions) {
     if (!body.success) {
       return reply.code(400).send({
         error: "INVALID_SETTINGS",
-        issues: body.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+        issues: issuesOf(body.error),
       });
     }
     const rec = await stores.profiles.get(request.userId!);

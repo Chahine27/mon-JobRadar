@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireAuth } from "../auth";
 import type { Stores } from "../stores";
+import { issuesOf } from "./http";
 
 const HomeSchema = z.object({
   label: z.string().trim().min(1).max(200),
@@ -48,7 +49,7 @@ export async function profileRoutes(app: FastifyInstance, opts: { stores: Stores
     if (!body.success) {
       return reply.code(400).send({
         error: "INVALID_PROFILE",
-        issues: body.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+        issues: issuesOf(body.error),
       });
     }
     return stores.profiles.save(request.userId!, body.data.profile, body.data.home);
