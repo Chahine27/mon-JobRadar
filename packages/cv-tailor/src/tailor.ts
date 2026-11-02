@@ -73,18 +73,33 @@ const kindOf = (s: string) => KINDS.find(([, r]) => r.test(s.split(/[,(.:]/)[0]!
 
 const short = (s: string, n = 70) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
-/**
- * CV adapté à une offre (§4). Pur et déterministe : mêmes données, mêmes règles → même résultat.
- * Toutes les phrases viennent mot pour mot de variantes validées du CV complet.
- */
-export function tailorCv(
-  master: CvMaster,
-  job: JobForCv,
-  template: TemplateId,
-  overrides: CvOverrides = EMPTY_OVERRIDES,
-  /** Lignes ou projets remis pour remplir la page (ajustement, §6.3) : placés comme les autres, par note. */
-  fill: string[] = [],
-): TailoredCvDraft {
+/** État partagé par les étapes du choix : ce que l'offre demande, les réglages à la main, et ce qui est gardé ou écarté. */
+type Pass = {
+  master: CvMaster;
+  job: JobForCv;
+  template: TemplateId;
+  overrides: CvOverrides;
+  style: Style;
+  req: Set<string>;
+  nice: Set<string>;
+  men: Set<string>;
+  forbidden: Set<string>;
+  removed: Set<string>;
+  filled: Set<string>;
+  added: Set<string>;
+  warnings: string[];
+  picked: PickedItem[];
+  dropped: PickedItem[];
+  substitutions: Substitution[];
+  pointsOf: (s: string) => number;
+  scoreOf: (skills: string[], level: Level) => { score: number; reasons: Reason[] };
+  pickVariant: (vs: TextVariant[], blockId: string) => { v: TextVariant; mixed: boolean } | null;
+  mixedWarning: (what: string) => void;
+  applyOrder: <T extends { id: string }>(items: T[], key: string) => T[];
+  substitute: (label: string, skillId: string | undefined, blockId: string) => string;
+};
+
+function startPass(master: CvMaster, job: JobForCv, template: TemplateId, overrides: CvOverrides, fill: string[]): Pass {
   const style = STYLE_OF[template];
   const req = new Set(job.required);
   const nice = new Set(job.niceToHave);
@@ -123,8 +138,24 @@ export function tailorCv(
     return [...first, ...items.filter((x) => !first.includes(x))];
   };
 
-  // ── Expériences : toutes, de la plus récente à la plus ancienne (jamais réordonnées par note).
-  const experiences = [...master.experiences]
+  /** Libellé écrit comme dans l'offre si c'est un synonyme du dictionnaire (§4.6). */
+  const substitute = (label: string, skillId: string | undefined, blockId: string): string => {
+    if (!master.rules.allowLabelSubstitution || !skillId) return label;
+    const form = job.forms[skillId];
+    if (!form || !/\p{Lu}/u.test(form) || !isPlainSkillLabel(label, skillId)) return label;
+    // Jamais une forme plus courte déjà contenue dans le libellé (« Docker Compose » reste tel quel si l'offre écrit « Docker »).
+    if (normalizeText(label).includes(normalizeText(form))) return label;
+    substitutions.push({ blockId, from: label, to: form });
+    return form;
+  };
+
+  return { master, job, template, overrides, style, req, nice, men, forbidden, removed, filled, added, warnings, picked, dropped, substitutions, pointsOf, scoreOf, pickVariant, mixedWarning, applyOrder, substitute };
+}
+
+/** Expériences : toutes, de la plus récente à la plus ancienne (jamais réordonnées par note). */
+function pickExperiences(t: Pass) {
+  const { master, overrides, removed, filled, added, picked, dropped, scoreOf, pickVariant, mixedWarning, applyOrder } = t;
+  return [...master.experiences]
     .map((e, i) => ({ e, i }))
     .sort((a, b) => b.e.start.localeCompare(a.e.start) || a.i - b.i)
     .map(({ e }) => {
@@ -167,7 +198,11 @@ export function tailorCv(
         bullets: ordered.map((x) => ({ id: x.id, text: x.pick!.v.text })),
       };
     });
+}
 
+/** Projets : par note, entre minProjects et maxProjects. */
+function pickProjects(t: Pass) {
+  const { master, overrides, removed, filled, added, warnings, picked, dropped, scoreOf, pickVariant, mixedWarning, applyOrder } = t;
   // ── Projets : par note, entre minProjects et maxProjects.
   const { minProjects, maxProjects } = master.rules;
   const projScored = master.projects.map((p, i) => ({ id: p.id, p, i, ...scoreOf(p.ownSkills, "projet"), pick: pickVariant(p.descriptions, p.id) }));
@@ -200,19 +235,13 @@ export function tailorCv(
     if (x.pick!.mixed) mixedWarning(x.id);
   }
   for (const x of projUsable) if (!projKept.includes(x)) dropped.push(projItem(x, removed.has(x.id) ? "retiré à la main" : x.score > 0 ? "limite de projets atteinte" : "rien en commun avec l'offre"));
+  return projOrdered;
+}
 
-  /** Libellé écrit comme dans l'offre si c'est un synonyme du dictionnaire (§4.6). */
-  const substitute = (label: string, skillId: string | undefined, blockId: string): string => {
-    if (!master.rules.allowLabelSubstitution || !skillId) return label;
-    const form = job.forms[skillId];
-    if (!form || !/\p{Lu}/u.test(form) || !isPlainSkillLabel(label, skillId)) return label;
-    // Jamais une forme plus courte déjà contenue dans le libellé (« Docker Compose » reste tel quel si l'offre écrit « Docker »).
-    if (normalizeText(label).includes(normalizeText(form))) return label;
-    substitutions.push({ blockId, from: label, to: form });
-    return form;
-  };
-
-  const projects = projOrdered.map(({ p, pick }) => {
+/** Projets choisis, tels qu'ils s'affichent. */
+function renderProjects(t: Pass, projOrdered: ReturnType<typeof pickProjects>) {
+  const { template, style, substitute } = t;
+  return projOrdered.map(({ p, pick }) => {
     const other = pick!.v.style !== "nom" ? p.descriptions.find((d) => !d.toValidate && d.style === "nom" && d.text !== pick!.v.text) : undefined;
     return {
       id: p.id,
@@ -229,7 +258,11 @@ export function tailorCv(
       }),
     };
   });
+}
 
+/** Compétences du profil citées par l'offre mais absentes du CV complet, avec le groupe où les ajouter. */
+function profileGroupOf(t: Pass) {
+  const { master, job, req, nice, men, forbidden } = t;
   // ── Compétences de ton profil citées par l'offre mais absentes des groupes du CV complet : ajoutées au groupe
   // qui leur ressemble le plus (côté serveur / interface, sinon même famille). Jamais dans une phrase.
   // Déjà quelque part dans le CV complet (groupe, ligne, technologies d'un projet : « Auth0 / JWT ») : rien à ajouter.
@@ -248,7 +281,12 @@ export function tailorCv(
       .sort((a, b) => b.n - a.n)[0];
     if (best && best.n > 0) profileGroup.set(s, best.g.id);
   }
+  return profileGroup;
+}
 
+/** Rubrique Compétences : technos faites en entreprise, ligne courte de projets et cours, groupes de notions. */
+function pickSkillGroups(t: Pass, profileGroup: Map<string, string>) {
+  const { master, req, nice, forbidden, picked, dropped, pointsOf, substitute } = t;
   // ── Compétences : d'abord les technos faites en entreprise, puis une ligne courte des technos de projets ou de cours
   // que l'offre cite ; les groupes de notions (architecture, tests, méthodes) restent tels quels, après.
   // Dans une ligne : exigées, « plus », puis par niveau et ordre du CV complet.
@@ -299,7 +337,12 @@ export function tailorCv(
       label: kept.filter((k) => k.it.skillId === it.skillId).length > 1 ? it.label : substitute(it.label, it.skillId, `skill:${it.skillId}`),
     })),
   }));
+  return skillGroups;
+}
 
+/** Titre : métier de l'offre + technos faites en entreprise, sinon un titre du CV complet. */
+function pickTitle(t: Pass) {
+  const { master, job, overrides, req, picked, scoreOf } = t;
   // ── Titre : métier de l'offre + technos faites en entreprise ; sinon (titre choisi à la main, mobile, autre)
   // celui du type de poste qui partage le plus de compétences exigées, ou le titre par défaut.
   const titles = master.titles.filter((t) => !t.toValidate);
@@ -309,11 +352,15 @@ export function tailorCv(
     .filter((x) => x.t.jobTypes.includes(job.jobType))
     .sort((a, b) => b.n - a.n || a.i - b.i);
   const title = forcedTitle ?? matching[0]?.t ?? titles.find((t) => t.isDefault) ?? titles[0]!;
-  const levels = bestLevels(master);
   const builtTitle = forcedTitle ? null : buildTitle(master, job);
   const titleText = builtTitle ?? title.text;
   picked.push({ kind: "title", id: builtTitle ? BUILT_TITLE_ID : title.id, label: titleText, ...scoreOf(builtTitle ? extractCvSkills(builtTitle) : title.skills, "pro") });
+  return { builtTitle, titleText };
+}
 
+/** Résumé : celui du modèle et du type de poste ; sinon celui du modèle pour tous les postes. */
+function pickSummary(t: Pass, titleText: string) {
+  const { master, job, template, warnings, picked } = t;
   // ── Résumé : celui du modèle et du type de poste ; sinon celui du modèle pour tous les postes.
   const summaries = master.summaries.filter((s) => !s.toValidate);
   const fitsTpl = (s: (typeof summaries)[number]) => s.template === template || s.template === "any";
@@ -328,6 +375,49 @@ export function tailorCv(
   const summaryKind = summary && kindOf(summary.text);
   if (titleKind && summaryKind && titleKind !== summaryKind)
     warnings.push(`Profil « ${summaryKind} » sous un titre « ${titleKind} » : valide un profil pour ce type de poste (page /cv).`);
+  return summary;
+}
+
+/** Ce que l'offre demande et que le CV n'a pas, avec les avertissements qui en découlent. */
+function findGaps(t: Pass, levels: Map<string, Level>, profileGroup: Map<string, string>) {
+  const { master, job, forbidden, warnings } = t;
+  const courseOnly = courseOnlySkills(master);
+  const missing = {
+    absent: job.required.filter((s) => !forbidden.has(s) && !levels.has(s) && !profileGroup.has(s)),
+    onlyCourse: job.required.filter((s) => courseOnly.has(s)),
+    forbidden: job.required.filter((s) => forbidden.has(s)),
+  };
+  if (job.isAbridged) warnings.unshift("Annonce incomplète (extrait) : complète-la d'abord pour un CV fiable.");
+  if (job.skillsSource === "dictionary") warnings.push("Analyse IA absente ou périmée : compétences lues par le dictionnaire seul (toutes traitées comme exigées).");
+  const covered = job.required.filter((s) => levels.has(s) && !courseOnly.has(s) && !forbidden.has(s));
+  if (job.required.length && covered.length < 2) warnings.push(`Seulement ${covered.length} compétence(s) exigée(s) couverte(s) par ton CV.`);
+  if (missing.absent.length) warnings.push(`Exigé dans l'offre mais absent de ton CV complet : ${missing.absent.map(cvSkillLabel).join(", ")}.`);
+
+  return missing;
+}
+
+/**
+ * CV adapté à une offre (§4). Pur et déterministe : mêmes données, mêmes règles → même résultat.
+ * Toutes les phrases viennent mot pour mot de variantes validées du CV complet.
+ */
+export function tailorCv(
+  master: CvMaster,
+  job: JobForCv,
+  template: TemplateId,
+  overrides: CvOverrides = EMPTY_OVERRIDES,
+  /** Lignes ou projets remis pour remplir la page (ajustement, §6.3) : placés comme les autres, par note. */
+  fill: string[] = [],
+): TailoredCvDraft {
+  const t = startPass(master, job, template, overrides, fill);
+  const { style, picked, dropped, substitutions, warnings, pickVariant } = t;
+
+  const experiences = pickExperiences(t);
+  const projects = renderProjects(t, pickProjects(t));
+  const profileGroup = profileGroupOf(t);
+  const skillGroups = pickSkillGroups(t, profileGroup);
+  const levels = bestLevels(master);
+  const { builtTitle, titleText } = pickTitle(t);
+  const summary = pickSummary(t, titleText);
 
   const headline = pickVariant(master.headline, "headline");
   const education = master.education.map((e) => {
@@ -351,18 +441,7 @@ export function tailorCv(
     hobbies: master.hobbies,
   };
 
-  // ── Ce que l'offre demande et que le CV n'a pas.
-  const courseOnly = courseOnlySkills(master);
-  const missing = {
-    absent: job.required.filter((s) => !forbidden.has(s) && !levels.has(s) && !profileGroup.has(s)),
-    onlyCourse: job.required.filter((s) => courseOnly.has(s)),
-    forbidden: job.required.filter((s) => forbidden.has(s)),
-  };
-  if (job.isAbridged) warnings.unshift("Annonce incomplète (extrait) : complète-la d'abord pour un CV fiable.");
-  if (job.skillsSource === "dictionary") warnings.push("Analyse IA absente ou périmée : compétences lues par le dictionnaire seul (toutes traitées comme exigées).");
-  const covered = job.required.filter((s) => levels.has(s) && !courseOnly.has(s) && !forbidden.has(s));
-  if (job.required.length && covered.length < 2) warnings.push(`Seulement ${covered.length} compétence(s) exigée(s) couverte(s) par ton CV.`);
-  if (missing.absent.length) warnings.push(`Exigé dans l'offre mais absent de ton CV complet : ${missing.absent.map(cvSkillLabel).join(", ")}.`);
+  const missing = findGaps(t, levels, profileGroup);
 
   const offerSkills = [...new Set(job.required.length + job.niceToHave.length ? [...job.required, ...job.niceToHave] : job.mentioned)];
   return {
