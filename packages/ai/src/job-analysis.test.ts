@@ -181,6 +181,27 @@ describe("points d'attention sur le contrat", () => {
     expect(unwanted.result.points_attention).toContain(`Contrat ${contractType} hors de tes critères (tu cherches : CDI)`);
   });
 
+  it("« faible » justifié à tort par un contrat souhaité : avis factuel, adéquation « moyenne »", async () => {
+    const answer = {
+      ...GOOD,
+      experience_min_ans: null,
+      adequation: "faible",
+      note: 35,
+      points_attention: [],
+      competences_obligatoires: ["Vue.js"],
+      avis: "Le contrat de stage ne correspond pas à tes contrats souhaités (CDI, CDD).",
+    };
+    const client = new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify(answer) } }) });
+    const job = { ...JOB, title: "Développeur Vue.js — Stage", contractType: "STAGE", description: "Développeur Vue.js pour un produit interne." };
+    const { result } = await analyzeJobWithAi(client, job, { ...PROFILE, contracts: ["CDI", "CDD", "Stage"] });
+    expect(result.adequation).toBe("moyenne");
+    expect(result.avis).not.toMatch(/ne correspond pas/);
+    // Contrat réellement non souhaité : l'avis du modèle est gardé.
+    const unwanted = await analyzeJobWithAi(client, job, PROFILE);
+    expect(unwanted.result.adequation).toBe("faible");
+    expect(unwanted.result.avis).toMatch(/ne correspond pas/);
+  });
+
   it("déduit et pénalise le contrat à partir de l'annonce quand le champ de la source est vide", async () => {
     const answer = { ...GOOD, experience_min_ans: null, adequation: "forte", points_attention: [] };
     const client = new OllamaClient({ fetch: async () => json({ message: { content: JSON.stringify(answer) } }) });

@@ -227,14 +227,22 @@ export function classifyRequired(required: string[], profile: AnalysisProfileInp
   return out;
 }
 
+/** Le modèle (petit) reproche un contrat que le candidat a bien choisi (« stage ne correspond pas à CDI, CDD » alors que Stage est coché). */
+export function blamesWantedContract(avis: string, job: AnalysisJobInput, profile: AnalysisProfileInput): boolean {
+  const kind = contractOf(job);
+  const wanted = profile.contracts.map((c) => normalizeContract(c) ?? c.toUpperCase());
+  return !!kind && wanted.includes(kind) && /contrat.*(ne correspond|non souhait|pas souhait|hors de|pas dans)/.test(normalizeText(avis));
+}
+
 /**
  * L'avis prête une « solide base » / une « maîtrise » sur une techno vue seulement en projets (« solides bases en Python ») :
  * remplacé par une phrase factuelle.
  */
-export function checkAvis(avis: string, profile: AnalysisProfileInput, c: ReturnType<typeof classifyRequired>): string {
+export function checkAvis(avis: string, profile: AnalysisProfileInput, c: ReturnType<typeof classifyRequired>, job?: AnalysisJobInput): string {
   const overclaims = /solides? (bases?|connaissances?|experiences?|competences?)|maitris|bonnes? connaissances?|experimente|expert|a l'aise/.test(normalizeText(avis));
   const proj = new Set((profile.projectSkills ?? []).flatMap(idsOf));
-  if (!overclaims || !extractSkills(avis).some((id) => proj.has(id))) return avis;
+  const wrongContract = job !== undefined && blamesWantedContract(avis, job, profile);
+  if (!wrongContract && (!overclaims || !extractSkills(avis).some((id) => proj.has(id)))) return avis;
   const part = (label: string, l: string[]) => (l.length ? `${label} : ${l.join(", ")}.` : "");
   return [
     part("Tu as en entreprise", c.exigees_en_entreprise),
@@ -289,6 +297,8 @@ function checkAdequation(
   const kind = contractOf(job);
   const wantedContracts = profile.contracts.map((contract) => normalizeContract(contract) ?? contract.toUpperCase());
   if (kind && !wantedContracts.includes(kind)) return "faible";
+  // « Faible » justifié par un contrat pourtant souhaité : motif faux, les autres vérifications ci-dessous décident.
+  const adequation = r.adequation === "faible" && blamesWantedContract(r.avis, job, profile) ? "moyenne" : r.adequation;
   if (r.experience_min_ans !== null && r.experience_min_ans > profile.experienceMax + 1) return "faible";
   // Vérifié par le code : au moins 2 langages / frameworks exigés manquants (pas les outils, ni les technos à apprendre), ou poste orienté IA sans IA en entreprise.
   const missingCore = r.exigees_manquantes.filter((x) => idsOf(x).some((id) => getSkill(id)?.core));
@@ -298,11 +308,11 @@ function checkAdequation(
   if (reallyMissing.length >= 2) return "faible";
   if (AI_DOMAIN.test(normalizeText(job.title)) && !levels(profile).atWork.some((s) => AI_DOMAIN.test(normalizeText(s)))) return "faible";
   const inTarget = (r.experience_min_ans === null || r.experience_min_ans <= profile.experienceMax) && r.niveau !== "senior";
-  if (r.adequation === "faible" && inTarget && reallyMissing.length === 0 && missingCore.length > 0) return "moyenne";
+  if (adequation === "faible" && inTarget && reallyMissing.length === 0 && missingCore.length > 0) return "moyenne";
   // Techno principale (celle du titre) vue seulement en projets : au mieux « moyenne », comme le dit la consigne.
   const main = new Set(extractSkills(job.title));
-  if (r.adequation === "forte" && r.exigees_en_projets.some((x) => idsOf(x).some((id) => main.has(id)))) return "moyenne";
-  return r.adequation;
+  if (adequation === "forte" && r.exigees_en_projets.some((x) => idsOf(x).some((id) => main.has(id)))) return "moyenne";
+  return adequation;
 }
 
 /**
@@ -390,7 +400,7 @@ export async function analyzeJobWithAi(
         result: {
           ...r,
           ...checkInfos(r, job),
-          avis: checkAvis(r.avis, profile, classes),
+          avis: checkAvis(r.avis, profile, classes, job),
           missions: tidy(r.missions),
           competences_obligatoires: required,
           competences_bonus: skillNames(r.competences_bonus).filter(
