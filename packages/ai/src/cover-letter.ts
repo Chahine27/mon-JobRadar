@@ -473,17 +473,26 @@ function knownSkills(kit: Pick<LetterKit, "cvText" | "blocks" | "rules" | "maste
   return ids;
 }
 
-/**
- * Problèmes précis d'une lettre, rédigés comme des consignes de correction pour l'IA. Vide = rien à corriger.
- * `body` = objet + paragraphes ; la ponctuation n'est vérifiée que dans les paragraphes (lignes après la première).
- */
-export function findLetterIssues(body: string, kit: LetterKit, jobText: string, opts: LetterOptions = {}): string[] {
-  const issues: string[] = [];
-  const inCv = knownSkills(kit, opts);
-  const inJob = new Set(extractSkills(jobText));
-  const sentences = body.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
-  const label = (id: string) => getSkill(id)?.label ?? id;
+/** Ce que chaque famille de vérifications lit : la lettre, le CV, l'annonce, et ce qu'on en a déjà tiré. */
+type LetterCheck = {
+  body: string;
+  kit: LetterKit;
+  jobText: string;
+  opts: LetterOptions;
+  /** Technos que le candidat a vraiment pratiquées. */
+  inCv: Set<string>;
+  /** Technos citées dans l'annonce. */
+  inJob: Set<string>;
+  sentences: string[];
+  /** Projets et entreprises du CV, avec leurs technos. */
+  entities: ReturnType<typeof cvEntities>;
+};
 
+const skillLabel = (id: string) => getSkill(id)?.label ?? id;
+
+/** Mots interdits, puis phrase par phrase : « maîtrise », technos inconnues du CV, phrases trop longues. */
+function sentenceIssues({ body, kit, sentences, inCv }: LetterCheck): string[] {
+  const issues: string[] = [];
   for (const [re, name] of [...FORBIDDEN, ...ownBanned(kit)]) if (re.test(body)) issues.push(`Supprime ${name}.`);
   const mastered = masteredSkills(kit);
   for (const s of sentences) {
@@ -496,11 +505,17 @@ export function findLetterIssues(body: string, kit: LetterKit, jobText: string, 
     const absent = extractSkills(s).filter((id) => !inCv.has(id));
     // « je souhaite approfondir X en m'appuyant sur Y » : la seule façon permise de parler d'un manque.
     if (absent.length && KNOWS.test(s) && !/pas encore|jamais (?:utilis|travaill|pratiqu)|n['’]ai pas|approfondir [^.]{2,80} en m['’]appuyant sur/i.test(s)) {
-      issues.push(`${absent.map(label).join(", ")} n'est pas dans le CV : ne prétends pas le connaître (« ${s.slice(0, 90)}… »).`);
+      issues.push(`${absent.map(skillLabel).join(", ")} n'est pas dans le CV : ne prétends pas le connaître (« ${s.slice(0, 90)}… »).`);
     }
     const words = s.split(/\s+/).length;
     if (words > 38) issues.push(`Phrase trop longue (${words} mots) à couper : « ${s.slice(0, 70)}… ».`);
   }
+  return issues;
+}
+
+/** Ponctuation, virgules, phrases hachées, débuts répétitifs, technologies citées trop souvent ou « à apprendre » alors qu'elles sont au CV. */
+function styleIssues({ body, sentences, inCv, inJob }: LetterCheck): string[] {
+  const issues: string[] = [];
   // Ponctuation et virgules : seulement dans le corps (l'objet est écrit par le code).
   const bodySentences = body.split("\n").slice(1).join("\n").split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
   const punct = bodySentences.filter(badPunctuation);
@@ -511,7 +526,7 @@ export function findLetterIssues(body: string, kit: LetterKit, jobText: string, 
   const short = bodySentences.filter((s) => s.split(/\s+/).length < 8);
   if (short.length > 2) issues.push(`Trop de phrases très courtes (« ${short.slice(0, 2).join(" » et « ")} ») : relie-les à la phrase voisine avec « qui », « où », « et » ou « parce que ».`);
   for (const m of body.matchAll(/(?:apprendre|découvrir|me former (?:à|sur))\s+(?:le |la |l'|les )?([^.,;\n]{2,60})/gi)) {
-    for (const id of extractSkills(m[1]!)) if (inCv.has(id)) issues.push(`${label(id)} est dans le CV : ne dis pas vouloir l'apprendre, dis qu'il l'a pratiqué.`);
+    for (const id of extractSkills(m[1]!)) if (inCv.has(id)) issues.push(`${skillLabel(id)} est dans le CV : ne dis pas vouloir l'apprendre, dis qu'il l'a pratiqué.`);
   }
   // Débuts de phrase répétitifs (« J'ai … J'ai … J'ai … »).
   let run = 0;
@@ -525,9 +540,13 @@ export function findLetterIssues(body: string, kit: LetterKit, jobText: string, 
   // Même technologie citée plus de deux fois.
   const counts = new Map<string, number>();
   for (const s of sentences) for (const id of extractSkills(s)) counts.set(id, (counts.get(id) ?? 0) + 1);
-  for (const [id, n] of counts) if (n > 2 && !inJob.has(id)) issues.push(`${label(id)} est cité ${n} fois : une ou deux suffisent.`);
-  // Technologie du CV attribuée au mauvais projet / à la mauvaise entreprise (ex. « microservices … projet parking »).
-  const entities = cvEntities(kit.cvText);
+  for (const [id, n] of counts) if (n > 2 && !inJob.has(id)) issues.push(`${skillLabel(id)} est cité ${n} fois : une ou deux suffisent.`);
+  return issues;
+}
+
+/** Technologie du CV attribuée au mauvais projet / à la mauvaise entreprise (ex. « microservices … projet parking »). */
+function attributionIssues({ kit, sentences, inCv, entities }: LetterCheck): string[] {
+  const issues: string[] = [];
   // Découpage en propositions (« …PostgreSQL et j'ai utilisé SQL sur Doc Chez Vous » = deux faits distincts).
   const clauses = sentences.flatMap((x) => x.split(/;|\s(?:et|puis|mais)\s+(?=j['’]|je\s|nous\s)/i));
   for (const s of clauses) {
@@ -538,9 +557,15 @@ export function findLetterIssues(body: string, kit: LetterKit, jobText: string, 
     const inBlock = (id: string) => (kit.blocks ?? []).some((b) => named.some((e) => b.text.toLowerCase().includes(e.name.toLowerCase())) && extractSkills(b.text).includes(id));
     const reallyWrong = wrong.filter((id) => !inBlock(id));
     if (reallyWrong.length) {
-      issues.push(`${reallyWrong.map(label).join(", ")} n'est pas écrit pour ${named.map((e) => e.name).join(" / ")} dans le CV : ne l'y associe pas (« ${s.slice(0, 90)}… »).`);
+      issues.push(`${reallyWrong.map(skillLabel).join(", ")} n'est pas écrit pour ${named.map((e) => e.name).join(" / ")} dans le CV : ne l'y associe pas (« ${s.slice(0, 90)}… »).`);
     }
   }
+  return issues;
+}
+
+/** Ce que la lettre affirme sur l'annonce : offre inexistante, manques listés, Job Radar, chiffres et besoins inventés, phrases recopiées. */
+function contentIssues({ body, kit, jobText, opts, inCv, inJob }: LetterCheck): string[] {
+  const issues: string[] = [];
   if (opts.spontaneous && /votre (offre|annonce)|l['’](offre|annonce)|le poste que vous (proposez|recherchez)/i.test(body)) {
     issues.push("Candidature spontanée : il n'y a pas d'offre, n'écris pas « votre offre » ; parle de l'envie de rejoindre l'entreprise.");
   }
@@ -548,7 +573,7 @@ export function findLetterIssues(body: string, kit: LetterKit, jobText: string, 
   const title = jobText.split("\n")[0] ?? "";
   const inTitle = new Set(extractSkills(title));
   const gapsCited = [...new Set(extractSkills(body))].filter((id) => !inCv.has(id) && inJob.has(id) && !inTitle.has(id));
-  if (gapsCited.length) issues.push(`Ne liste pas tes manques (${gapsCited.map(label).join(", ")}) : n'en parle pas, ce n'est pas dans l'intitulé du poste.`);
+  if (gapsCited.length) issues.push(`Ne liste pas tes manques (${gapsCited.map(skillLabel).join(", ")}) : n'en parle pas, ce n'est pas dans l'intitulé du poste.`);
   if (!opts.aiCoding && JOB_RADAR.test(body)) issues.push("Supprime Job Radar : l'analyse de l'offre ne parle pas de développement avec des agents IA.");
   // Chiffres inventés (on ignore les versions « Vue 3 », « .NET 8 », « OAuth2 » et les dates).
   const sources = `${truthText(kit)}\n${jobText}\n${kit.header}${opts.aiCoding ? `\n${JOB_RADAR_BLOCK.text}` : ""}`;
@@ -563,6 +588,12 @@ export function findLetterIssues(body: string, kit: LetterKit, jobText: string, 
   if (!opts.spontaneous) for (const s of copiedFromJob(body.split("\n").slice(1).join("\n"), jobText.split("\n").slice(1).join("\n"), title).slice(0, 2)) {
     issues.push(`Phrase recopiée de l'annonce : dis-le avec tes mots (« ${s}… »).`);
   }
+  return issues;
+}
+
+/** Entreprise d'alternance non nommée, mots répétés, connecteurs en trop. */
+function wordingIssues({ body, entities }: LetterCheck): string[] {
+  const issues: string[] = [];
   // L'entreprise d'alternance doit être nommée.
   const employers = entities.filter((e) => e.kind === "entreprise");
   if (employers.length && !employers.some((e) => body.toLowerCase().includes(e.name.toLowerCase()))) {
@@ -574,6 +605,25 @@ export function findLetterIssues(body: string, kit: LetterKit, jobText: string, 
   }
   const connectors = body.match(/\b(De plus|Parall[èe]lement|En outre|Par ailleurs)\b/g) ?? [];
   if (connectors.length > 1) issues.push("Trop de connecteurs (« De plus », « Parallèlement »…) : un seul maximum.");
+  return issues;
+}
+
+/**
+ * Problèmes précis d'une lettre, rédigés comme des consignes de correction pour l'IA. Vide = rien à corriger.
+ * `body` = objet + paragraphes ; la ponctuation n'est vérifiée que dans les paragraphes (lignes après la première).
+ */
+export function findLetterIssues(body: string, kit: LetterKit, jobText: string, opts: LetterOptions = {}): string[] {
+  const check: LetterCheck = {
+    body,
+    kit,
+    jobText,
+    opts,
+    inCv: knownSkills(kit, opts),
+    inJob: new Set(extractSkills(jobText)),
+    sentences: body.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean),
+    entities: cvEntities(kit.cvText),
+  };
+  const issues = [...sentenceIssues(check), ...styleIssues(check), ...attributionIssues(check), ...contentIssues(check), ...wordingIssues(check)];
   // Les erreurs de vérité d'abord (la liste est coupée à 10).
   return [...new Set(issues)].sort((x, y) => Number(isFactIssue(y)) - Number(isFactIssue(x))).slice(0, 10);
 }

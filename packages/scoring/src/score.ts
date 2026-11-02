@@ -117,26 +117,32 @@ const k = (n: number) => `${Math.round(n / 1000)}k`;
 
 type Item = { id: string; weight: number };
 
-function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRules) {
+/** Ce que ton profil et le titre de l'offre permettent de reconnaître : partagé par toutes les étapes du critère Technique. */
+function techContext(input: ScoringInput, profile: Profile, rules: ScoringRules) {
   const projects = (profile.projectSkills ?? []).map(resolveSkill);
   const owned = [...profile.skills.map(resolveSkill), ...projects];
-  const projectIds = new Set(projects.map((s) => s.id));
   const preferred = profile.preferredTechs.map((p) => resolveSkill(p.name));
   const learnable = (profile.learnableSkills ?? []).map(resolveSkill);
-  const learnIds = new Set(learnable.map((s) => s.id));
   const customSkills = [...owned, ...preferred, ...learnable].filter((s) => s.id.startsWith("custom:"));
-  const skillOf = (id: string): Skill | undefined => getSkill(id) ?? customSkills.find((s) => s.id === id);
-  const ownedIds = new Set(owned.map((s) => s.id));
   const inTitle = new Set(extractSkills(input.title, customSkills));
-  const titleWeight = (id: string) => (inTitle.has(id) ? rules.titleWeight : 1);
+  return {
+    customSkills,
+    ownedIds: new Set(owned.map((s) => s.id)),
+    projectIds: new Set(projects.map((s) => s.id)),
+    learnIds: new Set(learnable.map((s) => s.id)),
+    preferredIds: new Set(preferred.map((s) => s.id)),
+    inTitle,
+    skillOf: (id: string): Skill | undefined => getSkill(id) ?? customSkills.find((s) => s.id === id),
+    titleWeight: (id: string) => (inTitle.has(id) ? rules.titleWeight : 1),
+  };
+}
+type TechContext = ReturnType<typeof techContext>;
 
+/** Les compétences de l'offre qui comptent : celles de l'IA, sinon celles du titre et du texte. */
+function pickItems(input: ScoringInput, ctx: TechContext) {
+  const { customSkills, skillOf, titleWeight, inTitle } = ctx;
   const ai = input.aiSkills;
   const useAi = !!ai && ai.required.length + ai.bonus.length > 0;
-  let items: Item[];
-  let found: string[];
-  let aiLabels: string[] = [];
-  /** Compétences exigées : celles de l'IA, sinon celles du titre et du texte hors « un plus ». */
-  let requiredIds: string[];
   if (useAi) {
     // Seulement des technos : celles du dictionnaire ou de ton profil. Les secteurs, méthodes, langues et qualités lus par
     // l'IA (« Défense », « Cycle en V », « Anglais professionnel ») restent affichés dans son analyse, pas dans la note.
@@ -151,29 +157,31 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
     ].filter(known);
     const req = idsOf(ai.required);
     const bonus = idsOf(ai.bonus).filter((id) => !req.includes(id));
-    const all = [...req.map((id) => ({ id, weight: titleWeight(id) })), ...bonus.map((id) => ({ id, weight: 0.5 }))];
+    const all: Item[] = [...req.map((id) => ({ id, weight: titleWeight(id) })), ...bonus.map((id) => ({ id, weight: 0.5 }))];
     // Comme sans l'IA : les outils (Kubernetes, AWS, Kafka…) ne départagent pas, sauf s'il n'y a qu'eux.
     const core = all.filter((it) => skillOf(it.id)?.core ?? true);
-    items = core.length ? core : all;
-    found = [...req, ...bonus];
-    aiLabels = [...ai.required, ...ai.bonus];
-    requiredIds = req;
-  } else {
-    found = extractSkills([input.title, input.description, ...(input.technologies ?? [])].join("\n"), customSkills);
-    // Les outils (Git, SQL, Docker...) ne départagent pas : seulement langages et frameworks, sauf s'il n'y a qu'eux.
-    const core = found.filter((id) => skillOf(id)?.core ?? true);
-    items = (core.length ? core : found).map((id) => ({ id, weight: titleWeight(id) }));
-    // Une techno citée dans « Nice to have / un plus » n'est pas exigée, même si elle apparaît ailleurs (« Stack : …, Vue for the back office »).
-    const text = splitRequired(input.description);
-    const req = new Set(extractSkills(text.required, customSkills));
-    const optional = new Set(extractSkills(text.optional, customSkills));
-    requiredIds = found.filter((id) => inTitle.has(id) || (req.has(id) && !optional.has(id)));
+    return { useAi, ai, items: core.length ? core : all, found: [...req, ...bonus], aiLabels: [...ai.required, ...ai.bonus], requiredIds: req };
   }
+  const found = extractSkills([input.title, input.description, ...(input.technologies ?? [])].join("\n"), customSkills);
+  // Les outils (Git, SQL, Docker...) ne départagent pas : seulement langages et frameworks, sauf s'il n'y a qu'eux.
+  const core = found.filter((id) => skillOf(id)?.core ?? true);
+  const items: Item[] = (core.length ? core : found).map((id) => ({ id, weight: titleWeight(id) }));
+  // Une techno citée dans « Nice to have / un plus » n'est pas exigée, même si elle apparaît ailleurs (« Stack : …, Vue for the back office »).
+  const text = splitRequired(input.description);
+  const req = new Set(extractSkills(text.required, customSkills));
+  const optional = new Set(extractSkills(text.optional, customSkills));
+  const requiredIds = found.filter((id) => inTitle.has(id) || (req.has(id) && !optional.has(id)));
+  return { useAi, ai, items, found, aiLabels: [] as string[], requiredIds };
+}
 
-  const label = (id: string) => skillOf(id)?.label ?? aiLabels.find((l) => resolveSkill(l).id === id) ?? id;
-
-  // Exigence au choix (« Angular ou React », dans la liste de l'IA ou dans le texte) : UNE exigence, remplie par la
-  // techno que tu as le mieux (en entreprise, puis en projets, puis dans ta liste à apprendre) ; les autres sont retirées.
+/**
+ * Exigence au choix (« Angular ou React », dans la liste de l'IA ou dans le texte) : UNE exigence, remplie par la
+ * techno que tu as le mieux (en entreprise, puis en projets, puis dans ta liste à apprendre) ; les autres sont retirées.
+ */
+function mergeChoices(input: ScoringInput, ctx: TechContext, picked: ReturnType<typeof pickItems>, label: (id: string) => string) {
+  const { customSkills, ownedIds, projectIds, learnIds } = ctx;
+  const { useAi, aiLabels } = picked;
+  let { items } = picked;
   const groups = useAi
     ? aiLabels.filter((l) => /\s(ou|or)\s/i.test(l)).map((l) => extractSkills(l, customSkills))
     : alternativeSkills(splitRequired(input.description).required, customSkills);
@@ -189,31 +197,36 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
     items = items.filter((it) => it.id === best || !members.includes(it.id)).map((it) => (it.id === best ? { ...it, weight } : it));
     choices.push(`${members.map(label).join(" ou ")}${have(best) ? ` (tu as ${label(best)})` : ""}`);
   }
-  found = found.filter((id) => !dropped.has(id));
-  requiredIds = requiredIds.filter((id) => !dropped.has(id));
-  const matched = found.filter((id) => ownedIds.has(id)).map(label);
-  const inProjects = found.filter((id) => projectIds.has(id)).map(label);
-  const missing = found.filter((id) => !ownedIds.has(id)).map(label);
-  const preferredIds = new Set(preferred.map((s) => s.id));
-  const preferredFound = found.filter((id) => preferredIds.has(id)).map(label);
+  return {
+    items,
+    found: picked.found.filter((id) => !dropped.has(id)),
+    requiredIds: picked.requiredIds.filter((id) => !dropped.has(id)),
+    choices,
+  };
+}
 
-  // Années exigées sur une techno principale (pas un outil) absente de ton profil : critère bloquant.
-  const required = productExperienceRequired(input.title, input.description, customSkills);
-  const lacking = required?.ids.filter((id) => !ownedIds.has(id) && (skillOf(id)?.core ?? true)) ?? [];
-  const product = required && lacking.length ? { labels: lacking.map(label), years: required.years } : null;
-
-  const part: Part = { score: rules.noSkillsTechnical, reasons: [], warnings: [] };
-  if (items.length === 0) {
-    part.warnings.push("Aucune techno détectée : poste peut-être hors informatique");
-    return { part, matched, missing, preferredFound, main: [] as string[], product, requiredIds, missingRequired: [] as string[], blocking: [] as string[], toLearn: [] as string[], lifted: [] as string[], liftedWeak: false, notStrong: [] as string[] };
-  }
-
+/** Pourquoi une techno absente compte à moitié : formation proposée, ou poste junior sans production exigée. */
+function learnableReason(input: ScoringInput, profile: Profile): string | null {
   const seniority = titleSeniority(input, profile);
-  const learnableWhy = trainingOffered(input.description)
+  return trainingOffered(input.description)
     ? "formation proposée"
     : (seniority === "junior" || input.experienceMinYears === 0) && !productionRequired(input.description)
       ? "poste junior"
       : null;
+}
+
+/**
+ * Points gagnés sur chaque techno de l'offre : tes technos en entier, celles vues en projets à moitié, les absentes
+ * comptées « à apprendre » à moitié (dans la limite de `maxLearnable`), celles que l'IA range chez toi selon son analyse.
+ */
+function creditItems(
+  input: ScoringInput,
+  ctx: TechContext,
+  rules: ScoringRules,
+  f: { items: Item[]; requiredIds: string[]; learnableWhy: string | null; aiLists: ScoringInput["aiSkills"]; label: (id: string) => string },
+) {
+  const { ownedIds, projectIds, learnIds, customSkills, inTitle, skillOf } = ctx;
+  const { items, requiredIds, learnableWhy, aiLists, label } = f;
   /** Technos absentes comptées à moitié : poste junior / formation proposée, ou ta liste « à apprendre vite ». */
   const toLearn: string[] = [];
   const listed: string[] = [];
@@ -235,8 +248,8 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
   // pour qu'une ancienne erreur (« React Native » rangé en projets grâce à React) ne lève pas un plafond.
   const aiIds = (labels: string[] | undefined) =>
     new Set((labels ?? []).map((l) => extractSkills(l, customSkills)).filter((ids) => ids.some((id) => ownedIds.has(id))).flat());
-  const aiWork = useAi ? aiIds(ai.atWork) : new Set<string>();
-  const aiProjects = useAi ? aiIds(ai.inProjects) : new Set<string>();
+  const aiWork = aiLists ? aiIds(aiLists.atWork) : new Set<string>();
+  const aiProjects = aiLists ? aiIds(aiLists.inProjects) : new Set<string>();
   const lifted: string[] = [];
   const liftedIds = new Set<string>();
   let got = 0;
@@ -260,7 +273,70 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
       blocking.push(mastery ? `${label(it.id)} (${mastery})` : label(it.id));
     }
   }
-  part.score = clamp((100 * got) / total);
+  return { got, total, toLearn, listed, blocking, lifted, liftedIds, tooMany, aiProjects };
+}
+
+/** Les raisons et points de vigilance affichés pour le critère Technique. */
+function explainTechnical(
+  part: Part,
+  rules: ScoringRules,
+  f: {
+    main: string[];
+    choices: string[];
+    useAi: boolean;
+    matched: string[];
+    inProjects: string[];
+    missing: string[];
+    toLearn: string[];
+    listed: string[];
+    tooMany: string[];
+    blocking: string[];
+    learnableWhy: string | null;
+    learnLabels: string[];
+    label: (id: string) => string;
+  },
+) {
+  const { main, choices, useAi, matched, inProjects, missing, toLearn, listed, tooMany, blocking, learnableWhy, learnLabels, label } = f;
+  if (main.length) part.reasons.push(`Stack principale (titre) : ${main.map(label).join(", ")}`);
+  for (const c of choices) part.reasons.push(`Exigence au choix, comptée une fois : ${c}`);
+  if (useAi) part.reasons.push("Compétences lues par l'IA (« plus » comptés à moitié)");
+  if (matched.length) part.reasons.push(`Tu as : ${matched.join(", ")}`);
+  if (inProjects.length) part.reasons.push(`Vu seulement en projets (compté à moitié) : ${inProjects.join(", ")}`);
+  if (toLearn.length) part.reasons.push(`À apprendre (${learnableWhy}) : ${toLearn.map(label).join(", ")}`);
+  if (listed.length) part.reasons.push(`À apprendre (dans ta liste « je peux l'apprendre vite ») : ${listed.map(label).join(", ")}`);
+  if (tooMany.length) part.warnings.push(`Trop de technos à apprendre (${rules.maxLearnable} au plus comptées à moitié), manquantes : ${tooMany.map(label).join(", ")}`);
+  if (blocking.length) part.warnings.push(`Techno principale ou exigée que tu n'as pas : ${blocking.join(", ")}`);
+  const others = missing.filter((m) => !learnLabels.includes(m) && !tooMany.map(label).includes(m) && !blocking.some((b) => b.startsWith(m)));
+  if (others.length) part.warnings.push(`Mots-clés absents de ton profil : ${others.join(", ")} — à ajouter au CV si tu les maîtrises`);
+}
+
+function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRules) {
+  const ctx = techContext(input, profile, rules);
+  const { ownedIds, projectIds, preferredIds, inTitle, skillOf } = ctx;
+  const picked = pickItems(input, ctx);
+  const { useAi, ai, aiLabels } = picked;
+  const label = (id: string) => skillOf(id)?.label ?? aiLabels.find((l) => resolveSkill(l).id === id) ?? id;
+  const { items, found, requiredIds, choices } = mergeChoices(input, ctx, picked, label);
+  const matched = found.filter((id) => ownedIds.has(id)).map(label);
+  const inProjects = found.filter((id) => projectIds.has(id)).map(label);
+  const missing = found.filter((id) => !ownedIds.has(id)).map(label);
+  const preferredFound = found.filter((id) => preferredIds.has(id)).map(label);
+
+  // Années exigées sur une techno principale (pas un outil) absente de ton profil : critère bloquant.
+  const required = productExperienceRequired(input.title, input.description, ctx.customSkills);
+  const lacking = required?.ids.filter((id) => !ownedIds.has(id) && (skillOf(id)?.core ?? true)) ?? [];
+  const product = required && lacking.length ? { labels: lacking.map(label), years: required.years } : null;
+
+  const part: Part = { score: rules.noSkillsTechnical, reasons: [], warnings: [] };
+  if (items.length === 0) {
+    part.warnings.push("Aucune techno détectée : poste peut-être hors informatique");
+    return { part, matched, missing, preferredFound, main: [] as string[], product, requiredIds, missingRequired: [] as string[], blocking: [] as string[], toLearn: [] as string[], lifted: [] as string[], liftedWeak: false, notStrong: [] as string[] };
+  }
+
+  const learnableWhy = learnableReason(input, profile);
+  const credit = creditItems(input, ctx, rules, { items, requiredIds, learnableWhy, aiLists: useAi ? ai : null, label });
+  const { toLearn, listed, blocking, lifted, liftedIds, tooMany, aiProjects } = credit;
+  part.score = clamp((100 * credit.got) / credit.total);
   // Seulement des outils comptés (SQL, Docker…), aucun langage ni framework : la note ne dit pas grand-chose.
   if (!items.some((it) => skillOf(it.id)?.core ?? true) && part.score > rules.noCoreTechCap) {
     part.score = rules.noCoreTechCap;
@@ -275,19 +351,9 @@ function scoreTechnical(input: ScoringInput, profile: Profile, rules: ScoringRul
     part.score = rules.projectOnlyMainCap;
     part.warnings.push(`Techno principale vue seulement en projets : ${projectOnly.map(label).join(", ")} (technique plafonnée à ${rules.projectOnlyMainCap} %)`);
   }
-  if (main.length) part.reasons.push(`Stack principale (titre) : ${main.map(label).join(", ")}`);
-  for (const c of choices) part.reasons.push(`Exigence au choix, comptée une fois : ${c}`);
-  if (useAi) part.reasons.push("Compétences lues par l'IA (« plus » comptés à moitié)");
-  if (matched.length) part.reasons.push(`Tu as : ${matched.join(", ")}`);
-  if (inProjects.length) part.reasons.push(`Vu seulement en projets (compté à moitié) : ${inProjects.join(", ")}`);
-  if (toLearn.length) part.reasons.push(`À apprendre (${learnableWhy}) : ${toLearn.map(label).join(", ")}`);
-  if (listed.length) part.reasons.push(`À apprendre (dans ta liste « je peux l'apprendre vite ») : ${listed.map(label).join(", ")}`);
-  if (tooMany.length) part.warnings.push(`Trop de technos à apprendre (${rules.maxLearnable} au plus comptées à moitié), manquantes : ${tooMany.map(label).join(", ")}`);
-  if (blocking.length) part.warnings.push(`Techno principale ou exigée que tu n'as pas : ${blocking.join(", ")}`);
   const learning = new Set([...toLearn, ...listed]);
   const learnLabels = [...learning].map(label);
-  const others = missing.filter((m) => !learnLabels.includes(m) && !tooMany.map(label).includes(m) && !blocking.some((b) => b.startsWith(m)));
-  if (others.length) part.warnings.push(`Mots-clés absents de ton profil : ${others.join(", ")} — à ajouter au CV si tu les maîtrises`);
+  explainTechnical(part, rules, { main, choices, useAi, matched, inProjects, missing, toLearn, listed, tooMany, blocking, learnableWhy, learnLabels, label });
   // Langages / frameworks exigés absents (les outils et mots inconnus — Kafka, Scrum… — ne comptent pas), hors technos à apprendre.
   // Sans l'IA, « cité dans l'annonce » n'est pas « exigé » : seulement les technos du titre ou à maîtrise exigée.
   const missingCore = (ids: string[]) => ids.filter((id) => !ownedIds.has(id) && !learning.has(id) && getSkill(id)?.core).map(label);
@@ -494,6 +560,55 @@ export function userRuleAdjustments(input: ScoringInput, rules: ScoreRule[]): Ad
 
 // ───────── Score final ─────────
 
+/** Ta techno préférée dans la stack principale (le titre, sinon les compétences exigées, pas les « plus ») : jusqu'à +10. */
+function favoriteTechAdjustment(profile: Profile, tech: { main: string[]; requiredIds: string[] }): Adjustment | null {
+  const mainIds = tech.main.length ? tech.main : tech.requiredIds;
+  const fav = profile.preferredTechs
+    .map((p) => ({ p, id: resolveSkill(p.name).id }))
+    .filter((x) => mainIds.includes(x.id) && x.p.weight >= 0.5)
+    .sort((a, b) => b.p.weight - a.p.weight)[0];
+  return fav ? { label: `${fav.p.name}, ta techno préférée`, points: Math.round(10 * fav.p.weight) } : null;
+}
+
+/** Stage : réservé aux étudiants (tu es diplômé) ? Débouche sur un CDI ? POEI / PMSMP (ouverts aux demandeurs d'emploi) ? */
+function internshipOf(input: ScoringInput, profile: Profile, rules: ScoringRules) {
+  const text = `${input.title}\n${input.description}`;
+  const internship = contractOfJob(input) === "STAGE" || titleSeniority(input, profile) === "intern";
+  const scheme = jobseekerScheme(text);
+  const hire = internship ? hireAfterInternship(text) : null;
+  const studentOnly = internship && !scheme && !internshipOpenToGraduates(text) ? studentOnlyInternship(text) : null;
+  const adjustments: Adjustment[] = [];
+  if (scheme) adjustments.push({ label: `${scheme} citée : accessible sans être étudiant`, points: rules.jobseekerSchemePoints });
+  if (hire) adjustments.push({ label: `Stage qui débouche sur un CDI / CDD (« ${hire} »)`, points: rules.hireAfterInternshipPoints });
+  return { hire, studentOnly, adjustments };
+}
+
+/** Adéquation faible vérifiée par le code (le petit modèle d'IA s'y trompe) : compétences exigées manquantes, poste senior, domaine IA. */
+function weakFitReasons(input: ScoringInput, profile: Profile, missingRequired: string[]): string[] {
+  const weakFit: string[] = [];
+  if (missingRequired.length >= 2) weakFit.push(`compétences exigées manquantes : ${missingRequired.join(", ")}`);
+  // Poste senior / lead lu par l'IA dans le texte (« Tech Lead Java Senior » sous un titre sans « senior ») : au-dessus de ta cible, même sans nombre d'années écrit.
+  if (input.aiSkills?.level === "senior" && (input.experienceMinYears === null || input.experienceMinYears > profile.experienceMax)) weakFit.push("poste senior (lu par l'IA)");
+  const inProjects = new Set((profile.projectSkills ?? []).map((p) => normalizeText(p)));
+  const aiAtWork = profile.skills.some((x) => !inProjects.has(normalizeText(x)) && AI_DOMAIN.test(normalizeText(x)));
+  if (AI_DOMAIN.test(normalizeText(input.title)) && !aiAtWork) weakFit.push("poste orienté IA / LLM, domaine absent de ton expérience en entreprise");
+  return weakFit;
+}
+
+/** Pourquoi l'offre est masquée du flux principal (la première règle activée qui s'applique), sinon null. */
+function hiddenReasonOf(input: ScoringInput, profile: Profile, rules: ScoringRules, breakdown: Breakdown, offTopic: boolean): string | null {
+  const kind = contractOfJob(input);
+  const seniority = titleSeniority(input, profile);
+  if (rules.hideNonMatchingContract && kind && breakdown.contract < 100) return `Contrat ${kind} hors profil`;
+  if (rules.hideSenior && (seniority === "senior" || seniority === "lead")) return seniority === "lead" ? "Poste de lead / manager" : "Poste senior / confirmé";
+  if (rules.hideYearsOverMax !== null && input.experienceMinYears !== null && input.experienceMinYears > profile.experienceMax + rules.hideYearsOverMax) {
+    return `Demande ${input.experienceMinYears} ans d'expérience`;
+  }
+  if (rules.hideOutOfZone && breakdown.location <= 15) return input.department ? `Hors de ta zone (département ${input.department})` : "Hors de ta zone";
+  if (rules.hideOffTopic && offTopic) return "Pas un poste informatique";
+  return null;
+}
+
 export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRules = DEFAULT_RULES): ScoreResult {
   const tech = scoreTechnical(input, profile, rules);
   const parts = {
@@ -514,27 +629,16 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
   };
 
   const adjustments: Adjustment[] = [];
-  // Ta techno préférée dans la stack principale (le titre, sinon les compétences exigées, pas les « plus ») : jusqu'à +10.
-  const mainIds = tech.main.length ? tech.main : tech.requiredIds;
-  const fav = profile.preferredTechs
-    .map((p) => ({ p, id: resolveSkill(p.name).id }))
-    .filter((x) => mainIds.includes(x.id) && x.p.weight >= 0.5)
-    .sort((a, b) => b.p.weight - a.p.weight)[0];
-  if (fav) adjustments.push({ label: `${fav.p.name}, ta techno préférée`, points: Math.round(10 * fav.p.weight) });
+  const fav = favoriteTechAdjustment(profile, tech);
+  if (fav) adjustments.push(fav);
   for (const p of Object.values(parts)) if (p.adjustment) adjustments.push(p.adjustment);
   const english = fluentEnglishRequired(input.description);
   if (english) adjustments.push({ label: "Anglais courant exigé", points: rules.fluentEnglishPoints });
   const side = detectSideRole(input.title);
   if (side) adjustments.push({ label: `Fonction à vérifier : ${side}`, points: rules.sideRolePoints });
   adjustments.push(...userRuleAdjustments(input, profile.scoreRules));
-  // Stage : réservé aux étudiants (tu es diplômé) ? Débouche sur un CDI ? POEI / PMSMP (ouverts aux demandeurs d'emploi) ?
-  const text = `${input.title}\n${input.description}`;
-  const internship = contractOfJob(input) === "STAGE" || titleSeniority(input, profile) === "intern";
-  const scheme = jobseekerScheme(text);
-  const hire = internship ? hireAfterInternship(text) : null;
-  const studentOnly = internship && !scheme && !internshipOpenToGraduates(text) ? studentOnlyInternship(text) : null;
-  if (scheme) adjustments.push({ label: `${scheme} citée : accessible sans être étudiant`, points: rules.jobseekerSchemePoints });
-  if (hire) adjustments.push({ label: `Stage qui débouche sur un CDI / CDD (« ${hire} »)`, points: rules.hireAfterInternshipPoints });
+  const { hire, studentOnly, adjustments: stageAdjustments } = internshipOf(input, profile, rules);
+  adjustments.push(...stageAdjustments);
 
   const base = Math.round((breakdown.technical * rules.technicalPoints) / 100);
   let final = clamp(base + adjustments.reduce((a, x) => a + x.points, 0));
@@ -564,43 +668,20 @@ export function scoreJob(input: ScoringInput, profile: Profile, rules: ScoringRu
       hire ? rules.studentOnlyHireCap : rules.studentOnlyInternshipCap,
       hire ? `stage réservé aux étudiants (« ${studentOnly} »), mais embauche prévue : à proposer en POEI` : `stage réservé aux étudiants (« ${studentOnly} »)`,
     );
-  // Adéquation faible vérifiée par le code (le petit modèle d'IA s'y trompe) : compétences exigées manquantes, domaine IA.
-  const weakFit: string[] = [];
-  if (tech.missingRequired.length >= 2) weakFit.push(`compétences exigées manquantes : ${tech.missingRequired.join(", ")}`);
-  // Poste senior / lead lu par l'IA dans le texte (« Tech Lead Java Senior » sous un titre sans « senior ») : au-dessus de ta cible, même sans nombre d'années écrit.
-  if (input.aiSkills?.level === "senior" && (input.experienceMinYears === null || input.experienceMinYears > profile.experienceMax)) weakFit.push("poste senior (lu par l'IA)");
-  const inProjects = new Set((profile.projectSkills ?? []).map((p) => normalizeText(p)));
-  const aiAtWork = profile.skills.some((x) => !inProjects.has(normalizeText(x)) && AI_DOMAIN.test(normalizeText(x)));
-  if (AI_DOMAIN.test(normalizeText(input.title)) && !aiAtWork) weakFit.push("poste orienté IA / LLM, domaine absent de ton expérience en entreprise");
+  const weakFit = weakFitReasons(input, profile, tech.missingRequired);
   if (weakFit.length) cap(rules.weakFitCap, `adéquation faible (${weakFit.join(" ; ")})`);
   const liftedCaps = [
     ...(tech.lifted.length ? [`techno principale ou exigée : ${tech.lifted.join(", ")}`] : []),
     ...(tech.liftedWeak ? ["adéquation faible (compétences exigées manquantes)"] : []),
   ];
 
-  let hiddenReason: string | null = null;
-  const kind = contractOfJob(input);
-  const seniority = titleSeniority(input, profile);
-  if (rules.hideNonMatchingContract && kind && breakdown.contract < 100) {
-    hiddenReason = `Contrat ${kind} hors profil`;
-  } else if (rules.hideSenior && (seniority === "senior" || seniority === "lead")) {
-    hiddenReason = seniority === "lead" ? "Poste de lead / manager" : "Poste senior / confirmé";
-  } else if (
-    rules.hideYearsOverMax !== null &&
-    input.experienceMinYears !== null &&
-    input.experienceMinYears > profile.experienceMax + rules.hideYearsOverMax
-  ) {
-    hiddenReason = `Demande ${input.experienceMinYears} ans d'expérience`;
-  } else if (rules.hideOutOfZone && breakdown.location <= 15) {
-    hiddenReason = input.department ? `Hors de ta zone (département ${input.department})` : "Hors de ta zone";
-  } else if (rules.hideOffTopic && offTopic) {
-    hiddenReason = "Pas un poste informatique";
-  }
+  const hiddenReason = hiddenReasonOf(input, profile, rules, breakdown, offTopic);
 
   const all = Object.values(parts);
   const warnings = all.flatMap((p) => p.warnings);
   if (english) warnings.push("Anglais courant exigé");
-  if (language) warnings.push(`Langue exigée : ${language}`);  if (capLabel) warnings.unshift(`Score plafonné à ${final} % : ${capLabel}`);
+  if (language) warnings.push(`Langue exigée : ${language}`);
+  if (capLabel) warnings.unshift(`Score plafonné à ${final} % : ${capLabel}`);
   return {
     final,
     base,
