@@ -60,10 +60,7 @@ export async function completeJobScraperDescriptions(opts: {
     // Hors de ta zone : masquée du flux, inutile de demander sa page (LinkedIn bloque vite l'IP).
     .filter((l) => !opts.zone || !outOfZone(l.job, opts.zone))
     // Filtres en JS : en SQL, « clé JSON absente » ne se teste pas proprement avec NOT.
-    .filter((l) => {
-      const tried = (l.rawData as Record<string, unknown> | null)?.[DETAIL_TRIED_AT];
-      return typeof tried !== "string" || Date.now() - Date.parse(tried) > 86_400_000;
-    })
+    .filter((l) => canRetry(l.rawData))
     .filter(
       (l) =>
         (!flag(l.rawData, DETAIL_FETCHED) && (!l.job.description.trim() || SUMMARY_ONLY.includes(l.source))) ||
@@ -78,34 +75,61 @@ export async function completeJobScraperDescriptions(opts: {
     if (refused.has(link.source)) continue;
     // Pas de rafale vers le même site ; LinkedIn bloque l'IP plus vite que les autres.
     if (fetched++ > 0) await sleep(link.source === "jobscraper:linkedin" ? 5000 : 1500);
-    const details = await opts.fetchDetails(link);
-    // Page illisible, ou sans texte alors qu'il en manque : essai noté, on retentera demain (pas à chaque passage).
-    const tried = () =>
-      prisma.jobSourceLink.update({ where: { id: link.id }, data: { rawData: { ...(link.rawData as object), [DETAIL_TRIED_AT]: new Date().toISOString() } } });
-    if (!details) {
-      refused.add(link.source);
-      await tried();
-      continue;
-    }
-    const text = details.description ? htmlToText(details.description).trim() : "";
-    const raw = link.rawData as Record<string, unknown>;
-    // Un texte de page trop court (page vide, offre retirée) ne remplace rien ; sans description du tout, on retentera.
-    const description = text.length >= 100 ? text : null;
-    if (!description && !link.job.description.trim()) {
-      await tried();
-      continue;
-    }
-    const data = {
-      ...raw,
-      ...(description ? { description, [DETAIL_FETCHED]: true } : {}),
-      ...(details.postedAt && !raw.posted_at ? { posted_at: details.postedAt.toISOString() } : {}),
-      [DATE_CHECKED]: true,
-    };
-    const n = normalize({ source: link.source, sourceJobId: link.sourceJobId, data, collectedAt: new Date() });
-    if (n && (await ingestJob(prisma, n)) === "updated") completed++;
+    const r = await completeScraperLink(prisma, link, opts.fetchDetails);
+    if (r.refused) refused.add(link.source);
+    if (r.completed) completed++;
   }
   if (links.length) log(`Offres JobScraper complétées (description, date) : ${completed} sur ${links.length}`);
   return { checked: links.length, completed };
+}
+
+type ScraperLink = { id: string; source: string; sourceJobId: string; sourceUrl: string; rawData: unknown; job: { description: string } };
+
+/** Pas de nouvel essai avant 1 jour sur une page déjà tentée sans résultat. */
+const canRetry = (raw: unknown) => {
+  const tried = (raw as Record<string, unknown> | null)?.[DETAIL_TRIED_AT];
+  return typeof tried !== "string" || Date.now() - Date.parse(tried) > 86_400_000;
+};
+
+/** Lit la page d'une offre JobScraper et la repasse par la normalisation. `refused` : page illisible (le site bloque peut-être). */
+async function completeScraperLink(prisma: PrismaClient, link: ScraperLink, fetchDetails: DetailsFetcher): Promise<{ refused: boolean; completed: boolean }> {
+  const details = await fetchDetails(link);
+  // Page illisible, ou sans texte alors qu'il en manque : essai noté, on retentera demain (pas à chaque passage).
+  const tried = () =>
+    prisma.jobSourceLink.update({ where: { id: link.id }, data: { rawData: { ...(link.rawData as object), [DETAIL_TRIED_AT]: new Date().toISOString() } } });
+  if (!details) {
+    await tried();
+    return { refused: true, completed: false };
+  }
+  const text = details.description ? htmlToText(details.description).trim() : "";
+  const raw = link.rawData as Record<string, unknown>;
+  // Un texte de page trop court (page vide, offre retirée) ne remplace rien ; sans description du tout, on retentera.
+  const description = text.length >= 100 ? text : null;
+  if (!description && !link.job.description.trim()) {
+    await tried();
+    return { refused: false, completed: false };
+  }
+  const data = {
+    ...raw,
+    ...(description ? { description, [DETAIL_FETCHED]: true } : {}),
+    ...(details.postedAt && !raw.posted_at ? { posted_at: details.postedAt.toISOString() } : {}),
+    [DATE_CHECKED]: true,
+  };
+  const n = normalize({ source: link.source, sourceJobId: link.sourceJobId, data, collectedAt: new Date() });
+  return { refused: false, completed: !!n && (await ingestJob(prisma, n)) === "updated" };
+}
+
+/**
+ * Offre ouverte par toi, sans description (LinkedIn hors de ta zone : le passage planifié ne la lit pas) : sa page est
+ * lue maintenant, une seule à la fois, jamais en rafale. Faux : rien à lire, déjà essayée aujourd'hui ou page illisible.
+ */
+export async function completeJobScraperJob(opts: { prisma: PrismaClient; jobId: string; fetchDetails: DetailsFetcher }): Promise<boolean> {
+  const links = await opts.prisma.jobSourceLink.findMany({
+    where: { jobId: opts.jobId, source: { startsWith: "jobscraper:" }, job: { fullTextAt: null, description: "" } },
+    select: { id: true, source: true, sourceJobId: true, sourceUrl: true, rawData: true, job: { select: { description: true } } },
+  });
+  const link = links.find((l) => (l.rawData as Record<string, unknown> | null)?.[DETAIL_FETCHED] !== true && canRetry(l.rawData));
+  return !!link && (await completeScraperLink(opts.prisma, link, opts.fetchDetails)).completed;
 }
 
 /**
@@ -298,10 +322,13 @@ export type HelloWorkClient = {
  * elle contient le début de l'extrait Jooble (même titre chez un autre client = refusée), puis repassée par la
  * normalisation avec le texte entier. HelloWork : 117 des 317 offres actives vues sur Jooble seul (28/10/2026).
  * Pas trouvée : nouvel essai dans 1 jour. Seulement les offres encore utiles dont le texte est encore l'extrait Jooble.
+ * Les autres sites d'origine (experteer, jobdefense, aerocontact… une soixantaine) ne sont pas lus : pas de recherche commune.
  */
 export async function completeJoobleAds(opts: {
   prisma: PrismaClient;
   helloWork: HelloWorkClient;
+  /** Offres Jooble venues de Free-Work : même recherche que pour Adzuna (titre, puis ses 5 premiers mots). */
+  freeWork?: FreeWorkClient;
   /** Offres au plus par passage (jusqu'à 2 recherches et `pages` annonces lues pour chacune). */
   max?: number;
   pages?: number;
@@ -319,37 +346,40 @@ export async function completeJoobleAds(opts: {
       orderBy: { firstSeenAt: "desc" },
     })
   )
-    .filter((l) => raw(l).source === "hellowork.com" && raw(l)[DETAIL_FETCHED] !== true)
+    .filter((l) => (raw(l).source === "hellowork.com" || (!!opts.freeWork && raw(l).source === "free-work.com")) && raw(l)[DETAIL_FETCHED] !== true)
     .filter((l) => !opts.zone || !outOfZone(l.job, opts.zone))
-    .filter((l) => {
-      const tried = raw(l)[DETAIL_TRIED_AT];
-      return typeof tried !== "string" || Date.now() - Date.parse(tried) > 86_400_000;
+    .filter((l) => canRetry(l.rawData))
+    .flatMap((link) => {
+      const n = normalize({ source: "jooble", sourceJobId: link.sourceJobId, data: link.rawData, collectedAt: link.firstSeenAt });
+      // Texte venu d'une autre source (LinkedIn, Indeed…), plus long que l'extrait : déjà complet. Écartée ici, avant la
+      // limite par passage : sinon ces offres (29 le 03/11/2026) prenaient les places de la file sans jamais en sortir.
+      if (!n || link.job.description.trim().length > n.description.trim().length + 50) return [];
+      const excerpt = textKey(n.description).slice(0, 40);
+      return excerpt.length < 30 ? [] : [{ link, excerpt }];
     })
-    .slice(0, opts.max ?? 8);
+    .slice(0, opts.max ?? 15);
   let completed = 0;
   let checked = 0;
   let requests = 0;
   const pause = () => (requests++ > 0 ? sleep(1500) : Promise.resolve());
-  for (const link of links) {
-    const n = normalize({ source: "jooble", sourceJobId: link.sourceJobId, data: link.rawData, collectedAt: link.firstSeenAt });
-    // Texte venu d'une autre source (LinkedIn, Indeed…), plus long que l'extrait : déjà complet.
-    if (!n || link.job.description.trim().length > n.description.trim().length + 50) continue;
-    const excerpt = textKey(n.description).slice(0, 40);
-    if (excerpt.length < 30) continue;
+  for (const { link, excerpt } of links) {
     checked++;
     const title = freeWorkQuery(link.job.title);
+    const fromFreeWork = raw(link).source === "free-work.com";
+    const site = fromFreeWork ? opts.freeWork! : opts.helloWork;
+    const queries = fromFreeWork ? [title, title.split(" ").slice(0, 5).join(" ")] : [link.job.company ? `${title} ${link.job.company}` : title, title];
     let found: { description: string; url: string } | null = null;
     let refused = false;
-    for (const query of [...new Set([link.job.company ? `${title} ${link.job.company}` : title, title])]) {
+    for (const query of [...new Set(queries)]) {
       await pause();
-      const ads = await opts.helloWork.search(query);
+      const ads = await site.search(query);
       if (!ads) {
         refused = true;
         break;
       }
       for (const url of ads.slice(0, pages)) {
         await pause();
-        const page = await opts.helloWork.ad(url);
+        const page = await site.ad(url);
         if (page?.description && textKey(htmlToText(page.description)).includes(excerpt)) {
           found = { description: page.description, url };
           break;
@@ -362,7 +392,7 @@ export async function completeJoobleAds(opts: {
       if (refused) break; // HelloWork refuse : on arrête ce passage (insister prolonge un blocage).
       continue;
     }
-    const data = { ...raw(link), snippet: found.description, helloWorkUrl: found.url, [DETAIL_FETCHED]: true };
+    const data = { ...raw(link), snippet: found.description, [fromFreeWork ? "freeWorkUrl" : "helloWorkUrl"]: found.url, [DETAIL_FETCHED]: true };
     const next = normalize({ source: "jooble", sourceJobId: link.sourceJobId, data, collectedAt: link.firstSeenAt });
     if (next && (await ingestJob(prisma, next)) === "updated") completed++;
   }

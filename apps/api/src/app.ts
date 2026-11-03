@@ -46,6 +46,8 @@ export type AppOptions = {
   onJobService?: (jobs: ReturnType<typeof createJobService>) => void;
   /** Calcule le trajet d'une offre si besoin (à son ouverture). */
   ensureTravel?: (jobId: string) => Promise<string | null>;
+  /** Lit la page publique d'une offre sans description (à son ouverture) ; vrai si elle a été complétée. */
+  fetchPage?: (jobId: string) => Promise<boolean>;
   searchCompanies?: LeadsOptions["searchCompanies"];
   /** IA locale (Ollama) : résumé et analyse des offres. */
   ai?: AiService;
@@ -112,6 +114,7 @@ export async function buildApp(opts: AppOptions) {
     jobs: jobService,
     stores: opts.stores,
     ...(opts.ensureTravel ? { ensureTravel: opts.ensureTravel } : {}),
+    ...(opts.fetchPage ? { fetchPage: opts.fetchPage } : {}),
   });
   await app.register(applicationRoutes, { stores: opts.stores, jobs: jobService, ...(opts.mailTracker ? { mailTracker: opts.mailTracker } : {}) });
   await app.register(aiRoutes, { stores: opts.stores, jobs: jobService, ...(opts.ai ? { ai: opts.ai } : {}), ...(opts.mailer ? { mailer: opts.mailer } : {}), ...(opts.onLetterReady ? { onLetterReady: opts.onLetterReady } : {}), ...(opts.autoFeed ? { autoFeed: opts.autoFeed } : {}), ...(opts.followUpPauseMs !== undefined ? { followUpPauseMs: opts.followUpPauseMs } : {}) });

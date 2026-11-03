@@ -31,6 +31,11 @@ async function load() {
     const pending = job.value.travelPending;
     if (job.value.status === "NEW") job.value = { ...(await api.setJobStatus(props.id, "SEEN")), travelPending: pending };
     if (pending) void waitForTravel();
+    // Aucune description et une page publique à lire (LinkedIn hors zone) : lue maintenant, une seule fois par jour.
+    if (!job.value.description.trim() && !job.value.fullTextAt && job.value.sources.some((s) => s.source.startsWith("jobscraper:"))) {
+      const fresh = await api.fetchJobPage(props.id).catch(() => null);
+      if (fresh?.pageFetched && job.value) job.value = { ...job.value, ...fresh, travelPending: job.value.travelPending, travelIssue: job.value.travelIssue };
+    }
   } catch (e) {
     error.value = e instanceof ApiError && e.status === 404 ? "Offre introuvable." : "Impossible de charger l'offre.";
   }

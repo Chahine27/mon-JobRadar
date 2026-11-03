@@ -123,6 +123,8 @@ export const api = {
   },
   jobStats: (days: number | null) => request<SkillStats>("GET", `/api/jobs/stats${days ? `?days=${days}` : ""}`),
   getJob: (id: string) => request<JobDetail>("GET", `/api/jobs/${encodeURIComponent(id)}`),
+  /** Lit la page publique d'une offre sans description (LinkedIn hors zone). */
+  fetchJobPage: (id: string) => request<JobDetail & { pageFetched: boolean }>("POST", `/api/jobs/${encodeURIComponent(id)}/fetch-page`),
   refresh: () => request<{ status: "started" | "already_running"; runId: string }>("POST", "/api/jobs/refresh"),
   collectionStatus: () => request<CollectionStatus>("GET", "/api/collection/status"),
   geocode: (q: string) =>

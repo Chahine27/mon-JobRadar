@@ -10,7 +10,7 @@ import {
   notifyNewMatches,
   notifyNotice,
 } from "@job-radar/notifications";
-import { type CollectReport, CollectionRunner, type RunnerOptions, completeAdzunaAds, completeFreeWorkAds, completeJobScraperDescriptions, completeJoobleAds, renormalizeJobs, splitMergedAds, undoSalarySplits, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
+import { type CollectReport, CollectionRunner, type RunnerOptions, completeAdzunaAds, completeFreeWorkAds, completeJobScraperDescriptions, completeJobScraperJob, completeJoobleAds, renormalizeJobs, splitMergedAds, undoSalarySplits, trackApplicationMails, createPrismaRunRepo, expireJobs, prismaCollect, prismaJoobleQuota } from "@job-radar/pipeline";
 import { OsrmRoutingService, PrimRoutingService, ensureTravelTimes, fillDepartments, geocode, recheckAddressPoints } from "@job-radar/routing";
 import { scoreJob, scoringInputFromJob } from "@job-radar/scoring";
 import { parseProfile, zoneDepartments } from "@job-radar/shared";
@@ -217,10 +217,11 @@ const runner = new CollectionRunner({
     const completed = await completeFreeWorkAds({ prisma, freeWork: { search: (q) => searchFreeWork(q), ad: (l) => fetchFreeWorkAd(l) }, ...(zone ? { zone } : {}), log: (m) => log(m) })
       .then((r) => r.completed)
       .catch((err) => (log(`Annonces Free-Work : ${String(err)}`), 0));
-    // Offres Jooble venues de HelloWork : Jooble refuse les robots, l'annonce entière est relue sur HelloWork.
+    // Offres Jooble venues de HelloWork ou de Free-Work : Jooble refuse les robots, l'annonce entière est relue sur le site d'origine.
     const jooble = await completeJoobleAds({
       prisma,
       helloWork: { search: (q) => searchHelloWork(q), ad: (url) => fetchJobScraperDetails({ source: "jobscraper:hellowork", sourceJobId: url, sourceUrl: url }) },
+      freeWork: { search: (q) => searchFreeWork(q), ad: (l) => fetchFreeWorkAd(l) },
       ...(zone ? { zone } : {}),
       log: (m) => log(m),
     })
@@ -350,6 +351,8 @@ const app = await buildApp({
     if (job.travel?.mode === "car") return "aucun itinéraire en voiture trouvé depuis ton domicile";
     return report.skipped ?? "lieu de l'offre inconnu ou hors zone";
   },
+  // Page d'une offre sans description (LinkedIn hors zone), lue à son ouverture.
+  fetchPage: (jobId) => completeJobScraperJob({ prisma, jobId, fetchDetails: (l) => fetchJobScraperDetails(l) }),
   sourcesConfigured: {
     "france-travail": Boolean(e.FRANCE_TRAVAIL_CLIENT_ID?.trim() && e.FRANCE_TRAVAIL_CLIENT_SECRET?.trim()),
     adzuna: Boolean(e.ADZUNA_APP_ID?.trim() && e.ADZUNA_APP_KEY?.trim()),

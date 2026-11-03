@@ -83,6 +83,7 @@ export async function jobRoutes(
     jobs: JobService;
     stores: Stores;
     ensureTravel?: (jobId: string) => Promise<string | null>;
+    fetchPage?: (jobId: string) => Promise<boolean>;
     /** Annonce complète collée : score recalculé (mail « à postuler » s'il reste bon). */
   },
 ) {
@@ -169,6 +170,16 @@ export async function jobRoutes(
     const job = await jobs.get(request.userId!, params.data.id);
     if (!job) return reply.code(404).send({ error: "JOB_NOT_FOUND" });
     return { ...job, travelIssue, travelPending };
+  });
+
+  // Offre sans description (LinkedIn hors zone, jamais lue par la collecte) : sa page est lue à l'ouverture.
+  app.post("/api/jobs/:id/fetch-page", { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const params = IdParams.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "INVALID_ID" });
+    const fetched = opts.fetchPage ? await opts.fetchPage(params.data.id).catch(() => false) : false;
+    const job = await jobs.get(request.userId!, params.data.id);
+    if (!job) return reply.code(404).send({ error: "JOB_NOT_FOUND" });
+    return { ...job, pageFetched: fetched };
   });
 
   /** Un seul calcul en cours par offre : la page qui redemande attend le même, sans second appel au calculateur. */

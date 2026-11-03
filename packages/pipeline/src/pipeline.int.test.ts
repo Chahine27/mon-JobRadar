@@ -6,7 +6,7 @@ import { resetDatabase, testPrisma } from "../../db/test/helpers";
 import { prismaJoobleQuota } from "./api-quota";
 import { buildManualJob, removeManualJob, saveManualJob } from "./manual";
 import { collectOnce } from "./collect";
-import { completeJobScraperDescriptions } from "./complete";
+import { completeJobScraperDescriptions, completeJobScraperJob, completeJoobleAds } from "./complete";
 import { expireJobs } from "./expire";
 import { renormalizeJobs } from "./renormalize";
 import { ingestJob } from "./ingest";
@@ -275,6 +275,52 @@ describe("source → normalisation → base (README §32)", () => {
     const asked: string[] = [];
     await completeJobScraperDescriptions({ prisma, sleep: async () => {}, zone: new Set(["75"]), fetchDetails: async (l) => (asked.push(l.sourceJobId), null) });
     expect(asked).toEqual(["linkedin_4400021"]);
+  });
+
+  it("offre LinkedIn hors zone ouverte par toi : sa page est lue à l'ouverture, une fois par jour", async () => {
+    const id = "linkedin_4400031";
+    await ingestJob(prisma, normalize(mapJobScraperOfferToRawJob({ id, source: "linkedin", url: "https://www.linkedin.com/jobs/view/4400031", title: "Dev Vue.js", company: "Boîte", location: "Marseille, Provence-Alpes-Côte d'Azur" }, "linkedin")!)!);
+    const jobId = (await prisma.job.findFirstOrThrow()).id;
+    const full = `<p>${"Vue.js, TypeScript et Node.js au sein d'une équipe produit à taille humaine. ".repeat(3)}</p>`;
+    // Le passage planifié ne la lit pas (hors zone).
+    expect((await completeJobScraperDescriptions({ prisma, sleep: async () => {}, zone: new Set(["75"]), fetchDetails: async () => null })).checked).toBe(0);
+    // Page illisible : essai noté, pas de second essai aujourd'hui.
+    let asked = 0;
+    expect(await completeJobScraperJob({ prisma, jobId, fetchDetails: async () => (asked++, null) })).toBe(false);
+    expect(await completeJobScraperJob({ prisma, jobId, fetchDetails: async () => (asked++, null) })).toBe(false);
+    expect(asked).toBe(1);
+    // Demain : lue et complétée ; ensuite plus rien à lire.
+    await prisma.jobSourceLink.updateMany({ where: { jobId }, data: { rawData: { ...((await prisma.jobSourceLink.findFirstOrThrow({ where: { jobId } })).rawData as object), detailTriedAt: "2020-01-01T00:00:00.000Z" } } });
+    expect(await completeJobScraperJob({ prisma, jobId, fetchDetails: async () => ({ description: full, postedAt: null }) })).toBe(true);
+    expect((await prisma.job.findUniqueOrThrow({ where: { id: jobId } })).description).toContain("Vue.js, TypeScript");
+    expect(await completeJobScraperJob({ prisma, jobId, fetchDetails: async () => (asked++, null) })).toBe(false);
+    expect(asked).toBe(1);
+  });
+
+  it("offre Jooble venue de Free-Work : annonce retrouvée par sa recherche, seulement si elle contient le début de l'extrait", async () => {
+    const excerpt = "Nous recherchons un développeur Full Stack TypeScript pour rejoindre une équipe produit en pleine croissance, avec";
+    const joo = (id: string, title: string, source: string) =>
+      ingestJob(prisma, normalize({ source: "jooble", sourceJobId: id, collectedAt: new Date(), data: { id, title, company: "Easy Partner", location: "Paris (75)", snippet: excerpt, source, link: `https://fr.jooble.org/desc/${id}`, updated: "2026-10-30T10:00:00" } })!);
+    await joo("-111", "Développeur Full Stack TypeScript", "free-work.com");
+    await joo("-222", "Développeur Rust embarqué", "experteer.it"); // autre site : jamais cherché
+    // Texte déjà complet venu d'une autre source, et plus récent : ne prend pas la seule place du passage.
+    await joo("-333", "Développeur Java", "hellowork.com");
+    await prisma.job.updateMany({ where: { title: "Développeur Java" }, data: { description: `${excerpt} ${"texte complet venu d'une autre source ".repeat(5)}` } });
+    const full = `<p>${excerpt} ses clients grands comptes. Stack : Node.js, NestJS, Vue.js, PostgreSQL. Télétravail partiel, CDI.</p>`;
+    const searched: string[] = [];
+    const freeWork = {
+      search: async (q: string) => (searched.push(q), ["https://www.free-work.com/fr/tech-it/autre", "https://www.free-work.com/fr/tech-it/bonne"]),
+      ad: async (u: string) => (u.endsWith("autre") ? { description: "<p>Un autre développeur, chez un autre client, sans rapport avec l'extrait cherché.</p>", url: u } : { description: full, url: u }),
+    };
+    const helloWork = { search: async () => (searched.push("hellowork"), []), ad: async () => null };
+    const r = await completeJoobleAds({ prisma, helloWork, freeWork, max: 1, sleep: async () => {} });
+    expect(r).toEqual({ checked: 1, completed: 1 });
+    expect(searched).toEqual(["Développeur Full Stack TypeScript"]);
+    const job = await prisma.job.findFirstOrThrow({ where: { title: "Développeur Full Stack TypeScript" } });
+    expect(job.description).toContain("Stack : Node.js, NestJS");
+    expect((await prisma.jobSourceLink.findFirstOrThrow({ where: { jobId: job.id } })).rawData).toMatchObject({ freeWorkUrl: "https://www.free-work.com/fr/tech-it/bonne", detailFetched: true });
+    // Déjà complétée : rien à refaire.
+    expect((await completeJoobleAds({ prisma, helloWork, freeWork, sleep: async () => {} })).checked).toBe(0);
   });
 
   it("règles changées depuis : réappliquées aux offres déjà en base, sans toucher aux ajouts manuels ni aux fusions", async () => {
