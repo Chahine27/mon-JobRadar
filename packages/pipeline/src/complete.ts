@@ -166,17 +166,17 @@ export async function completeAdzunaAds(opts: {
     .filter((l) => l.job.company !== FREE_WORK_COMPANY && !done.has(l.jobId))
     .filter((l) => !opts.zone || !outOfZone(l.job, opts.zone))
     .filter((l) => (seen.has(l.jobId) ? false : (seen.add(l.jobId), true)))
+    .filter((l) => canRetry(l.rawData))
+    // Texte venu d'une autre source (LinkedIn, Indeed…), plus long que l'extrait : déjà complet. Écartée avant la limite
+    // par passage : sinon ces offres prenaient les places de la file sans jamais en sortir.
     .filter((l) => {
-      const tried = raw(l)[DETAIL_TRIED_AT];
-      return typeof tried !== "string" || Date.now() - Date.parse(tried) > 86_400_000;
+      const n = normalize({ source: "adzuna", sourceJobId: l.sourceJobId, data: l.rawData, collectedAt: l.firstSeenAt });
+      return !!n && l.job.description.trim().length <= n.description.trim().length + 50;
     })
     .slice(0, opts.max ?? 20);
   let completed = 0;
   let checked = 0;
   for (const link of links) {
-    const n = normalize({ source: "adzuna", sourceJobId: link.sourceJobId, data: link.rawData, collectedAt: link.firstSeenAt });
-    // Texte venu d'une autre source (LinkedIn, Indeed…), plus long que l'extrait : déjà complet.
-    if (!n || link.job.description.trim().length > n.description.trim().length + 50) continue;
     if (checked++ > 0) await sleep(3000);
     const ad = await opts.fetchAd(link.sourceJobId);
     const text = ad?.description ? htmlToText(ad.description).trim() : "";
@@ -249,14 +249,17 @@ export async function completeFreeWorkAds(opts: {
       const todo = (l.job.company === FREE_WORK_COMPANY && raw[DETAIL_FETCHED] !== true) || raw[FREE_WORK_PENDING] === true || (typeof raw.freeWorkUrl === "string" && raw[FREE_WORK_PROFILE] !== true);
       return todo && (typeof tried !== "string" || Date.now() - Date.parse(tried) > 86_400_000);
     })
+    // Texte venu d'une autre source (LinkedIn, Indeed…) : déjà complet, rien à chercher. Écartée avant la limite par passage.
+    .flatMap((link) => {
+      const n = normalize({ source: link.source, sourceJobId: link.sourceJobId, data: link.rawData, collectedAt: link.firstSeenAt });
+      return n && sameDescription(n.description, link.job.description) ? [{ ...link, n }] : [];
+    })
     .slice(0, opts.max ?? 8);
   let completed = 0;
   let requests = 0;
   const pause = () => (requests++ > 0 ? sleep(1500) : Promise.resolve());
   for (const link of links) {
-    const n = normalize({ source: link.source, sourceJobId: link.sourceJobId, data: link.rawData, collectedAt: link.firstSeenAt });
-    // Texte venu d'une autre source (LinkedIn, Indeed…) : déjà complet, rien à chercher.
-    if (!n || !sameDescription(n.description, link.job.description)) continue;
+    const { n } = link;
     const excerpt = textKey(n.description).slice(0, 50);
     let found: { description: string; company?: string | null; url: string } | null = null;
     let refused = false;

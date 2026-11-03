@@ -6,7 +6,7 @@ import { resetDatabase, testPrisma } from "../../db/test/helpers";
 import { prismaJoobleQuota } from "./api-quota";
 import { buildManualJob, removeManualJob, saveManualJob } from "./manual";
 import { collectOnce } from "./collect";
-import { completeJobScraperDescriptions, completeJobScraperJob, completeJoobleAds } from "./complete";
+import { completeAdzunaAds, completeJobScraperDescriptions, completeJobScraperJob, completeJoobleAds } from "./complete";
 import { expireJobs } from "./expire";
 import { renormalizeJobs } from "./renormalize";
 import { ingestJob } from "./ingest";
@@ -275,6 +275,19 @@ describe("source → normalisation → base (README §32)", () => {
     const asked: string[] = [];
     await completeJobScraperDescriptions({ prisma, sleep: async () => {}, zone: new Set(["75"]), fetchDetails: async (l) => (asked.push(l.sourceJobId), null) });
     expect(asked).toEqual(["linkedin_4400021"]);
+  });
+
+  it("Adzuna : une offre déjà complète venue d'ailleurs, plus récente, ne prend pas la place de la file", async () => {
+    const adz = (id: string, title: string) =>
+      normalize({ source: "adzuna", sourceJobId: id, collectedAt: new Date(), data: { id, title, redirect_url: `https://www.adzuna.fr/details/${id}`, description: "Développeur Node.js pour une banque, avec une équipe de dix personnes à Paris.", company: { display_name: `Boîte ${title}` }, location: { display_name: "Paris", area: ["France", "Ile-de-France", "Paris"] }, created: new Date().toISOString() } })!;
+    await ingestJob(prisma, adz("301", "Dev ancien"));
+    await ingestJob(prisma, adz("302", "Dev déjà complet"));
+    await prisma.job.updateMany({ where: { title: "Dev déjà complet" }, data: { description: "Texte complet venu de LinkedIn. ".repeat(40) } });
+    const asked: string[] = [];
+    const fetchAd = async (id: string) => (asked.push(id), { description: `<p>${"Annonce entière Node.js, TypeScript et PostgreSQL pour une banque. ".repeat(4)}</p>`, partner: null });
+    const r = await completeAdzunaAds({ prisma, fetchAd, max: 1, sleep: async () => {} });
+    expect(r).toEqual({ checked: 1, completed: 1 });
+    expect(asked).toEqual(["301"]);
   });
 
   it("offre LinkedIn hors zone ouverte par toi : sa page est lue à l'ouverture, une fois par jour", async () => {
