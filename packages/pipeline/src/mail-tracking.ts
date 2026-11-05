@@ -394,7 +394,7 @@ export function candidateApplications(mail: InboxMail, apps: ApplicationRef[]): 
     (a) =>
       a !== best &&
       after(a) &&
-      (mentionsCompany(mail, a.company) || a.senders?.some((x) => x.toLowerCase() === from) || (a.kind === "job" && titleInMail(mail, a.title))),
+      (mentionsCompany(mail, a.company) || a.senders?.some((x) => x.toLowerCase() === from) || (a.kind === "job" && (titleInMail(mail, a.title) || samePost(mail, a.title) === true))),
   );
   return [...(best ? [best] : []), ...others].slice(0, 6);
 }

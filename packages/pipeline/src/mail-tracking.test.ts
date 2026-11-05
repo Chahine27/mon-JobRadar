@@ -315,6 +315,20 @@ describe("audit du 26/10 : rattachement", () => {
     expect(candidateApplications(ack, apps).map((a) => a.id)).toEqual(["clia"]);
   });
 
+  it("entretien de la DGFiP : entreprise « Service Public » absente du mail, poste cité seulement", () => {
+    const apps: ApplicationRef[] = [
+      { kind: "job", id: "esi", company: "Service Public", title: "Cat B -Esi Amiens 80 - Développeur Full Stack Programmeur H/F", since: new Date("2026-11-03T14:06:00Z") },
+      { kind: "job", id: "autre", company: "Autre", title: "Développeur Java Confirmé H/F", since: new Date("2026-11-03T14:06:00Z") },
+    ];
+    const invitation = mail({
+      from: "jean-andre.laval@dgfip.finances.gouv.fr",
+      subject: "votre candidature au poste de Développeur Full stack à l'ESI d'Amiens",
+      text: "Nous avons bien reçu votre candidature au poste de Développeur Full stack à l'ESI d'Amiens.\nNous souhaitons planifier un premier entretien en visio avec vous.",
+      date: new Date("2026-11-05T13:48:00Z"),
+    });
+    expect(candidateApplications(invitation, apps).map((a) => a.id)).toEqual(["esi"]);
+  });
+
   it("site carrière sur Welcome to the Jungle (Partoo)", () => {
     expect(careerSiteUrl({ text: "Bonjour,\nToutes nos offres d'emploi sont disponibles sur Welcome to the Jungle, vous pouvez les consulter ici : https://www.welcometothejungle.com/fr/companies/partoo/jobs" })).toBe("https://www.welcometothejungle.com/fr/companies/partoo/jobs");
   });
