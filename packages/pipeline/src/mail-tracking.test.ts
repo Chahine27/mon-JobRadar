@@ -316,7 +316,12 @@ describe("audit du 26/10 : rattachement", () => {
   });
 
   it("entretien de la DGFiP : entreprise « Service Public » absente du mail, poste cité seulement", () => {
+    // Six offres « Full Stack » plus anciennes (comme en base) : elles ne doivent pas prendre les 6 places.
+    const older: ApplicationRef[] = ["Louve", "Wink Lab", "Koncrete", "GBI", "Galadrim", "HoppR"].map((c, i) => ({
+      kind: "job", id: c, company: c, title: "Développeur Full Stack H/F", since: new Date(`2026-10-2${i}T10:00:00Z`),
+    }));
     const apps: ApplicationRef[] = [
+      ...older,
       { kind: "job", id: "esi", company: "Service Public", title: "Cat B -Esi Amiens 80 - Développeur Full Stack Programmeur H/F", since: new Date("2026-11-03T14:06:00Z") },
       { kind: "job", id: "autre", company: "Autre", title: "Développeur Java Confirmé H/F", since: new Date("2026-11-03T14:06:00Z") },
     ];
@@ -326,7 +331,9 @@ describe("audit du 26/10 : rattachement", () => {
       text: "Nous avons bien reçu votre candidature au poste de Développeur Full stack à l'ESI d'Amiens.\nNous souhaitons planifier un premier entretien en visio avec vous.",
       date: new Date("2026-11-05T13:48:00Z"),
     });
-    expect(candidateApplications(invitation, apps).map((a) => a.id)).toEqual(["esi"]);
+    const ids = candidateApplications(invitation, apps).map((a) => a.id);
+    expect(ids[0]).toBe("esi");
+    expect(ids).not.toContain("autre");
   });
 
   it("site carrière sur Welcome to the Jungle (Partoo)", () => {

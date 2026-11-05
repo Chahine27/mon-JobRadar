@@ -396,6 +396,10 @@ export function candidateApplications(mail: InboxMail, apps: ApplicationRef[]): 
       after(a) &&
       (mentionsCompany(mail, a.company) || a.senders?.some((x) => x.toLowerCase() === from) || (a.kind === "job" && (titleInMail(mail, a.title) || samePost(mail, a.title) === true))),
   );
+  // Beaucoup d'offres « Développeur Full Stack » répondent au même poste cité : celles dont l'intitulé ressemble le plus
+  // au mail (« Esi Amiens ») d'abord, sinon les plus anciennes prennent les 6 places. L'entreprise nommée passe avant tout.
+  const overlap = new Map(others.map((a) => [a, (mentionsCompany(mail, a.company) ? 100 : 0) + (a.kind === "job" ? titleOverlap(mail, a.title) : 0)]));
+  others.sort((x, y) => overlap.get(y)! - overlap.get(x)!);
   return [...(best ? [best] : []), ...others].slice(0, 6);
 }
 
